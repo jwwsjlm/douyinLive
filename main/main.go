@@ -1,22 +1,29 @@
 package main
 
 import (
-	"flag"
+	"encoding/hex"
 	"github.com/gorilla/websocket"
 	douyinlive "github.com/jwwsjlm/douyinLive"
 	"github.com/jwwsjlm/douyinLive/generated/douyin"
+	"github.com/spf13/pflag"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"log"
 	"net/http"
+	"strconv"
+	"sync"
 )
 
-var addr = flag.String("addr", ":18080", "http service address")
-var agentlist = make([]*websocket.Conn, 0)
-
+var agentlist = make(map[string]*websocket.Conn)
+var mu sync.Mutex // 使用互斥锁来保护用户列表
 func main() {
-	flag.Parse()
-	log.SetFlags(0)
+	var port int
+	pflag.IntVar(&port, "port", 18080, "ws端口")
+	var room string
+	pflag.StringVar(&room, "room", "****", "房间号")
+	var unknown bool
+	pflag.BoolVar(&unknown, "unknown", false, "未知源pb消息是否输出")
+	pflag.Parse()
 
 	// 创建WebSocket升级器
 	upgrader := websocket.Upgrader{
@@ -31,8 +38,15 @@ func main() {
 	})
 
 	// 启动HTTP服务器
-	go http.ListenAndServe(*addr, nil)
-	d, _ := douyinlive.NewDouyinLive("933572413882")
+	go func() {
+		err := http.ListenAndServe(":"+strconv.Itoa(port), nil)
+		if err != nil {
+			panic("ListenAndServe: " + err.Error())
+		}
+		//log.Println("ws服务启动成功")
+	}()
+	log.Println("wss服务启动成功")
+	d, _ := douyinlive.NewDouyinLive(room)
 
 	d.Subscribe(func(eventData *douyin.Message) {
 		var marshal []byte
@@ -90,6 +104,9 @@ func main() {
 			//log.Printf("直播间排行榜msg%v", msg.RanksList)
 
 		default:
+			if unknown == true {
+				log.Println("本条消息.暂时没有源pb.无法处理.", hex.EncodeToString(eventData.Payload))
+			}
 			//d.Emit(Default, data.Payload)
 			//log.Println("payload:", method, hex.EncodeToString(data.Payload))
 		}
@@ -99,11 +116,17 @@ func main() {
 				log.Println("unmarshal:", err)
 				return
 			}
-			marshal, _ = protojson.Marshal(msg)
+			marshal, err = protojson.Marshal(msg)
+			if err != nil {
+				log.Println("protojson:unmarshal:", err)
+				return
+			}
 			for _, conn := range agentlist {
+				//if conn.IsClientConn
+
 				if err := conn.WriteMessage(websocket.TextMessage, marshal); err != nil {
-					log.Println("write:", err)
-					break
+					log.Println("发送消息失败:", err)
+					continue
 				}
 			}
 		}
@@ -111,6 +134,7 @@ func main() {
 	})
 	d.Start()
 }
+
 func serveWs(upgrader websocket.Upgrader, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -118,13 +142,24 @@ func serveWs(upgrader websocket.Upgrader, w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer conn.Close()
-	agentlist = append(agentlist, conn)
+	sec := r.Header.Get("Sec-WebSocket-Key")
+	mu.Lock()
+	agentlist[sec] = conn
+	mu.Unlock()
+	log.Println("当前连接数", len(agentlist))
+	defer func() {
+		mu.Lock()
+		log.Println(sec, "断开连接")
+		delete(agentlist, sec)
+		mu.Unlock()
+	}()
+
 	// 处理WebSocket消息
 	for {
 		mt, message, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("read:", err)
-			continue
+			break
 		}
 		log.Printf("recv: %s", message)
 		if string(message) == "ping" {

@@ -17,7 +17,7 @@ func TestNewDouyinLive(t *testing.T) {
 			proto.Unmarshal(eventData.Payload, msg)
 			marshal, _ := protojson.Marshal(msg)
 			//msg.String()
-			log.Println("聊天msg", msg.User.Id, msg.User.NickName, msg.Content, string(marshal), msg.String())
+			log.Println("聊天msg", msg.User.Id, msg.User.NickName, msg.Content, string(marshal))
 		}
 		//log.Println(eventData.Method, string(eventData.Payload))
 		//msg := &douyin.ChatMessage{}
@@ -29,5 +29,5 @@ func TestNewDouyinLive(t *testing.T) {
 	})
 
 	d.Start()
-	select {}
+
 }

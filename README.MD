@@ -8,4 +8,5 @@
 
 改写成golang测试
 
-![1716881601495](douyinlive/image/README/1716881601495.png)
+
+![1716881601495.png](image%2FREADME%2F1716881601495.png)

@@ -25,7 +25,7 @@ func NewDouyinLive(liveid string) (*DouyinLive, error) {
 		liveurl:       "https://live.douyin.com/",
 		useragent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
 		c:             c,
-		eventHandlers: make(map[string][]EventHandler),
+		eventHandlers: make([]EventHandler, 0),
 	}
 	var err error
 	d.ttwid, err = d.fttwid()
@@ -36,10 +36,7 @@ func NewDouyinLive(liveid string) (*DouyinLive, error) {
 	d.roomid = d.froomid()
 	return d, nil
 }
-func (d *DouyinLive) Close() error {
-	return d.Conn.Close()
 
-}
 func (d *DouyinLive) Start() {
 
 	//d.roomid = d.froomid()
@@ -62,11 +59,11 @@ func (d *DouyinLive) Start() {
 		return
 
 	}
-	d.Conn.Close()
+	//d.Conn.Close()
 	for {
 		_, message, err := d.Conn.ReadMessage()
 		if err != nil {
-			log.Println("读取消息失败：", err)
+			log.Println("读取消息失败：", err, message)
 			continue
 		}
 
@@ -105,16 +102,16 @@ func (d *DouyinLive) Start() {
 		}
 	}
 }
-func (d *DouyinLive) Emit(eventType string, eventData *douyin.Message) {
-	for _, handler := range d.eventHandlers[eventType] {
+func (d *DouyinLive) Emit(eventData *douyin.Message) {
+	for _, handler := range d.eventHandlers {
 		handler(eventData)
 	}
 }
 func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
 
 	for _, data := range response.MessagesList {
-		method := data.Method
-		d.Emit(method, data)
+		//method := data.Method
+		d.Emit(data)
 		//
 		//switch method {
 		//
@@ -175,8 +172,8 @@ func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
 	}
 	//fmt.Println("消息", message)
 }
-func (d *DouyinLive) Subscribe(eventType string, handler EventHandler) {
-	d.eventHandlers[eventType] = append(d.eventHandlers[eventType], handler)
+func (d *DouyinLive) Subscribe(handler EventHandler) {
+	d.eventHandlers = append(d.eventHandlers, handler)
 }
 
 func (d *DouyinLive) fttwid() (string, error) {

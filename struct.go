@@ -32,5 +32,5 @@ type DouyinLive struct {
 	liveurl       string
 	useragent     string
 	Conn          *websocket.Conn
-	eventHandlers map[string][]EventHandler
+	eventHandlers []EventHandler
 }

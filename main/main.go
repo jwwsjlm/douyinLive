@@ -1,10 +1,10 @@
 package main
 
 import (
+	"DouyinLive/generated/douyin"
 	"encoding/hex"
 	"github.com/gorilla/websocket"
 	douyinlive "github.com/jwwsjlm/douyinLive"
-	"github.com/jwwsjlm/douyinLive/generated/douyin"
 	"github.com/spf13/pflag"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -16,6 +16,8 @@ import (
 
 var agentlist = make(map[string]*websocket.Conn)
 var mu sync.Mutex // 使用互斥锁来保护用户列表
+var unknown bool
+
 func main() {
 	var port int
 	pflag.IntVar(&port, "port", 18080, "ws端口")
@@ -48,95 +50,100 @@ func main() {
 	log.Println("wss服务启动成功")
 	d, _ := douyinlive.NewDouyinLive(room)
 
-	d.Subscribe(func(eventData *douyin.Message) {
-		var marshal []byte
-		var msg proto.Message
-		switch eventData.Method {
-
-		case "WebcastChatMessage":
-			msg = &douyin.ChatMessage{}
-			//proto.Unmarshal(eventData.Payload, msg)
-			//marshal, _ = protojson.Marshal(msg)
-		case "WebcastGiftMessage":
-			msg = &douyin.GiftMessage{}
-			//proto.Unmarshal(eventData.Payload, msg)
-			//marshal, _ = protojson.Marshal(msg)
-		case "WebcastLikeMessage":
-			msg = &douyin.LikeMessage{}
-			//proto.Unmarshal(eventData.Payload, msg)
-			//marshal, _ = protojson.Marshal(msg)
-		case "WebcastMemberMessage":
-
-			msg = &douyin.MemberMessage{}
-			//proto.Unmarshal(eventData.Payload, msg)
-			//marshal, _ = protojson.Marshal(msg)
-		case "WebcastSocialMessage":
-			msg = &douyin.SocialMessage{}
-			//proto.Unmarshal(data.Payload, msg)
-			//log.Println("关注msg", msg.User.Id, msg.User.NickName)
-		case "WebcastRoomUserSeqMessage":
-			msg = &douyin.RoomUserSeqMessage{}
-			//proto.Unmarshal(data.Payload, msg)
-			//log.Printf("房间人数msg 当前观看人数:%v,累计观看人数:%v\n", msg.Total, msg.TotalPvForAnchor)
-		case "WebcastFansclubMessage":
-			msg = &douyin.FansclubMessage{}
-			//proto.Unmarshal(data.Payload, msg)
-			//log.Printf("粉丝团msg %v\n", msg.Content)
-		case "WebcastControlMessage":
-			msg = &douyin.ControlMessage{}
-
-			//proto.Unmarshal(data.Payload, msg)
-			//log.Printf("直播间状态消息%v", msg.Status)
-		case "WebcastEmojiChatMessage":
-			msg = &douyin.EmojiChatMessage{}
-			//proto.Unmarshal(data.Payload, msg)
-			//log.Printf("表情消息%vuser:%vcommon:%vdefault_content:%v", msg.EmojiId, msg.User, msg.Common, msg.DefaultContent)
-		case "WebcastRoomStatsMessage":
-			msg = &douyin.RoomStatsMessage{}
-			//proto.Unmarshal(data.Payload, msg)
-			//log.Printf("直播间统计msg%v", msg.DisplayLong)
-		case "WebcastRoomMessage":
-			msg = &douyin.RoomMessage{}
-			//proto.Unmarshal(data.Payload, msg)
-			//log.Printf("【直播间msg】直播间id%v", msg.Common.RoomId)
-		case "WebcastRoomRankMessage":
-			msg = &douyin.RoomRankMessage{}
-			//proto.Unmarshal(data.Payload, msg)
-			//log.Printf("直播间排行榜msg%v", msg.RanksList)
-
-		default:
-			log.Println("未知消息", eventData.Method, hex.EncodeToString(eventData.Payload))
-			if unknown == true {
-				log.Println("本条消息.暂时没有源pb.无法处理.", hex.EncodeToString(eventData.Payload))
-			}
-			//d.Emit(Default, data.Payload)
-			//log.Println("payload:", method, hex.EncodeToString(data.Payload))
-		}
-		if msg != nil {
-			err := proto.Unmarshal(eventData.Payload, msg)
-			if err != nil {
-				log.Println("unmarshal:", err)
-				return
-			}
-			marshal, err = protojson.Marshal(msg)
-			if err != nil {
-				log.Println("protojson:unmarshal:", err)
-				return
-			}
-			for _, conn := range agentlist {
-				//if conn.IsClientConn
-
-				if err := conn.WriteMessage(websocket.TextMessage, marshal); err != nil {
-					log.Println("发送消息失败:", err)
-					continue
-				}
-			}
-		}
-
-	})
+	d.Subscribe(Subscribe)
 	d.Start()
 }
+func Subscribe(eventData *douyin.Message) {
 
+	var marshal []byte
+	var msg proto.Message
+	switch eventData.Method {
+
+	case "WebcastChatMessage":
+		msg = &douyin.ChatMessage{}
+		//proto.Unmarshal(eventData.Payload, msg)
+		//marshal, _ = protojson.Marshal(msg)
+	case "WebcastGiftMessage":
+		msg = &douyin.GiftMessage{}
+		//proto.Unmarshal(eventData.Payload, msg)
+		//marshal, _ = protojson.Marshal(msg)
+	case "WebcastLikeMessage":
+		msg = &douyin.LikeMessage{}
+		//proto.Unmarshal(eventData.Payload, msg)
+		//marshal, _ = protojson.Marshal(msg)
+	case "WebcastMemberMessage":
+
+		msg = &douyin.MemberMessage{}
+		//proto.Unmarshal(eventData.Payload, msg)
+		//marshal, _ = protojson.Marshal(msg)
+	case "WebcastSocialMessage":
+		msg = &douyin.SocialMessage{}
+		//proto.Unmarshal(data.Payload, msg)
+		//log.Println("关注msg", msg.User.Id, msg.User.NickName)
+	case "WebcastRoomUserSeqMessage":
+		msg = &douyin.RoomUserSeqMessage{}
+		//proto.Unmarshal(data.Payload, msg)
+		//log.Printf("房间人数msg 当前观看人数:%v,累计观看人数:%v\n", msg.Total, msg.TotalPvForAnchor)
+	case "WebcastFansclubMessage":
+		msg = &douyin.FansclubMessage{}
+		//proto.Unmarshal(data.Payload, msg)
+		//log.Printf("粉丝团msg %v\n", msg.Content)
+	case "WebcastControlMessage":
+		msg = &douyin.ControlMessage{}
+
+		//proto.Unmarshal(data.Payload, msg)
+		//log.Printf("直播间状态消息%v", msg.Status)
+	case "WebcastEmojiChatMessage":
+		msg = &douyin.EmojiChatMessage{}
+		//proto.Unmarshal(data.Payload, msg)
+		//log.Printf("表情消息%vuser:%vcommon:%vdefault_content:%v", msg.EmojiId, msg.User, msg.Common, msg.DefaultContent)
+	case "WebcastRoomStatsMessage":
+		msg = &douyin.RoomStatsMessage{}
+		//proto.Unmarshal(data.Payload, msg)
+		//log.Printf("直播间统计msg%v", msg.DisplayLong)
+	case "WebcastRoomMessage":
+		msg = &douyin.RoomMessage{}
+		//proto.Unmarshal(data.Payload, msg)
+		//log.Printf("【直播间msg】直播间id%v", msg.Common.RoomId)
+	case "WebcastRanklistHourEntranceMessage":
+		msg = &douyin.RanklistHourEntranceMessage{}
+	//proto.Unmarshal(data.Payload, msg)
+	//log.Printf("直播间排行榜msg%v", msg.RanksList)
+	case "WebcastRoomRankMessage":
+		msg = &douyin.RoomRankMessage{}
+	case "WebcastInRoomBannerMessage":
+		msg = &douyin.InRoomBannerMessage{}
+
+	default:
+		log.Println("未知消息", eventData.Method, hex.EncodeToString(eventData.Payload))
+		if unknown == true {
+			log.Println("本条消息.暂时没有源pb.无法处理.", hex.EncodeToString(eventData.Payload))
+		}
+		//d.Emit(Default, data.Payload)
+		//log.Println("payload:", method, hex.EncodeToString(data.Payload))
+	}
+	if msg != nil {
+		err := proto.Unmarshal(eventData.Payload, msg)
+		if err != nil {
+			log.Println("unmarshal:", err)
+			return
+		}
+		marshal, err = protojson.Marshal(msg)
+		if err != nil {
+			log.Println("protojson:unmarshal:", err)
+			return
+		}
+		for _, conn := range agentlist {
+			//if conn.IsClientConn
+
+			if err := conn.WriteMessage(websocket.TextMessage, marshal); err != nil {
+				log.Println("发送消息失败:", err)
+				continue
+			}
+		}
+	}
+
+}
 func serveWs(upgrader websocket.Upgrader, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

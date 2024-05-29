@@ -84,6 +84,7 @@ func main() {
 			//log.Printf("粉丝团msg %v\n", msg.Content)
 		case "WebcastControlMessage":
 			msg = &douyin.ControlMessage{}
+
 			//proto.Unmarshal(data.Payload, msg)
 			//log.Printf("直播间状态消息%v", msg.Status)
 		case "WebcastEmojiChatMessage":
@@ -104,6 +105,7 @@ func main() {
 			//log.Printf("直播间排行榜msg%v", msg.RanksList)
 
 		default:
+			log.Println("未知消息", eventData.Method, hex.EncodeToString(eventData.Payload))
 			if unknown == true {
 				log.Println("本条消息.暂时没有源pb.无法处理.", hex.EncodeToString(eventData.Payload))
 			}

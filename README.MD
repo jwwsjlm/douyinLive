@@ -24,3 +24,6 @@
 链接地址为`ws://127.0.0.1:18080/ws` 
 内置了个简单的心跳包.客户端需要每隔30s发送一次`ping`
 ![1716881601495.png](image%2FREADME%2F1716881601495.png)
+有能力的可以完善下proto文件 抖音的proto相关的链接在
+https://lf-cdn-tos.bytescm.com/obj/static/webcast/douyin_live/chunks/live-schema.0fa7e4bc.js
+或者全局搜索`webcast.im.Common`也可定位相关函数

@@ -1,13 +1,13 @@
 package douyinlive
 
 import (
+	"DouyinLive/generated/douyin"
+	"DouyinLive/utils"
 	"bytes"
 	"compress/gzip"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
-	"github.com/jwwsjlm/douyinLive/generated/douyin"
-	"github.com/jwwsjlm/douyinLive/utils"
 	"google.golang.org/protobuf/proto"
 	"io"
 	"log"
@@ -64,7 +64,7 @@ func (d *DouyinLive) Start() {
 		_, message, err := d.Conn.ReadMessage()
 		if err != nil {
 			log.Println("读取消息失败：", err, message)
-			continue
+			break
 		}
 
 		if message != nil {
@@ -98,7 +98,7 @@ func (d *DouyinLive) Start() {
 			}
 			//log.Println(d.eventHandlers)
 
-			go d.ProcessingMessage(response)
+			d.ProcessingMessage(response)
 		}
 	}
 }

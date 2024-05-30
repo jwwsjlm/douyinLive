@@ -63,8 +63,8 @@ func (d *DouyinLive) Start() {
 	for {
 		_, message, err := d.Conn.ReadMessage()
 		if err != nil {
-			log.Println("读取消息失败：", err, message)
-			break
+			log.Println("读取消息失败-可能已经关播：", err, message)
+			return
 		}
 
 		if message != nil {

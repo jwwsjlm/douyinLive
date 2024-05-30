@@ -3,6 +3,7 @@ package main
 import (
 	douyinlive "DouyinLive"
 	"DouyinLive/generated/douyin"
+	"DouyinLive/utils"
 	"encoding/hex"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/pflag"
@@ -19,13 +20,14 @@ var unknown bool
 
 func main() {
 	var port string
+
 	pflag.StringVar(&port, "port", "18080", "ws端口")
 	var room string
 	pflag.StringVar(&room, "room", "****", "房间号")
 	var unknown bool
 	pflag.BoolVar(&unknown, "unknown", false, "未知源pb消息是否输出")
 	pflag.Parse()
-
+	log.Println(unknown)
 	// 创建WebSocket升级器
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
@@ -55,79 +57,12 @@ func main() {
 }
 func Subscribe(eventData *douyin.Message) {
 	var marshal []byte
-	var msg proto.Message
-	switch eventData.Method {
-	case "WebcastChatMessage":
-		msg = &douyin.ChatMessage{}
-	case "WebcastGiftMessage":
-		msg = &douyin.GiftMessage{}
-	case "WebcastLikeMessage":
-		msg = &douyin.LikeMessage{}
-	case "WebcastMemberMessage":
-		msg = &douyin.MemberMessage{}
-	case "WebcastSocialMessage":
-		msg = &douyin.SocialMessage{}
-	case "WebcastRoomUserSeqMessage":
-		msg = &douyin.RoomUserSeqMessage{}
-	case "WebcastFansclubMessage":
-		msg = &douyin.FansclubMessage{}
-	case "WebcastControlMessage":
-		msg = &douyin.ControlMessage{}
-	case "WebcastEmojiChatMessage":
-		msg = &douyin.EmojiChatMessage{}
-	case "WebcastRoomStatsMessage":
-		msg = &douyin.RoomStatsMessage{}
-	case "WebcastRoomMessage":
-		msg = &douyin.RoomMessage{}
-	case "WebcastRanklistHourEntranceMessage":
-		msg = &douyin.RanklistHourEntranceMessage{}
-	case "WebcastRoomRankMessage":
-		msg = &douyin.RoomRankMessage{}
-	case "WebcastInRoomBannerMessage":
-		msg = &douyin.InRoomBannerMessage{}
-	case "WebcastRoomDataSyncMessage":
-		msg = &douyin.RoomDataSyncMessage{}
-	case "WebcastLuckyBoxTempStatusMessage":
-		msg = &douyin.LuckyBoxTempStatusMessage{}
-	case "WebcastDecorationModifyMethod":
-		msg = &douyin.DecorationModifyMessage{}
-	case "WebcastLinkMicAudienceKtvMessage":
-		msg = &douyin.LinkMicAudienceKtvMessage{}
-	case "WebcastRoomStreamAdaptationMessage":
-		msg = &douyin.RoomStreamAdaptationMessage{}
-	case "WebcastQuizAudienceStatusMessage":
-		msg = &douyin.QuizAudienceStatusMessage{}
-	case "WebcastHotChatMessage":
-		msg = &douyin.HotChatMessage{}
-	case "WebcastHotRoomMessage":
-		msg = &douyin.HotRoomMessage{}
-	case "WebcastAudioChatMessage":
-		msg = &douyin.AudioChatMessage{}
-	case "WebcastRoomNotifyMessage":
-		msg = &douyin.NotifyMessage{}
-	case "WebcastLuckyBoxMessage":
-		msg = &douyin.LuckyBoxMessage{}
-	case "WebcastUpdateFanTicketMessage":
-		msg = &douyin.UpdateFanTicketMessage{}
-	case "WebcastScreenChatMessage":
-		msg = &douyin.ScreenChatMessage{}
-	case "WebcastNotifyEffectMessage":
-		msg = &douyin.NotifyEffectMessage{}
-	case "WebcastBindingGiftMessage":
-		msg = &douyin.NotifyEffectMessage_BindingGiftMessage{}
-	case "WebcastTempStateAreaReachMessage":
-		msg = &douyin.TempStateAreaReachMessage{}
-	case "WebcastGrowthTaskMessage":
-		msg = &douyin.GrowthTaskMessage{}
-	case "WebcastGameCPBaseMessage":
-		msg = &douyin.GameCPBaseMessage{}
-	default:
-		//log.Println("未知消息", eventData.Method, hex.EncodeToString(eventData.Payload))
+
+	msg, err := utils.MatchMethod(eventData.Method)
+	if err != nil {
 		if unknown == true {
-			log.Println("本条消息.暂时没有源pb.无法处理.", hex.EncodeToString(eventData.Payload))
+			log.Println("本条消息.暂时没有源pb.无法处理.", err, hex.EncodeToString(eventData.Payload))
 		}
-		//d.Emit(Default, data.Payload)
-		//log.Println("payload:", method, hex.EncodeToString(data.Payload))
 	}
 	if msg != nil {
 		err := proto.Unmarshal(eventData.Payload, msg)

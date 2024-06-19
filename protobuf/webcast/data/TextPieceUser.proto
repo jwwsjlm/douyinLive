@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package webcast.data;
+
+// 假设 User 消息类型已经被定义在其他 .proto 文件中
+import "webcast/data/User.proto";
+
+// TextPieceUser 消息类型定义
+message TextPieceUser {
+  User user = 1;                      // 用户信息，假设 User 是已定义的消息类型
+  bool with_colon = 2;                // 是否带有冒号
+  bool self_show_real_name = 3;       // 是否显示真实姓名
+  int32 left_show_extension = 4;      // 左侧显示扩展
+  string left_additional_content = 5; // 左侧附加内容
+  string right_additional_content = 6;// 右侧附加内容
+}

@@ -3,16 +3,16 @@ module DouyinLive
 go 1.22.3
 
 require (
-	github.com/gorilla/websocket v1.5.1
-	github.com/imroc/req/v3 v3.43.6
+	github.com/gorilla/websocket v1.5.3
+	github.com/imroc/req/v3 v3.43.7
 	github.com/jwwsjlm/douyinLive v0.0.0-20240528105744-29b51579a39c
 	github.com/spf13/pflag v1.0.5
-	google.golang.org/protobuf v1.34.1
+	google.golang.org/protobuf v1.34.2
 )
 
 require (
 	github.com/andybalholm/brotli v1.1.0 // indirect
-	github.com/cloudflare/circl v1.3.7 // indirect
+	github.com/cloudflare/circl v1.3.9 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/google/pprof v0.0.0-20240227163752-401108e1b7e7 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect

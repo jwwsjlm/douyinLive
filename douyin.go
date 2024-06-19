@@ -74,31 +74,55 @@ func (d *DouyinLive) Start() {
 				log.Println("解析消息失败：", err)
 				continue
 			}
-			gzipReader, _ := gzip.NewReader(bytes.NewReader(pac.Payload))
-			uncompressedData, _ := io.ReadAll(gzipReader)
-			response := &douyin.Response{}
-			err = proto.Unmarshal(uncompressedData, response)
-			if err != nil {
-				log.Println("解析消息失败：", err)
-				continue
-			}
-			defer gzipReader.Close()
-			if response.NeedAck {
-				ack := &douyin.PushFrame{
-					LogId:       pac.LogId,
-					PayloadType: "ack",
-					Payload:     []byte(response.InternalExt),
+			n := false
+			for _, v := range pac.HeadersList {
+				if v.Key == "compress_type" {
+					if v.Value == "gzip" {
+						n = true
+						continue
+					}
 				}
-				serializedAck, _ := proto.Marshal(ack)
-				err := d.Conn.WriteMessage(websocket.BinaryMessage, serializedAck)
+			}
+			//消息为gzip压缩进行处理.否则抛弃
+			if n == true && pac.PayloadType == "msg" {
+				gzipReader, err := gzip.NewReader(bytes.NewReader(pac.Payload))
 				if err != nil {
-					fmt.Println("心跳包发送失败：", err)
+					log.Println("Gzip加载失败:", err)
+					continue
 				}
-				//fmt.Println("心跳包发送成功", ack)
-			}
-			//log.Println(d.eventHandlers)
+				uncompressedData, err := io.ReadAll(gzipReader)
+				if err != nil {
+					log.Println("数据流加载失败:", err)
+					continue
+				}
+				response := &douyin.Response{}
+				err = proto.Unmarshal(uncompressedData, response)
+				if err != nil {
+					log.Println("解析消息失败：", err)
+					continue
+				}
+				defer gzipReader.Close()
+				if response.NeedAck {
+					ack := &douyin.PushFrame{
+						LogId:       pac.LogId,
+						PayloadType: "ack",
+						Payload:     []byte(response.InternalExt),
+					}
+					serializedAck, err := proto.Marshal(ack)
+					if err != nil {
+						log.Println("proto心跳包序列化失败:", err)
+					}
+					err = d.Conn.WriteMessage(websocket.BinaryMessage, serializedAck)
+					if err != nil {
+						fmt.Println("心跳包发送失败：", err)
+					}
+					//fmt.Println("心跳包发送成功", ack)
+				}
+				//log.Println(d.eventHandlers)
 
-			d.ProcessingMessage(response)
+				d.ProcessingMessage(response)
+			}
+
 		}
 	}
 }

@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package webcast.data;
+
+// 定义 TextFormat 消息类型
+message TextFormat {
+  string color = 1;               // 字体颜色
+  bool bold = 2;                  // 是否加粗
+  bool italic = 3;                // 是否斜体
+  int32 weight = 4;               // 字重
+  int32 italic_angle = 5;         // 斜体角度
+  int32 font_size = 6;            // 字体大小
+  bool use_highlight_color = 7;   // 是否使用高亮颜色（假设 "use_heigh_light_color" 是拼写错误）
+  bool use_remote_color = 8;      // 是否使用远程颜色（假设 "use_remote_clor" 是拼写错误）
+}

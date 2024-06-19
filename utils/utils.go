@@ -4,7 +4,7 @@ import (
 	"DouyinLive/generated/douyin"
 	"crypto/rand"
 	"errors"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"math/big"
 )
 
@@ -22,7 +22,7 @@ func GenerateMsToken(length int) string {
 
 	return string(b) + "=_"
 }
-func MatchMethod(Method string) (proto.Message, error) {
+func MatchMethod(Method string) (protoreflect.ProtoMessage, error) {
 	switch Method {
 	case "WebcastChatMessage":
 

@@ -3,6 +3,7 @@ package main
 import (
 	douyinlive "DouyinLive"
 	"DouyinLive/generated/douyin"
+	"DouyinLive/jssrc"
 	"DouyinLive/utils"
 	"encoding/hex"
 	"github.com/gorilla/websocket"
@@ -19,6 +20,7 @@ var mu sync.Mutex // 使用互斥锁来保护用户列表
 var unknown bool
 
 func main() {
+
 	var port string
 
 	pflag.StringVar(&port, "port", "18080", "ws端口")
@@ -44,8 +46,11 @@ func main() {
 
 	// 启动HTTP服务器
 	go func() {
+
 		err := http.ListenAndServe(":"+port, nil)
+		//
 		if err != nil {
+			//启动失败
 			panic("ListenAndServe: " + err.Error())
 		}
 		//log.Println("ws服务启动成功")
@@ -54,11 +59,17 @@ func main() {
 	log.Println("wss服务启动成功,链接地址为:ws://127.0.0.1:" + port + "/ws\n" + "直播地址:" + room)
 
 	d, err := douyinlive.NewDouyinLive(room)
+
+	err = jssrc.LoadGoja("./jssrc/webmssdk.js", d.Useragent)
+	if err != nil {
+		panic(err)
+	}
+
 	if err != nil {
 		panic("抖音链接失败:" + err.Error())
 	}
 	d.Subscribe(Subscribe)
-
+	//开始
 	d.Start()
 }
 
@@ -71,9 +82,11 @@ func Subscribe(eventData *douyin.Message) {
 	if err != nil {
 		if unknown == true {
 			log.Println("本条消息.暂时没有源pb.无法处理.", err, hex.EncodeToString(eventData.Payload))
+			return
 		}
 	}
 	if msg != nil {
+
 		err := proto.Unmarshal(eventData.Payload, msg)
 		if err != nil {
 			log.Println("unmarshal:", err, eventData.Method)
@@ -86,6 +99,7 @@ func Subscribe(eventData *douyin.Message) {
 		}
 
 		for _, conn := range agentlist {
+
 			//log.Println("当前")
 			if err := conn.WriteMessage(websocket.TextMessage, marshal); err != nil {
 				log.Println("发送消息失败:", err)

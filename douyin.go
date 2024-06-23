@@ -2,28 +2,39 @@ package douyinlive
 
 import (
 	"DouyinLive/generated/douyin"
+	"DouyinLive/global"
 	"DouyinLive/utils"
 	"bytes"
 	"compress/gzip"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
+	"github.com/elliotchance/orderedmap"
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
+	"github.com/spf13/cast"
 	"google.golang.org/protobuf/proto"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"regexp"
+	"strconv"
+	"strings"
+	"time"
 )
 
 func NewDouyinLive(liveid string) (*DouyinLive, error) {
 
-	c := req.C().SetUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)")
+	ua := GetRandomUA()
+
+	c := req.C().SetUserAgent(ua)
 	d := &DouyinLive{
 		ttwid:         "",
 		roomid:        "",
 		liveid:        liveid,
 		liveurl:       "https://live.douyin.com/",
-		useragent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
+		Useragent:     ua,
 		c:             c,
 		eventHandlers: make([]EventHandler, 0),
 	}
@@ -36,30 +47,115 @@ func NewDouyinLive(liveid string) (*DouyinLive, error) {
 	d.roomid = d.froomid()
 	return d, nil
 }
-
-func (d *DouyinLive) Start() {
-
-	//d.roomid = d.froomid()
-	//d.ttwid, _ = d.fttwid()
-	wssURL := "wss://webcast3-ws-web-lq.douyin.com/webcast/im/push/v2/?app_name=douyin_web&version_code=180800&webcast_sdk_version=1.3.0&update_version_code=1.3.0&compress=gzip&internal_ext=internal_src:dim|wss_push_room_id:" + d.roomid + "|wss_push_did:" + d.roomid + "|dim_log_id:202302171547011A160A7BAA76660E13ED|fetch_time:1676620021641|seq:1|wss_info:0-1676620021641-0-0|wrds_kvs:WebcastRoomStatsMessage-1676620020691146024_WebcastRoomRankMessage-1676619972726895075_AudienceGiftSyncData-1676619980834317696_HighlightContainerSyncData-2&cursor=t-1676620021641_r-1_d-1_u-1_h-1&host=https://live.douyin.com&aid=6383&live_id=1&did_rule=3&debug=false&endpoint=live_pc&support_wrds=1&im_path=/webcast/im/fetch/&user_unique_id=" + d.roomid + "&device_platform=web&cookie_enabled=true&screen_width=1440&screen_height=900&browser_language=zh&browser_platform=MacIntel&browser_name=Mozilla&browser_version=5.0%20(Macintosh;%20Intel%20Mac%20OS%20X%2010_15_7)%20AppleWebKit/537.36%20(KHTML,%20like%20Gecko)%20Chrome/110.0.0.0%20Safari/537.36&browser_online=true&tz_name=Asia/Shanghai&identity=audience&room_id=" + d.roomid + "&heartbeatDuration=0&signature=00000000"
-	//t, _ := d.fttwid()
-
-	headers := http.Header{
-		"Cookie":     []string{fmt.Sprintf("ttwid=%s", d.ttwid)},
-		"user-agent": []string{d.useragent},
+func GetxMSStub(params *orderedmap.OrderedMap) string {
+	// 使用 strings.Builder 构建签名字符串
+	var sigParams strings.Builder
+	first := true
+	for _, key := range params.Keys() {
+		if !first {
+			sigParams.WriteString(",")
+		} else {
+			first = false
+		}
+		value, _ := params.Get(key)
+		sigParams.WriteString(fmt.Sprintf("%s=%s", key, value))
 	}
-	//fmt.Printf("协议头%v,%v\n", headers, d.useragent)
-	//return
+	hash := md5.Sum([]byte(sigParams.String()))
+	return hex.EncodeToString(hash[:])
+}
+func GetRandomUA() string {
+	osList := []string{
+		"(Windows NT 10.0; WOW64)", "(Windows NT 10.0; WOW64)", "(Windows NT 10.0; Win64; x64)",
+		"(Windows NT 6.3; WOW64)", "(Windows NT 6.3; Win64; x64)",
+		"(Windows NT 6.1; Win64; x64)", "(Windows NT 6.1; WOW64)",
+		"(X11; Linux x86_64)",
+		"(Macintosh; Intel Mac OS X 10_12_6)",
+	}
+
+	chromeVersionList := []string{
+		"110.0.5481.77", "110.0.5481.30", "109.0.5414.74", "108.0.5359.71", "108.0.5359.22",
+		// ... 其他版本号
+		"98.0.4758.48", "97.0.4692.71",
+	}
+
+	os := osList[rand.Intn(len(osList))]
+	chromeVersion := chromeVersionList[rand.Intn(len(chromeVersionList))]
+	//return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+	return fmt.Sprintf("Mozilla/5.0 %s AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", os, chromeVersion)
+}
+func randomUserAgent(device string) string {
+	chromeVersion := rand.Intn(20) + 100 // 生成 100 到 120 之间的随机 Chrome 版本号
+
+	switch device {
+	case "mobile":
+		androidVersion := rand.Intn(6) + 9 // 生成 9 到 14 之间的随机 Android 版本号
+		mobileModels := []string{
+			"SM-G981B", "SM-G9910", "SM-S9080", "SM-S9110", "SM-S921B",
+			"Pixel 5", "Pixel 6", "Pixel 7", "Pixel 7 Pro", "Pixel 8",
+		}
+		mobileModel := mobileModels[rand.Intn(len(mobileModels))]
+		return fmt.Sprintf("Mozilla/5.0 (Linux; Android %d; %s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%d.0.0.0 Mobile Safari/537.36", androidVersion, mobileModel, chromeVersion)
+	default:
+		return fmt.Sprintf("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%d.0.0.0 Safari/537.36", chromeVersion)
+	}
+}
+func getUserID() string {
+	// 生成7300000000000000000到7999999999999999999之间的随机数
+	randomNumber := rand.Int63n(7000000000000000000 + 1)
+
+	// 将整数转换为字符串
+	return strconv.FormatInt(randomNumber, 10)
+}
+func (d *DouyinLive) Start() {
 	var err error
 
-	d.Conn, _, err = websocket.DefaultDialer.Dial(wssURL, headers)
-	//fmt.Println(wssURL)
+	smap := orderedmap.NewOrderedMap()
+	smap.Set("live_id", "1")
+	smap.Set("aid", "6383")
+	smap.Set("version_code", "180800")
+	smap.Set("webcast_sdk_version", "1.0.14-beta.0")
+	smap.Set("room_id", d.roomid)
+	smap.Set("sub_room_id", "")
+	smap.Set("sub_channel_id", "")
+	smap.Set("did_rule", "3")
+	smap.Set("user_unique_id", d.pushid)
+	smap.Set("device_platform", "web")
+	smap.Set("device_type", "")
+	smap.Set("ac", "")
+	smap.Set("identity", "audience")
+	signaturemd5 := GetxMSStub(smap)
+
+	signature := global.GetSing(signaturemd5)
+
+	browserInfo := strings.Split(d.Useragent, "Mozilla")[1]
+	parsedURL := strings.Replace(browserInfo[1:], " ", "%20", -1)
+	fetchTime := time.Now().UnixNano() / int64(time.Millisecond)
+
+	browserVersion := parsedURL
+
+	wssURL := "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/?app_name=douyin_web&version_code=180800&" +
+		"webcast_sdk_version=1.0.14-beta.0&update_version_code=1.0.14-beta.0&compress=gzip&device_platform" +
+		"=web&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&" +
+		"browser_name=Mozilla&browser_version=" + browserVersion + "&browser_online=true" +
+		"&tz_name=Asia/Shanghai&cursor=d-1_u-1_fh-7383731312643626035_t-1719159695790_r-1&internal_ext" +
+		"=internal_src:dim|wss_push_room_id:" + d.roomid + "|wss_push_did:" + d.pushid + "|first_req_ms:" + cast.ToString(fetchTime) + "|fetch_time:" + cast.ToString(fetchTime) + "|seq:1|wss_info:0-" + cast.ToString(fetchTime) + "-0-0|" +
+		"wrds_v:7382620942951772256&host=https://live.douyin.com&aid=6383&live_id=1&did_rule=3" +
+		"&endpoint=live_pc&support_wrds=1&user_unique_id=" + d.pushid + "&im_path=/webcast/im/fetch/" +
+		"&identity=audience&need_persist_msg_count=15&insert_task_id=&live_reason=&room_id=" + d.roomid + "&heartbeatDuration=0&signature=" + signature
+
+	headers := make(http.Header)
+	headers.Add("user-agent", d.Useragent)
+	headers.Add("cookie", fmt.Sprintf("ttwid=%s", d.ttwid))
+	var response *http.Response
+	d.Conn, response, err = websocket.DefaultDialer.Dial(wssURL, headers)
+
 	if err != nil {
-		log.Printf("链接失败: err:%v\nroomid:%v\n ttwid:%v\n", err, d.roomid, d.ttwid)
+		log.Printf("链接失败: err:%v\nroomid:%v\n ttwid:%v\nwssurl:----%v\nresponse:%v\n", err, d.roomid, d.ttwid, wssURL, response.StatusCode)
 		return
 
 	}
-	//d.Conn.Close()
+	log.Println("链接成功")
+
 	for {
 		_, message, err := d.Conn.ReadMessage()
 		if err != nil {
@@ -236,13 +332,26 @@ func (d *DouyinLive) froomid() string {
 	}
 	//cookie := "ttwid=" + t.Value + "&msToken=" + utils.GenerateMsToken(107) + "; __ac_nonce=0123407cc00a9e438deb4"
 	res, err := d.c.R().SetCookies(ttwid, acNonce).Get(d.liveurl + d.liveid)
+
 	if err != nil {
 		return err.Error()
 
 	}
 	re := regexp.MustCompile(`roomId\\":\\"(\d+)\\"`)
 	match := re.FindStringSubmatch(res.String())
-	d.roomid = match[1]
+
+	d.roomid = d.regroomid(res.String())
+	d.pushid = d.regpushid(res.String())
 	return match[1]
 
+}
+func (d *DouyinLive) regroomid(s string) string {
+	re := regexp.MustCompile(`roomId\\":\\"(\d+)\\"`)
+	match := re.FindStringSubmatch(s)
+	return match[1]
+}
+func (d *DouyinLive) regpushid(s string) string {
+	re := regexp.MustCompile(`user_unique_id\\":\\"(\d+)\\"`)
+	match := re.FindStringSubmatch(s)
+	return match[1]
 }

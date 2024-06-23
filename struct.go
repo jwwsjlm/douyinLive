@@ -30,7 +30,8 @@ type DouyinLive struct {
 	roomid        string
 	liveid        string
 	liveurl       string
-	useragent     string
+	Useragent     string
+	pushid        string
 	Conn          *websocket.Conn
 	eventHandlers []EventHandler
 }

@@ -4,14 +4,11 @@ import (
 	"DouyinLive/generated/douyin"
 	"DouyinLive/global"
 	"DouyinLive/utils"
-	"bytes"
-	"compress/gzip"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
 	"github.com/spf13/cast"
 	"google.golang.org/protobuf/proto"
-	"io"
 	"log"
 	"net/http"
 	"regexp"
@@ -104,87 +101,71 @@ func (d *DouyinLive) Start() {
 		log.Printf("链接失败: err:%v\nroomid:%v\n ttwid:%v\nwssurl:----%v\nresponse:%v\n", err, d.roomid, d.ttwid, d.wssurl, response.StatusCode)
 	}
 	log.Println("链接成功")
-
 	for {
+		//读取消息
 		messageType, message, err := d.Conn.ReadMessage()
-
 		if err != nil {
+
 			//进行重连
-			if d.reconnect(5) {
-				continue // 如果重连成功，继续监听消息
-			}
-			log.Println("读取消息失败-可能已经关播：", err, message, messageType)
-			break
-		}
+			//if d.reconnect(5) {
+			//	continue // 如果重连成功，继续监听消息
+			//}
+			log.Println("读取消息失败-", err, message, messageType)
+			//break
 
-		if message != nil {
-			pac := &douyin.PushFrame{}
-			err := proto.Unmarshal(message, pac)
-			if err != nil {
-
-				log.Println("解析消息失败：", err)
-				continue
-			}
-			n := false
-			for _, v := range pac.HeadersList {
-				//
-				if v.Key == "compress_type" {
-					if v.Value == "gzip" {
-						n = true
-						continue
-					}
-				}
-			}
-			//
-
-			//消息为gzip压缩进行处理.否则抛弃
-			if n == true && pac.PayloadType == "msg" {
-				gzipReader, err := gzip.NewReader(bytes.NewReader(pac.Payload))
+		} else {
+			//解析消息正常的话进行处理
+			if message != nil {
+				pac := &douyin.PushFrame{}
+				err := proto.Unmarshal(message, pac)
 				if err != nil {
 
-					log.Println("Gzip加载失败:", err)
-					continue
-				}
-				uncompressedData, err := io.ReadAll(gzipReader)
-				if err != nil {
-					log.Println("数据流加载失败:", err)
-					continue
-				}
-				response := &douyin.Response{}
-				err = proto.Unmarshal(uncompressedData, response)
-
-				if err != nil {
 					log.Println("解析消息失败：", err)
 					continue
 				}
-				defer gzipReader.Close()
 
-				if response.NeedAck {
-
-					ack := &douyin.PushFrame{
-						LogId:       pac.LogId,
-						PayloadType: "ack",
-						Payload:     []byte(response.InternalExt),
-					}
-					serializedAck, err := proto.Marshal(ack)
-
+				n := utils.HasGzipEncoding(pac.HeadersList)
+				//消息为gzip压缩进行处理.否则抛弃
+				if n == true && pac.PayloadType == "msg" {
+					//gzipReader, err := gzip.NewReader(bytes.NewReader(pac.Payload))
+					gzipReader, err := utils.GzipUnzip(pac.Payload)
 					if err != nil {
-						log.Println("proto心跳包序列化失败:", err)
-					}
-					err = d.Conn.WriteMessage(websocket.BinaryMessage, serializedAck)
-
-					if err != nil {
-						fmt.Println("心跳包发送失败：", err)
+						log.Println("Gzip解压失败:", err)
 						continue
 					}
+					if err != nil {
+						log.Println("数据流加载失败:", err)
+						continue
+					}
+					response := &douyin.Response{}
+					err = proto.Unmarshal(gzipReader, response)
+					if err != nil {
+						log.Println("解析消息失败：", err)
+						continue
+					}
+					if response.NeedAck {
+						ack := &douyin.PushFrame{
+							LogId:       pac.LogId,
+							PayloadType: "ack",
+							Payload:     []byte(response.InternalExt),
+						}
+						serializedAck, err := proto.Marshal(ack)
+						if err != nil {
+							log.Println("proto心跳包序列化失败:", err)
+						}
+						err = d.Conn.WriteMessage(websocket.BinaryMessage, serializedAck)
 
-					//fmt.Println("心跳包发送成功", ack)
+						if err != nil {
+							fmt.Println("心跳包发送失败：", err)
+							continue
+						}
+					}
+					d.ProcessingMessage(response)
 				}
-				//
-				d.ProcessingMessage(response)
-			}
 
+			}
 		}
+
 	}
 }
 

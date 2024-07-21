@@ -1,13 +1,14 @@
 module DouyinLive
 
-go 1.22.4
+go 1.22.5
 
 require (
-	github.com/dop251/goja v0.0.0-20240610225006-393f6d42497b
+	github.com/dop251/goja v0.0.0-20240627195025-eb1f15ee67d2
 	github.com/elliotchance/orderedmap v1.6.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/imroc/req/v3 v3.43.7
 	github.com/jwwsjlm/douyinLive v0.0.0-20240528105744-29b51579a39c
+	github.com/spf13/cast v1.6.0
 	github.com/spf13/pflag v1.0.5
 	google.golang.org/protobuf v1.34.2
 )
@@ -26,7 +27,6 @@ require (
 	github.com/quic-go/qpack v0.4.0 // indirect
 	github.com/quic-go/quic-go v0.41.0 // indirect
 	github.com/refraction-networking/utls v1.6.3 // indirect
-	github.com/spf13/cast v1.6.0 // indirect
 	go.uber.org/mock v0.4.0 // indirect
 	golang.org/x/crypto v0.23.0 // indirect
 	golang.org/x/exp v0.0.0-20240222234643-814bf88cf225 // indirect

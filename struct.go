@@ -4,6 +4,7 @@ import (
 	"DouyinLive/generated/douyin"
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
+	"net/http"
 )
 
 const (
@@ -25,6 +26,8 @@ const (
 
 type EventHandler func(eventData *douyin.Message)
 type DouyinLive struct {
+	wssurl        string
+	headers       http.Header
 	c             *req.Client
 	ttwid         string
 	roomid        string

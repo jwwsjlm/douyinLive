@@ -26,6 +26,7 @@ func main() {
 	pflag.StringVar(&port, "port", "18080", "ws端口")
 	var room string
 	pflag.StringVar(&room, "room", "****", "房间号")
+
 	var unknown bool
 	pflag.BoolVar(&unknown, "unknown", false, "未知源pb消息是否输出")
 
@@ -76,6 +77,7 @@ func main() {
 // Subscribe 订阅更新
 func Subscribe(eventData *douyin.Message) {
 	var marshal []byte
+	//
 
 	msg, err := utils.MatchMethod(eventData.Method)
 
@@ -101,6 +103,7 @@ func Subscribe(eventData *douyin.Message) {
 		for _, conn := range agentlist {
 
 			//log.Println("当前")
+
 			if err := conn.WriteMessage(websocket.TextMessage, marshal); err != nil {
 				log.Println("发送消息失败:", err)
 				//break

@@ -2,6 +2,7 @@ package douyinlive
 
 import (
 	"DouyinLive/generated/douyin"
+	"compress/gzip"
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
 	"net/http"
@@ -37,4 +38,5 @@ type DouyinLive struct {
 	pushid        string
 	Conn          *websocket.Conn
 	eventHandlers []EventHandler
+	gzip          *gzip.Reader
 }

@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"github.com/elliotchance/orderedmap"
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"io"
-	"log"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -22,37 +20,16 @@ import (
 func HasGzipEncoding(h []*douyin.HeadersList) bool {
 	n := false
 	for _, v := range h {
+
 		if v.Key == "compress_type" {
 			if v.Value == "gzip" {
 				n = true
-				continue
+
+				break
 			}
 		}
 	}
 	return n
-}
-
-// GzipUnzip 解压gzip
-func GzipUnzip(compressedData []byte) ([]byte, error) {
-	// 创建一个读取gzip数据的reader
-	reader, err := gzip.NewReader(bytes.NewReader(compressedData))
-	if err != nil {
-		return nil, err
-	}
-	defer func(reader *gzip.Reader) {
-		err := reader.Close()
-		if err != nil {
-			log.Printf("Failed to close gzip reader: %v", err)
-		}
-	}(reader)
-	// 创建一个buffer来存储解压后的数据
-	var buffer bytes.Buffer
-	// 将解压的数据写入buffer
-	_, err = io.Copy(&buffer, reader)
-	if err != nil {
-		return nil, err
-	}
-	return buffer.Bytes(), nil
 }
 
 // GetxMSStub 拼接map返回md5.hex

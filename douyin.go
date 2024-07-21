@@ -4,11 +4,14 @@ import (
 	"DouyinLive/generated/douyin"
 	"DouyinLive/global"
 	"DouyinLive/utils"
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
 	"github.com/spf13/cast"
 	"google.golang.org/protobuf/proto"
+	"io"
 	"log"
 	"net/http"
 	"regexp"
@@ -18,7 +21,7 @@ import (
 
 // NewDouyinLive 创建一个新的链接
 func NewDouyinLive(liveid string) (*DouyinLive, error) {
-
+	var err error
 	ua := utils.RandomUserAgent()
 
 	c := req.C().SetUserAgent(ua)
@@ -32,7 +35,6 @@ func NewDouyinLive(liveid string) (*DouyinLive, error) {
 		eventHandlers: make([]EventHandler, 0),
 		headers:       http.Header{},
 	}
-	var err error
 	d.ttwid, err = d.fttwid()
 
 	if err != nil {
@@ -88,10 +90,42 @@ func (d *DouyinLive) StitchUrl() string {
 		"&identity=audience&need_persist_msg_count=15&insert_task_id=&live_reason=&room_id=" + d.roomid + "&heartbeatDuration=0&signature=" + signature
 }
 
+// GzipUnzip 解压gzip
+func (d *DouyinLive) GzipUnzip(compressedData []byte) ([]byte, error) {
+	var err error
+	if d.gzip != nil {
+		err := d.gzip.Reset(bytes.NewReader(compressedData))
+		if err != nil {
+			d.gzip.Close()
+			d.gzip = nil
+			return nil, err
+		}
+	} else {
+		d.gzip, err = gzip.NewReader(bytes.NewReader(compressedData))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	decompressedData, err := io.ReadAll(d.gzip)
+
+	if err != nil {
+		// 读取失败，关闭 gzip 读取器
+		d.gzip.Close()
+		d.gzip = nil
+		return nil, err
+	}
+	//log.Println(string(decompressedData))
+	return decompressedData, nil
+
+}
+
 // Start 开始运行
 func (d *DouyinLive) Start() {
 	var err error
 	//链接地址
+	//gzipReader, err := gzip.NewReader(nil)
+
 	d.wssurl = d.StitchUrl()
 	d.headers.Add("user-agent", d.Useragent)
 	d.headers.Add("cookie", fmt.Sprintf("ttwid=%s", d.ttwid))
@@ -127,22 +161,24 @@ func (d *DouyinLive) Start() {
 				n := utils.HasGzipEncoding(pac.HeadersList)
 				//消息为gzip压缩进行处理.否则抛弃
 				if n == true && pac.PayloadType == "msg" {
+
 					//gzipReader, err := gzip.NewReader(bytes.NewReader(pac.Payload))
-					gzipReader, err := utils.GzipUnzip(pac.Payload)
+
+					//uncompressedData, err := io.ReadAll(gzipReader)
+					uncompressedData, err := d.GzipUnzip(pac.Payload)
 					if err != nil {
 						log.Println("Gzip解压失败:", err)
 						continue
 					}
-					if err != nil {
-						log.Println("数据流加载失败:", err)
-						continue
-					}
+
 					response := &douyin.Response{}
-					err = proto.Unmarshal(gzipReader, response)
+
+					err = proto.Unmarshal(uncompressedData, response)
 					if err != nil {
 						log.Println("解析消息失败：", err)
 						continue
 					}
+
 					if response.NeedAck {
 						ack := &douyin.PushFrame{
 							LogId:       pac.LogId,
@@ -156,7 +192,7 @@ func (d *DouyinLive) Start() {
 						err = d.Conn.WriteMessage(websocket.BinaryMessage, serializedAck)
 
 						if err != nil {
-							fmt.Println("心跳包发送失败：", err)
+							log.Println("心跳包发送失败：", err)
 							continue
 						}
 					}

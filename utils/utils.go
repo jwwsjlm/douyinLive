@@ -12,6 +12,7 @@ import (
 	"github.com/elliotchance/orderedmap"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"io"
+	"log"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -38,7 +39,12 @@ func GzipUnzip(compressedData []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
+	defer func(reader *gzip.Reader) {
+		err := reader.Close()
+		if err != nil {
+			log.Printf("Failed to close gzip reader: %v", err)
+		}
+	}(reader)
 	// 创建一个buffer来存储解压后的数据
 	var buffer bytes.Buffer
 	// 将解压的数据写入buffer

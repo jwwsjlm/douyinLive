@@ -89,9 +89,31 @@ func (d *DouyinLive) StitchUrl() string {
 		"&endpoint=live_pc&support_wrds=1&user_unique_id=" + d.pushid + "&im_path=/webcast/im/fetch/" +
 		"&identity=audience&need_persist_msg_count=15&insert_task_id=&live_reason=&room_id=" + d.roomid + "&heartbeatDuration=0&signature=" + signature
 }
-
-// GzipUnzip 解压gzip
 func (d *DouyinLive) GzipUnzip(compressedData []byte) ([]byte, error) {
+	//log.Println(compressedData)
+
+	var err error
+	d.gzip, err = gzip.NewReader(bytes.NewReader(compressedData))
+	if err != nil {
+		return nil, err
+	}
+
+	decompressedData, err := io.ReadAll(d.gzip)
+
+	if err != nil {
+		// 读取失败，关闭 gzip 读取器
+		d.gzip.Close()
+		d.gzip = nil
+		return nil, err
+	}
+	//log.Println(string(decompressedData))
+	return decompressedData, nil
+
+}
+
+// GzipUnzipReset 使用Reset解压gzip
+func (d *DouyinLive) GzipUnzipReset(compressedData []byte) ([]byte, error) {
+	//log.Println(compressedData)
 	var err error
 	if d.gzip != nil {
 		err := d.gzip.Reset(bytes.NewReader(compressedData))
@@ -135,6 +157,7 @@ func (d *DouyinLive) Start() {
 		log.Printf("链接失败: err:%v\nroomid:%v\n ttwid:%v\nwssurl:----%v\nresponse:%v\n", err, d.roomid, d.ttwid, d.wssurl, response.StatusCode)
 	}
 	log.Println("链接成功")
+	defer d.gzip.Close()
 	for {
 		//读取消息
 		messageType, message, err := d.Conn.ReadMessage()
@@ -165,7 +188,7 @@ func (d *DouyinLive) Start() {
 					//gzipReader, err := gzip.NewReader(bytes.NewReader(pac.Payload))
 
 					//uncompressedData, err := io.ReadAll(gzipReader)
-					uncompressedData, err := d.GzipUnzip(pac.Payload)
+					uncompressedData, err := d.GzipUnzipReset(pac.Payload)
 					if err != nil {
 						log.Println("Gzip解压失败:", err)
 						continue

@@ -162,12 +162,14 @@ func (d *DouyinLive) Start() {
 		//读取消息
 		messageType, message, err := d.Conn.ReadMessage()
 		if err != nil {
-
-			//进行重连
-			//if d.reconnect(5) {
-			//	continue // 如果重连成功，继续监听消息
-			//}
 			log.Println("读取消息失败-", err, message, messageType)
+			//进行重连
+			if d.reconnect(5) {
+				continue // 如果重连成功，继续监听消息
+			} else {
+				break
+			}
+			//log.Println("读取消息失败-", err, message, messageType)
 			//break
 
 		} else {

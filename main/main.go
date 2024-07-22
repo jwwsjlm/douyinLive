@@ -45,8 +45,6 @@ func main() {
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(upgrader, w, r)
 	})
-
-	// 启动HTTP服务器
 	go func() {
 
 		err := http.ListenAndServe(":"+port, nil)

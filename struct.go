@@ -39,4 +39,5 @@ type DouyinLive struct {
 	Conn          *websocket.Conn
 	eventHandlers []EventHandler
 	gzip          *gzip.Reader
+	isLiveClosed  bool
 }

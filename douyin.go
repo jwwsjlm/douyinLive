@@ -145,6 +145,7 @@ func (d *DouyinLive) GzipUnzipReset(compressedData []byte) ([]byte, error) {
 // Start 开始运行
 func (d *DouyinLive) Start() {
 	var err error
+
 	//链接地址
 	//gzipReader, err := gzip.NewReader(nil)
 
@@ -157,9 +158,15 @@ func (d *DouyinLive) Start() {
 		log.Printf("链接失败: err:%v\nroomid:%v\n ttwid:%v\nwssurl:----%v\nresponse:%v\n", err, d.roomid, d.ttwid, d.wssurl, response.StatusCode)
 	}
 	log.Println("链接成功")
-	defer d.gzip.Close()
-	for {
-		//读取消息
+	d.isLiveClosed = true
+	defer func(gzip *gzip.Reader) {
+		err := gzip.Close()
+		if err != nil {
+			log.Println("gzip关闭失败:", err)
+		}
+	}(d.gzip)
+
+	for d.isLiveClosed {
 		messageType, message, err := d.Conn.ReadMessage()
 		if err != nil {
 			log.Println("读取消息失败-", err, message, messageType)
@@ -169,41 +176,31 @@ func (d *DouyinLive) Start() {
 			} else {
 				break
 			}
-			//log.Println("读取消息失败-", err, message, messageType)
-			//break
-
 		} else {
 			//解析消息正常的话进行处理
 			if message != nil {
 				pac := &douyin.PushFrame{}
 				err := proto.Unmarshal(message, pac)
 				if err != nil {
-
 					log.Println("解析消息失败：", err)
 					continue
 				}
-
 				n := utils.HasGzipEncoding(pac.HeadersList)
 				//消息为gzip压缩进行处理.否则抛弃
 				if n == true && pac.PayloadType == "msg" {
-
 					//gzipReader, err := gzip.NewReader(bytes.NewReader(pac.Payload))
-
 					//uncompressedData, err := io.ReadAll(gzipReader)
 					uncompressedData, err := d.GzipUnzipReset(pac.Payload)
 					if err != nil {
 						log.Println("Gzip解压失败:", err)
 						continue
 					}
-
 					response := &douyin.Response{}
-
 					err = proto.Unmarshal(uncompressedData, response)
 					if err != nil {
 						log.Println("解析消息失败：", err)
 						continue
 					}
-
 					if response.NeedAck {
 						ack := &douyin.PushFrame{
 							LogId:       pac.LogId,
@@ -215,19 +212,15 @@ func (d *DouyinLive) Start() {
 							log.Println("proto心跳包序列化失败:", err)
 						}
 						err = d.Conn.WriteMessage(websocket.BinaryMessage, serializedAck)
-
 						if err != nil {
 							log.Println("心跳包发送失败：", err)
 							continue
 						}
 					}
-
 					d.ProcessingMessage(response)
 				}
-
 			}
 		}
-
 	}
 }
 
@@ -240,7 +233,6 @@ func (d *DouyinLive) Emit(eventData *douyin.Message) {
 
 // ProcessingMessage 处理消息
 func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
-
 	for _, data := range response.MessagesList {
 		d.Emit(data)
 		//method := data.Method
@@ -252,12 +244,16 @@ func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
 				return
 			}
 			if msg.Status == 3 {
+				d.isLiveClosed = false
 				err := d.Conn.Close()
 				if err != nil {
-					log.Println("直播间应该关播,结束ws失败:", err)
-					return
+					log.Println("关闭ws链接失败", err)
 				}
-				log.Println("直播间应该关播,结束ws链接完毕")
+				err = d.gzip.Close()
+				if err != nil {
+					log.Println("gzip关闭失败:", err)
+				}
+				log.Println("关闭ws链接成功")
 			}
 		}
 

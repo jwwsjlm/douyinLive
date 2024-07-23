@@ -3,7 +3,6 @@ package main
 import (
 	douyinlive "DouyinLive"
 	"DouyinLive/generated/douyin"
-	"DouyinLive/jssrc"
 	"DouyinLive/utils"
 	"encoding/hex"
 	"github.com/gorilla/websocket"
@@ -12,7 +11,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"log"
 	"net/http"
-
 	"sync"
 )
 
@@ -21,49 +19,32 @@ var mu sync.Mutex // 使用互斥锁来保护用户列表
 var unknown bool
 
 func main() {
-
 	var port string
-
 	pflag.StringVar(&port, "port", "18080", "ws端口")
 	var room string
 	pflag.StringVar(&room, "room", "****", "房间号")
-
 	var unknown bool
 	pflag.BoolVar(&unknown, "unknown", false, "未知源pb消息是否输出")
-
 	pflag.Parse()
-
 	// 创建WebSocket升级器
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true // 允许所有CORS请求，实际应用中应根据需要设置
 		},
 	}
-
 	// 设置WebSocket路由
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(upgrader, w, r)
 	})
 	go func() {
-
 		err := http.ListenAndServe(":"+port, nil)
-		//
 		if err != nil {
 			//启动失败
 			panic("ListenAndServe: " + err.Error())
 		}
-		//log.Println("ws服务启动成功")
 	}()
-
 	log.Println("wss服务启动成功,链接地址为:ws://127.0.0.1:" + port + "/ws\n" + "直播地址:" + room)
-
 	d, err := douyinlive.NewDouyinLive(room)
-
-	err = jssrc.LoadGoja("./jssrc/webmssdk.js", d.Useragent)
-	if err != nil {
-		panic(err)
-	}
-
 	if err != nil {
 		panic("抖音链接失败:" + err.Error())
 	}
@@ -75,10 +56,7 @@ func main() {
 // Subscribe 订阅更新
 func Subscribe(eventData *douyin.Message) {
 	var marshal []byte
-	//
-
 	msg, err := utils.MatchMethod(eventData.Method)
-
 	if err != nil {
 		if unknown == true {
 			log.Println("本条消息.暂时没有源pb.无法处理.", err, hex.EncodeToString(eventData.Payload))

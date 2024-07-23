@@ -6,6 +6,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
 	"net/http"
+	"sync"
 )
 
 const (
@@ -34,10 +35,11 @@ type DouyinLive struct {
 	roomid        string
 	liveid        string
 	liveurl       string
-	Useragent     string
+	userAgent     string
 	pushid        string
 	Conn          *websocket.Conn
 	eventHandlers []EventHandler
 	gzip          *gzip.Reader
 	isLiveClosed  bool
+	buffers       *sync.Pool
 }

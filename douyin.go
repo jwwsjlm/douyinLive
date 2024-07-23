@@ -3,6 +3,7 @@ package douyinlive
 import (
 	"DouyinLive/generated/douyin"
 	"DouyinLive/global"
+	"DouyinLive/jssrc"
 	"DouyinLive/utils"
 	"bytes"
 	"compress/gzip"
@@ -16,6 +17,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,22 +27,30 @@ func NewDouyinLive(liveid string) (*DouyinLive, error) {
 	ua := utils.RandomUserAgent()
 
 	c := req.C().SetUserAgent(ua)
+
 	d := &DouyinLive{
 		ttwid:         "",
 		roomid:        "",
 		liveid:        liveid,
 		liveurl:       "https://live.douyin.com/",
-		Useragent:     ua,
+		userAgent:     ua,
 		c:             c,
 		eventHandlers: make([]EventHandler, 0),
 		headers:       http.Header{},
+		buffers: &sync.Pool{
+			New: func() interface{} {
+				return &bytes.Buffer{}
+			}},
 	}
 	d.ttwid, err = d.fttwid()
-
 	if err != nil {
 		return nil, err
 	}
 	d.roomid = d.froomid()
+	err = jssrc.LoadGoja("./jssrc/webmssdk.js", d.userAgent)
+	if err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 
@@ -76,7 +86,7 @@ func (d *DouyinLive) StitchUrl() string {
 	smap := utils.NewOrderedMap(d.roomid, d.pushid)
 	signaturemd5 := utils.GetxMSStub(smap)
 	signature := global.GetSing(signaturemd5)
-	browserInfo := strings.Split(d.Useragent, "Mozilla")[1]
+	browserInfo := strings.Split(d.userAgent, "Mozilla")[1]
 	parsedURL := strings.Replace(browserInfo[1:], " ", "%20", -1)
 	fetchTime := time.Now().UnixNano() / int64(time.Millisecond)
 	return "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/?app_name=douyin_web&version_code=180800&" +
@@ -113,44 +123,42 @@ func (d *DouyinLive) GzipUnzip(compressedData []byte) ([]byte, error) {
 
 // GzipUnzipReset 使用Reset解压gzip
 func (d *DouyinLive) GzipUnzipReset(compressedData []byte) ([]byte, error) {
-	//log.Println(compressedData)
 	var err error
+	buffer := d.buffers.Get().(*bytes.Buffer)
+	defer func() {
+		buffer.Reset()
+		d.buffers.Put(buffer)
+	}()
+	_, err = buffer.Write(compressedData)
+	if err != nil {
+		return nil, err
+	}
 	if d.gzip != nil {
-		err := d.gzip.Reset(bytes.NewReader(compressedData))
+		err := d.gzip.Reset(buffer)
 		if err != nil {
 			d.gzip.Close()
 			d.gzip = nil
 			return nil, err
 		}
 	} else {
-		d.gzip, err = gzip.NewReader(bytes.NewReader(compressedData))
+		d.gzip, err = gzip.NewReader(buffer)
 		if err != nil {
 			return nil, err
 		}
 	}
-
-	decompressedData, err := io.ReadAll(d.gzip)
-
+	uncompressedBuffer := &bytes.Buffer{}
+	_, err = io.Copy(uncompressedBuffer, d.gzip)
 	if err != nil {
-		// 读取失败，关闭 gzip 读取器
-		d.gzip.Close()
-		d.gzip = nil
 		return nil, err
 	}
-	//log.Println(string(decompressedData))
-	return decompressedData, nil
-
+	return uncompressedBuffer.Bytes(), nil
 }
 
 // Start 开始运行
 func (d *DouyinLive) Start() {
 	var err error
-
-	//链接地址
-	//gzipReader, err := gzip.NewReader(nil)
-
 	d.wssurl = d.StitchUrl()
-	d.headers.Add("user-agent", d.Useragent)
+	d.headers.Add("user-agent", d.userAgent)
 	d.headers.Add("cookie", fmt.Sprintf("ttwid=%s", d.ttwid))
 	var response *http.Response
 	d.Conn, response, err = websocket.DefaultDialer.Dial(d.wssurl, d.headers)
@@ -159,13 +167,20 @@ func (d *DouyinLive) Start() {
 	}
 	log.Println("链接成功")
 	d.isLiveClosed = true
-	defer func(gzip *gzip.Reader) {
-		err := gzip.Close()
+	defer func() {
+		err := d.gzip.Close()
 		if err != nil {
 			log.Println("gzip关闭失败:", err)
+		} else {
+			log.Println("gzip关闭")
 		}
-	}(d.gzip)
-
+		err = d.Conn.Close()
+		if err != nil {
+			log.Println("关闭ws链接失败", err)
+		} else {
+			log.Println("抖音ws链接关闭")
+		}
+	}()
 	for d.isLiveClosed {
 		messageType, message, err := d.Conn.ReadMessage()
 		if err != nil {
@@ -225,7 +240,7 @@ func (d *DouyinLive) Start() {
 }
 
 // Emit 匹配事件
-func (d *DouyinLive) Emit(eventData *douyin.Message) {
+func (d *DouyinLive) emit(eventData *douyin.Message) {
 	for _, handler := range d.eventHandlers {
 		handler(eventData)
 	}
@@ -234,7 +249,7 @@ func (d *DouyinLive) Emit(eventData *douyin.Message) {
 // ProcessingMessage 处理消息
 func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
 	for _, data := range response.MessagesList {
-		d.Emit(data)
+		d.emit(data)
 		//method := data.Method
 		if data.Method == "WebcastControlMessage" {
 			msg := &douyin.ControlMessage{}
@@ -245,14 +260,6 @@ func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
 			}
 			if msg.Status == 3 {
 				d.isLiveClosed = false
-				err := d.Conn.Close()
-				if err != nil {
-					log.Println("关闭ws链接失败", err)
-				}
-				err = d.gzip.Close()
-				if err != nil {
-					log.Println("gzip关闭失败:", err)
-				}
 				log.Println("关闭ws链接成功")
 			}
 		}
@@ -310,7 +317,7 @@ func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
 		//	//log.Printf("直播间排行榜msg%v", msg.RanksList)
 		//
 		//default:
-		//	//d.Emit(Default, data.Payload)
+		//	//d.emit(Default, data.Payload)
 		//	//log.Println("payload:", method, hex.EncodeToString(data.Payload))
 		//}
 

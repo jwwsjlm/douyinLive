@@ -33,7 +33,6 @@ func main() {
 
 	pflag.Parse()
 
-	log.Println(unknown)
 	// 创建WebSocket升级器
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {

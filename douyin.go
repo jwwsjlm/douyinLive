@@ -221,6 +221,7 @@ func (d *DouyinLive) Start() {
 							continue
 						}
 					}
+
 					d.ProcessingMessage(response)
 				}
 
@@ -241,8 +242,25 @@ func (d *DouyinLive) Emit(eventData *douyin.Message) {
 func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
 
 	for _, data := range response.MessagesList {
-		//method := data.Method
 		d.Emit(data)
+		//method := data.Method
+		if data.Method == "WebcastControlMessage" {
+			msg := &douyin.ControlMessage{}
+			err := proto.Unmarshal(data.Payload, msg)
+			if err != nil {
+				log.Println("解析protobuf失败", err)
+				return
+			}
+			if msg.Status == 3 {
+				err := d.Conn.Close()
+				if err != nil {
+					log.Println("直播间应该关播,结束ws失败:", err)
+					return
+				}
+				log.Println("直播间应该关播,结束ws链接完毕")
+			}
+		}
+
 		//
 		//switch method {
 		//

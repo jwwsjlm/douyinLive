@@ -1,9 +1,11 @@
 package douyinlive
 
 import (
+	"DouyinLive/config"
 	"DouyinLive/generated/douyin"
 	"DouyinLive/global"
 	"DouyinLive/jssrc"
+	"DouyinLive/model"
 	"DouyinLive/utils"
 	"bytes"
 	"compress/gzip"
@@ -12,6 +14,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -280,8 +283,12 @@ func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
 			msg := &douyin.ChatMessage{}
 			proto.Unmarshal(data.Payload, msg)
 			filterMessage := d.FilterMessage(msg.Content)
-			//log.Println("聊天msg", msg.User.Id, msg.User.NickName, filterMessage)
-			log.Println("聊天msg", msg.User.Id, filterMessage)
+			log.Println("聊天msg", msg.User.Id, msg.User.NickName, filterMessage)
+			if filterMessage == "" {
+				continue
+			}
+			roomId, _ := strconv.Atoi(config.Conf.RoomNumber)
+			model.InsertComments(roomId, int(msg.User.Id), filterMessage)
 		case "WebcastGiftMessage":
 			//msg := &douyin.GiftMessage{}
 			//proto.Unmarshal(data.Payload, msg)
@@ -341,6 +348,10 @@ func (d *DouyinLive) FilterMessage(message string) string {
 	//去除内容的表情符号
 	reg := regexp.MustCompile(`\[.*?\]`)
 	message = reg.ReplaceAllString(message, "")
+
+	//过滤emoji表情
+	emojiReg := regexp.MustCompile("[\U00010000-\U0010ffff]")
+	message = emojiReg.ReplaceAllString(message, "")
 
 	//过滤中文文字小于4的内容
 	if len(message) < 12 {

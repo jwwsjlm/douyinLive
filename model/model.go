@@ -2,19 +2,17 @@ package model
 
 import "DouyinLive/database"
 
-type Manager struct {
-	Username string `json:"username"`
-	Password string `json:"-"`
-	Email    string `json:"email"`
-	RoleId   int64  `json:"role_id"`
+type Comment struct {
+	RoomId  int    `json:"room_id"`
+	UserId  int    `json:"user_id"`
+	Content string `json:"content"`
 }
 
-func InsertMessage() {
-	manager := Manager{
-		Username: "yes",
-		Password: "manager password",
-		Email:    "this is email",
-		RoleId:   1,
+func InsertComments(roomId, userId int, content string) {
+	comment := Comment{
+		RoomId:  roomId,
+		UserId:  userId,
+		Content: content,
 	}
-	database.DB.Table("managers").Create(&manager)
+	database.DB.Table("comments").Create(&comment)
 }

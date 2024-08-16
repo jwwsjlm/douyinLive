@@ -8,10 +8,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
-	"github.com/gorilla/websocket"
-	"github.com/imroc/req/v3"
-	"github.com/spf13/cast"
-	"google.golang.org/protobuf/proto"
 	"io"
 	"log"
 	"net/http"
@@ -19,7 +15,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/imroc/req/v3"
+	"github.com/spf13/cast"
+	"google.golang.org/protobuf/proto"
 )
+
+var IsLive bool
 
 // NewDouyinLive 创建一个新的链接
 func NewDouyinLive(liveid string) (*DouyinLive, error) {
@@ -154,7 +157,23 @@ func (d *DouyinLive) GzipUnzipReset(compressedData []byte) ([]byte, error) {
 	return uncompressedBuffer.Bytes(), nil
 }
 
-// Start 开始运行
+func (d *DouyinLive) Close() {
+	IsLive = false
+	err := d.gzip.Close()
+	if err != nil {
+		log.Println("gzip关闭失败:", err)
+	} else {
+		log.Println("gzip关闭")
+	}
+	err = d.Conn.Close()
+	if err != nil {
+		log.Println("关闭ws链接失败", err)
+	} else {
+		log.Println("抖音ws链接关闭")
+	}
+}
+
+// 开始运行
 func (d *DouyinLive) Start() {
 	var err error
 	d.wssurl = d.StitchUrl()
@@ -166,25 +185,14 @@ func (d *DouyinLive) Start() {
 		log.Printf("链接失败: err:%v\nroomid:%v\n ttwid:%v\nwssurl:----%v\nresponse:%v\n", err, d.roomid, d.ttwid, d.wssurl, response.StatusCode)
 	}
 	log.Println("链接成功")
-	d.isLiveClosed = true
 	defer func() {
-		err := d.gzip.Close()
-		if err != nil {
-			log.Println("gzip关闭失败:", err)
-		} else {
-			log.Println("gzip关闭")
-		}
-		err = d.Conn.Close()
-		if err != nil {
-			log.Println("关闭ws链接失败", err)
-		} else {
-			log.Println("抖音ws链接关闭")
-		}
+		d.Close()
 	}()
-	for d.isLiveClosed {
+	for IsLive {
 		messageType, message, err := d.Conn.ReadMessage()
 		if err != nil {
 			log.Println("读取消息失败-", err, message, messageType)
+			d.Close()
 			//进行重连
 			if d.reconnect(5) {
 				continue // 如果重连成功，继续监听消息
@@ -205,12 +213,14 @@ func (d *DouyinLive) Start() {
 				if n == true && pac.PayloadType == "msg" {
 					//gzipReader, err := gzip.NewReader(bytes.NewReader(pac.Payload))
 					//uncompressedData, err := io.ReadAll(gzipReader)
+					//解压缩数据
 					uncompressedData, err := d.GzipUnzipReset(pac.Payload)
 					if err != nil {
 						log.Println("Gzip解压失败:", err)
 						continue
 					}
 					response := &douyin.Response{}
+					//解码二进制数据
 					err = proto.Unmarshal(uncompressedData, response)
 					if err != nil {
 						log.Println("解析消息失败：", err)
@@ -250,7 +260,7 @@ func (d *DouyinLive) emit(eventData *douyin.Message) {
 func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
 	for _, data := range response.MessagesList {
 		d.emit(data)
-		//method := data.Method
+		method := data.Method
 		if data.Method == "WebcastControlMessage" {
 			msg := &douyin.ControlMessage{}
 			err := proto.Unmarshal(data.Payload, msg)
@@ -259,70 +269,99 @@ func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
 				return
 			}
 			if msg.Status == 3 {
-				d.isLiveClosed = false
+				IsLive = false
 				log.Println("关闭ws链接成功")
 			}
 		}
 
-		//
-		//switch method {
-		//
-		//case "WebcastChatMessage":
-		//	//msg := &douyin.ChatMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Println("聊天msg", msg.User.Id, msg.User.NickName, msg.Content)
-		//case "WebcastGiftMessage":
-		//	//msg := &douyin.GiftMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Println("礼物msg", msg.User.Id, msg.User.NickName, msg.Gift.Name, msg.ComboCount)
-		//case "WebcastLikeMessage":
-		//	//msg := &douyin.LikeMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Println("点赞msg", msg.User.Id, msg.User.NickName, msg.Count)
-		//case "WebcastMemberMessage":
-		//	//msg := &douyin.MemberMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Println("进场msg", msg.User.Id, msg.User.NickName, msg.User.Gender)
-		//case "WebcastSocialMessage":
-		//	//msg := &douyin.SocialMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Println("关注msg", msg.User.Id, msg.User.NickName)
-		//case "WebcastRoomUserSeqMessage":
-		//	//msg := &douyin.RoomUserSeqMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Printf("房间人数msg 当前观看人数:%v,累计观看人数:%v\n", msg.Total, msg.TotalPvForAnchor)
-		//case "WebcastFansclubMessage":
-		//	//msg := &douyin.FansclubMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Printf("粉丝团msg %v\n", msg.Content)
-		//case "WebcastControlMessage":
-		//	//msg := &douyin.ControlMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Printf("直播间状态消息%v", msg.Status)
-		//case "WebcastEmojiChatMessage":
-		//	//msg := &douyin.EmojiChatMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Printf("表情消息%vuser:%vcommon:%vdefault_content:%v", msg.EmojiId, msg.User, msg.Common, msg.DefaultContent)
-		//case "WebcastRoomStatsMessage":
-		//	//msg := &douyin.RoomStatsMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Printf("直播间统计msg%v", msg.DisplayLong)
-		//case "WebcastRoomMessage":
-		//	//msg := &douyin.RoomMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Printf("【直播间msg】直播间id%v", msg.Common.RoomId)
-		//case "WebcastRoomRankMessage":
-		//	//msg := &douyin.RoomRankMessage{}
-		//	//proto.Unmarshal(data.Payload, msg)
-		//	//log.Printf("直播间排行榜msg%v", msg.RanksList)
-		//
-		//default:
-		//	//d.emit(Default, data.Payload)
-		//	//log.Println("payload:", method, hex.EncodeToString(data.Payload))
-		//}
+		switch method {
+
+		case "WebcastChatMessage":
+			msg := &douyin.ChatMessage{}
+			proto.Unmarshal(data.Payload, msg)
+			filterMessage := d.FilterMessage(msg.Content)
+			//log.Println("聊天msg", msg.User.Id, msg.User.NickName, filterMessage)
+			log.Println("聊天msg", msg.User.Id, filterMessage)
+		case "WebcastGiftMessage":
+			//msg := &douyin.GiftMessage{}
+			//proto.Unmarshal(data.Payload, msg)
+			//log.Println("礼物msg", msg.User.Id, msg.User.NickName, msg.Gift.Name, msg.ComboCount)
+		case "WebcastLikeMessage":
+			//msg := &douyin.LikeMessage{}
+			//proto.Unmarshal(data.Payload, msg)
+			//log.Println("点赞msg", msg.User.Id, msg.User.NickName, msg.Count)
+		case "WebcastMemberMessage":
+			//msg := &douyin.MemberMessage{}
+			//proto.Unmarshal(data.Payload, msg)
+			//log.Println("进场msg", msg.User.Id, msg.User.NickName, msg.User.Gender)
+		case "WebcastSocialMessage":
+			//msg := &douyin.SocialMessage{}
+			//proto.Unmarshal(data.Payload, msg)
+			//log.Println("关注msg", msg.User.Id, msg.User.NickName)
+		case "WebcastRoomUserSeqMessage":
+			//msg := &douyin.RoomUserSeqMessage{}
+			//proto.Unmarshal(data.Payload, msg)
+			//log.Printf("房间人数msg 当前观看人数:%v,累计观看人数:%v\n", msg.Total, msg.TotalPvForAnchor)
+		case "WebcastFansclubMessage":
+			//msg := &douyin.FansclubMessage{}
+			//proto.Unmarshal(data.Payload, msg)
+			//log.Printf("粉丝团msg %v\n", msg.Content)
+		case "WebcastControlMessage":
+			//msg := &douyin.ControlMessage{}
+			//proto.Unmarshal(data.Payload, msg)
+			//log.Printf("直播间状态消息%v", msg.Status)
+		case "WebcastEmojiChatMessage":
+			//msg := &douyin.EmojiChatMessage{}
+			//proto.Unmarshal(data.Payload, msg)
+			//log.Printf("表情消息%vuser:%vcommon:%vdefault_content:%v", msg.EmojiId, msg.User, msg.Common, msg.DefaultContent)
+		case "WebcastRoomStatsMessage":
+			//msg := &douyin.RoomStatsMessage{}
+			//proto.Unmarshal(data.Payload, msg)
+			//log.Printf("直播间统计msg%v", msg.DisplayLong)
+		case "WebcastRoomMessage":
+			//msg := &douyin.RoomMessage{}
+			//proto.Unmarshal(data.Payload, msg)
+			//log.Printf("【直播间msg】直播间id%v", msg.Common.RoomId)
+		case "WebcastRoomRankMessage":
+			//msg := &douyin.RoomRankMessage{}
+			//proto.Unmarshal(data.Payload, msg)
+			//log.Printf("直播间排行榜msg%v", msg.RanksList)
+
+		default:
+			//d.emit(Default, data.Payload)
+			//log.Println("payload:", method, hex.EncodeToString(data.Payload))
+		}
 
 	}
 	//fmt.Println("消息", message)
+}
+
+// 过滤消息
+func (d *DouyinLive) FilterMessage(message string) string {
+	//去除内容的表情符号
+	reg := regexp.MustCompile(`\[.*?\]`)
+	message = reg.ReplaceAllString(message, "")
+
+	//过滤中文文字小于4的内容
+	if len(message) < 12 {
+		return ""
+	}
+
+	//过滤全英文字母的内容
+	alphaRegex := regexp.MustCompile(`^[a-zA-Z]+$`)
+	if alphaRegex.MatchString(message) {
+		return ""
+	}
+
+	// 过滤包含链接或疑似链接的内容
+	urlRegex := regexp.MustCompile(
+		`https?://(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[^ \n]*)?|` +
+			`\b(?:\.com|www|.cn|.net)\b`,
+	)
+	if urlRegex.MatchString(message) {
+		return ""
+	}
+	return message
 }
 
 // Subscribe 订阅事件

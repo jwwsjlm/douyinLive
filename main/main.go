@@ -2,6 +2,8 @@ package main
 
 import (
 	douyinlive "DouyinLive"
+	"DouyinLive/config"
+	"DouyinLive/database"
 	"DouyinLive/generated/douyin"
 	"DouyinLive/utils"
 	"encoding/hex"
@@ -37,8 +39,12 @@ func stopService() {
 }
 
 func main() {
+	//加载配置配置文件
+	config.Init()
+	database.InitRMSDB(config.Conf.DbConf)
+
 	var err error
-	d, err = douyinlive.NewDouyinLive("786495126434") //已开播：786495126434,未开播：986557904798
+	d, err = douyinlive.NewDouyinLive(config.Conf.RoomNumber)
 	if err != nil {
 		panic("抖音链接失败:" + err.Error())
 	}
@@ -52,7 +58,7 @@ func main() {
 	}
 }
 
-// handleStartService 处理启动服务的请求
+// 处理启动服务的请求
 func handleStartService(w http.ResponseWriter, r *http.Request) {
 	if !serviceRunning {
 		startService()

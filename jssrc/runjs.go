@@ -1,7 +1,6 @@
 package jssrc
 
 import (
-	"DouyinLive/global"
 	_ "embed"
 	"github.com/dop251/goja"
 )
@@ -12,27 +11,30 @@ import (
 //
 //go:embed webmssdk.js
 var jsstr string
+var vm *goja.Runtime
+var fGetSing func(string) string
 
 // LoadGoja 加载js到func当中
 func LoadGoja(ua string) error {
 	var err error
 	// 创建一个新的Goja VM
-	global.Gjsvm = goja.New()
-	//
+	vm = goja.New()
 	jsdom := "navigator = {" +
-		"userAgent: '" + ua + "'" +
-		"};" +
+		"userAgent: '" + ua + "'" + "};" +
 		"window=this;" +
 		"document ={};" +
 		"window.navigator = navigator;" +
 		"setTimeout=function(){};"
 
-	_, err = global.Gjsvm.RunString(jsdom + jsstr)
+	_, err = vm.RunString(jsdom + jsstr)
 	//
 	if err != nil {
 		return err
 	}
 	//
-	err = global.Gjsvm.ExportTo(global.Gjsvm.Get("get_sign"), &global.GetSing)
+	err = vm.ExportTo(vm.Get("get_sign"), &fGetSing)
 	return err
+}
+func ExecuteJS(signature string) string {
+	return fGetSing(signature)
 }

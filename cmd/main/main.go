@@ -118,9 +118,13 @@ func Subscribe(eventData *douyin.Message) {
 	}
 
 }
+
+// StoreConnection 储存ws客户
 func StoreConnection(agentID string, conn *websocket.Conn) {
 	agentlist.Store(agentID, conn)
 }
+
+// GetConnection 获取一个链接
 func GetConnection(agentID string) (*websocket.Conn, bool) {
 	value, ok := agentlist.Load(agentID)
 	if !ok {
@@ -129,9 +133,13 @@ func GetConnection(agentID string) (*websocket.Conn, bool) {
 	conn, ok := value.(*websocket.Conn) // 类型断言
 	return conn, ok
 }
+
+// DeleteConnection 删除一个ws客户
 func DeleteConnection(agentID string) {
 	agentlist.Delete(agentID)
 }
+
+// RangeConnections 遍历ws客户端
 func RangeConnections(f func(agentID string, conn *websocket.Conn)) {
 	agentlist.Range(func(key, value interface{}) bool {
 		agentID, ok := key.(string)
@@ -154,6 +162,8 @@ func GetConnectionCount() int {
 	})
 	return count
 }
+
+// serveWs 处理ws请求
 func serveWs(upgrader websocket.Upgrader, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

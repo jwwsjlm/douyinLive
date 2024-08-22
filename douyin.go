@@ -2,7 +2,6 @@ package douyinlive
 
 import (
 	"DouyinLive/generated/douyin"
-	"DouyinLive/global"
 	"DouyinLive/jssrc"
 	"DouyinLive/utils"
 	"bytes"
@@ -86,7 +85,7 @@ func (d *DouyinLive) StitchUrl() string {
 
 	smap := utils.NewOrderedMap(d.roomid, d.pushid)
 	signaturemd5 := utils.GetxMSStub(smap)
-	signature := global.GetSing(signaturemd5)
+	signature := jssrc.ExecuteJS(signaturemd5)
 	browserInfo := strings.Split(d.userAgent, "Mozilla")[1]
 	parsedURL := strings.Replace(browserInfo[1:], " ", "%20", -1)
 	fetchTime := time.Now().UnixNano() / int64(time.Millisecond)

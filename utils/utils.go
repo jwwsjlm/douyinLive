@@ -16,6 +16,41 @@ import (
 	"strings"
 )
 
+var messageMap = map[string]func() protoreflect.ProtoMessage{
+	"WebcastChatMessage":                 func() protoreflect.ProtoMessage { return &douyin.ChatMessage{} },
+	"WebcastGiftMessage":                 func() protoreflect.ProtoMessage { return &douyin.GiftMessage{} },
+	"WebcastLikeMessage":                 func() protoreflect.ProtoMessage { return &douyin.LikeMessage{} },
+	"WebcastMemberMessage":               func() protoreflect.ProtoMessage { return &douyin.MemberMessage{} },
+	"WebcastSocialMessage":               func() protoreflect.ProtoMessage { return &douyin.SocialMessage{} },
+	"WebcastRoomUserSeqMessage":          func() protoreflect.ProtoMessage { return &douyin.RoomUserSeqMessage{} },
+	"WebcastFansclubMessage":             func() protoreflect.ProtoMessage { return &douyin.FansclubMessage{} },
+	"WebcastControlMessage":              func() protoreflect.ProtoMessage { return &douyin.ControlMessage{} },
+	"WebcastEmojiChatMessage":            func() protoreflect.ProtoMessage { return &douyin.EmojiChatMessage{} },
+	"WebcastRoomStatsMessage":            func() protoreflect.ProtoMessage { return &douyin.RoomStatsMessage{} },
+	"WebcastRoomMessage":                 func() protoreflect.ProtoMessage { return &douyin.RoomMessage{} },
+	"WebcastRanklistHourEntranceMessage": func() protoreflect.ProtoMessage { return &douyin.RanklistHourEntranceMessage{} },
+	"WebcastRoomRankMessage":             func() protoreflect.ProtoMessage { return &douyin.RoomRankMessage{} },
+	"WebcastInRoomBannerMessage":         func() protoreflect.ProtoMessage { return &douyin.InRoomBannerMessage{} },
+	"WebcastRoomDataSyncMessage":         func() protoreflect.ProtoMessage { return &douyin.RoomDataSyncMessage{} },
+	"WebcastLuckyBoxTempStatusMessage":   func() protoreflect.ProtoMessage { return &douyin.LuckyBoxTempStatusMessage{} },
+	"WebcastDecorationModifyMethod":      func() protoreflect.ProtoMessage { return &douyin.DecorationModifyMessage{} },
+	"WebcastLinkMicAudienceKtvMessage":   func() protoreflect.ProtoMessage { return &douyin.LinkMicAudienceKtvMessage{} },
+	"WebcastRoomStreamAdaptationMessage": func() protoreflect.ProtoMessage { return &douyin.RoomStreamAdaptationMessage{} },
+	"WebcastQuizAudienceStatusMessage":   func() protoreflect.ProtoMessage { return &douyin.QuizAudienceStatusMessage{} },
+	"WebcastHotChatMessage":              func() protoreflect.ProtoMessage { return &douyin.HotChatMessage{} },
+	"WebcastHotRoomMessage":              func() protoreflect.ProtoMessage { return &douyin.HotRoomMessage{} },
+	"WebcastAudioChatMessage":            func() protoreflect.ProtoMessage { return &douyin.AudioChatMessage{} },
+	"WebcastRoomNotifyMessage":           func() protoreflect.ProtoMessage { return &douyin.NotifyMessage{} },
+	"WebcastLuckyBoxMessage":             func() protoreflect.ProtoMessage { return &douyin.LuckyBoxMessage{} },
+	"WebcastUpdateFanTicketMessage":      func() protoreflect.ProtoMessage { return &douyin.UpdateFanTicketMessage{} },
+	"WebcastScreenChatMessage":           func() protoreflect.ProtoMessage { return &douyin.ScreenChatMessage{} },
+	"WebcastNotifyEffectMessage":         func() protoreflect.ProtoMessage { return &douyin.NotifyEffectMessage{} },
+	"WebcastBindingGiftMessage":          func() protoreflect.ProtoMessage { return &douyin.NotifyEffectMessage_BindingGiftMessage{} },
+	"WebcastTempStateAreaReachMessage":   func() protoreflect.ProtoMessage { return &douyin.TempStateAreaReachMessage{} },
+	"WebcastGrowthTaskMessage":           func() protoreflect.ProtoMessage { return &douyin.GrowthTaskMessage{} },
+	"WebcastGameCPBaseMessage":           func() protoreflect.ProtoMessage { return &douyin.GameCPBaseMessage{} },
+}
+
 // HasGzipEncoding 判断消息体是否包含gzip
 func HasGzipEncoding(h []*douyin.HeadersList) bool {
 	n := false
@@ -83,77 +118,10 @@ func GenerateMsToken(length int) string {
 
 // MatchMethod 匹配处理函数
 func MatchMethod(Method string) (protoreflect.ProtoMessage, error) {
-	switch Method {
-	case "WebcastChatMessage":
-
-		return &douyin.ChatMessage{}, nil
-
-	case "WebcastGiftMessage":
-		return &douyin.GiftMessage{}, nil
-
-	case "WebcastLikeMessage":
-		return &douyin.LikeMessage{}, nil
-	case "WebcastMemberMessage":
-		return &douyin.MemberMessage{}, nil
-	case "WebcastSocialMessage":
-		return &douyin.SocialMessage{}, nil
-	case "WebcastRoomUserSeqMessage":
-		return &douyin.RoomUserSeqMessage{}, nil
-	case "WebcastFansclubMessage":
-		return &douyin.FansclubMessage{}, nil
-	case "WebcastControlMessage":
-		return &douyin.ControlMessage{}, nil
-	case "WebcastEmojiChatMessage":
-		return &douyin.EmojiChatMessage{}, nil
-	case "WebcastRoomStatsMessage":
-		return &douyin.RoomStatsMessage{}, nil
-	case "WebcastRoomMessage":
-		return &douyin.RoomMessage{}, nil
-	case "WebcastRanklistHourEntranceMessage":
-		return &douyin.RanklistHourEntranceMessage{}, nil
-	case "WebcastRoomRankMessage":
-		return &douyin.RoomRankMessage{}, nil
-	case "WebcastInRoomBannerMessage":
-		return &douyin.InRoomBannerMessage{}, nil
-	case "WebcastRoomDataSyncMessage":
-		return &douyin.RoomDataSyncMessage{}, nil
-	case "WebcastLuckyBoxTempStatusMessage":
-		return &douyin.LuckyBoxTempStatusMessage{}, nil
-	case "WebcastDecorationModifyMethod":
-		return &douyin.DecorationModifyMessage{}, nil
-	case "WebcastLinkMicAudienceKtvMessage":
-		return &douyin.LinkMicAudienceKtvMessage{}, nil
-	case "WebcastRoomStreamAdaptationMessage":
-		return &douyin.RoomStreamAdaptationMessage{}, nil
-	case "WebcastQuizAudienceStatusMessage":
-		return &douyin.QuizAudienceStatusMessage{}, nil
-	case "WebcastHotChatMessage":
-		return &douyin.HotChatMessage{}, nil
-	case "WebcastHotRoomMessage":
-		return &douyin.HotRoomMessage{}, nil
-	case "WebcastAudioChatMessage":
-		return &douyin.AudioChatMessage{}, nil
-	case "WebcastRoomNotifyMessage":
-		return &douyin.NotifyMessage{}, nil
-	case "WebcastLuckyBoxMessage":
-		return &douyin.LuckyBoxMessage{}, nil
-	case "WebcastUpdateFanTicketMessage":
-		return &douyin.UpdateFanTicketMessage{}, nil
-	case "WebcastScreenChatMessage":
-		return &douyin.ScreenChatMessage{}, nil
-	case "WebcastNotifyEffectMessage":
-		return &douyin.NotifyEffectMessage{}, nil
-	case "WebcastBindingGiftMessage":
-		return &douyin.NotifyEffectMessage_BindingGiftMessage{}, nil
-	case "WebcastTempStateAreaReachMessage":
-		return &douyin.TempStateAreaReachMessage{}, nil
-	case "WebcastGrowthTaskMessage":
-		return &douyin.GrowthTaskMessage{}, nil
-	case "WebcastGameCPBaseMessage":
-		return &douyin.GameCPBaseMessage{}, nil
-	default:
-		return nil, errors.New("未知消息:" + Method)
+	if createMessage, ok := messageMap[Method]; ok {
+		return createMessage(), nil
 	}
+	return nil, errors.New("未知消息: " + Method)
 }
 
 // GzipCompressAndBase64Encode 消息进行gzip压缩转为base64

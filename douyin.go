@@ -8,10 +8,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
-	"github.com/gorilla/websocket"
-	"github.com/imroc/req/v3"
-	"github.com/spf13/cast"
-	"google.golang.org/protobuf/proto"
 	"io"
 	"log"
 	"net/http"
@@ -19,15 +15,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/imroc/req/v3"
+	"github.com/spf13/cast"
+	"google.golang.org/protobuf/proto"
 )
 
 // NewDouyinLive 创建一个新的链接
 func NewDouyinLive(liveid string) (*DouyinLive, error) {
 	var err error
 	ua := utils.RandomUserAgent()
-
 	c := req.C().SetUserAgent(ua)
-
 	d := &DouyinLive{
 		ttwid:         "",
 		roomid:        "",
@@ -42,12 +41,13 @@ func NewDouyinLive(liveid string) (*DouyinLive, error) {
 				return &bytes.Buffer{}
 			}},
 	}
+
 	d.ttwid, err = d.fttwid()
 	if err != nil {
 		return nil, err
 	}
 	d.roomid = d.froomid()
-	err = jssrc.LoadGoja("./jssrc/webmssdk.js", d.userAgent)
+	err = jssrc.LoadGoja(d.userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +83,7 @@ func (d *DouyinLive) reconnect(i int) bool {
 	return false // 重连失败，返回false
 }
 func (d *DouyinLive) StitchUrl() string {
+
 	smap := utils.NewOrderedMap(d.roomid, d.pushid)
 	signaturemd5 := utils.GetxMSStub(smap)
 	signature := global.GetSing(signaturemd5)
@@ -128,6 +129,7 @@ func (d *DouyinLive) GzipUnzipReset(compressedData []byte) ([]byte, error) {
 	defer func() {
 		buffer.Reset()
 		d.buffers.Put(buffer)
+
 	}()
 	_, err = buffer.Write(compressedData)
 	if err != nil {
@@ -141,12 +143,14 @@ func (d *DouyinLive) GzipUnzipReset(compressedData []byte) ([]byte, error) {
 			return nil, err
 		}
 	} else {
+		//
 		d.gzip, err = gzip.NewReader(buffer)
 		if err != nil {
 			return nil, err
 		}
 	}
 	uncompressedBuffer := &bytes.Buffer{}
+	defer uncompressedBuffer.Reset()
 	_, err = io.Copy(uncompressedBuffer, d.gzip)
 	if err != nil {
 		return nil, err
@@ -164,6 +168,7 @@ func (d *DouyinLive) Start() {
 	d.Conn, response, err = websocket.DefaultDialer.Dial(d.wssurl, d.headers)
 	if err != nil {
 		log.Printf("链接失败: err:%v\nroomid:%v\n ttwid:%v\nwssurl:----%v\nresponse:%v\n", err, d.roomid, d.ttwid, d.wssurl, response.StatusCode)
+		return
 	}
 	log.Println("链接成功")
 	d.isLiveClosed = true
@@ -181,8 +186,15 @@ func (d *DouyinLive) Start() {
 			log.Println("抖音ws链接关闭")
 		}
 	}()
+	var pbPac = &douyin.PushFrame{}
+	var pbResp = &douyin.Response{}
+	var pbAck = &douyin.PushFrame{}
 	for d.isLiveClosed {
+		//pbPac.Reset()
+		//pbResp.Reset()
 		messageType, message, err := d.Conn.ReadMessage()
+		//messageType, ir, err := d.Conn.NextReader()
+		//start := time.Now()
 		if err != nil {
 			log.Println("读取消息失败-", err, message, messageType)
 			//进行重连
@@ -194,37 +206,39 @@ func (d *DouyinLive) Start() {
 		} else {
 			//解析消息正常的话进行处理
 			if message != nil {
-				pac := &douyin.PushFrame{}
-				err := proto.Unmarshal(message, pac)
+
+				//pac := &douyin.PushFrame{}
+				err := proto.Unmarshal(message, pbPac)
 				if err != nil {
 					log.Println("解析消息失败：", err)
 					continue
 				}
-				n := utils.HasGzipEncoding(pac.HeadersList)
+				n := utils.HasGzipEncoding(pbPac.HeadersList)
 				//消息为gzip压缩进行处理.否则抛弃
-				if n == true && pac.PayloadType == "msg" {
+				if n == true && pbPac.PayloadType == "msg" {
 					//gzipReader, err := gzip.NewReader(bytes.NewReader(pac.Payload))
 					//uncompressedData, err := io.ReadAll(gzipReader)
-					uncompressedData, err := d.GzipUnzipReset(pac.Payload)
+					uncompressedData, err := d.GzipUnzipReset(pbPac.Payload)
 					if err != nil {
 						log.Println("Gzip解压失败:", err)
 						continue
 					}
-					response := &douyin.Response{}
-					err = proto.Unmarshal(uncompressedData, response)
+
+					err = proto.Unmarshal(uncompressedData, pbResp)
 					if err != nil {
 						log.Println("解析消息失败：", err)
 						continue
 					}
-					if response.NeedAck {
-						ack := &douyin.PushFrame{
-							LogId:       pac.LogId,
-							PayloadType: "ack",
-							Payload:     []byte(response.InternalExt),
-						}
-						serializedAck, err := proto.Marshal(ack)
+					if pbResp.NeedAck {
+						pbAck.Reset()
+						pbAck.LogId = pbPac.LogId
+						pbAck.PayloadType = "ack"
+						pbAck.Payload = []byte(pbResp.InternalExt)
+
+						serializedAck, err := proto.Marshal(pbAck)
 						if err != nil {
 							log.Println("proto心跳包序列化失败:", err)
+							continue
 						}
 						err = d.Conn.WriteMessage(websocket.BinaryMessage, serializedAck)
 						if err != nil {
@@ -232,10 +246,13 @@ func (d *DouyinLive) Start() {
 							continue
 						}
 					}
-					d.ProcessingMessage(response)
+					d.ProcessingMessage(pbResp)
 				}
 			}
 		}
+		//elapsed := time.Since(start)
+		//log.Printf("代码执行时间:%s", elapsed)
+
 	}
 }
 
@@ -380,6 +397,9 @@ func (d *DouyinLive) froomid() string {
 
 	d.roomid = d.regroomid(res.String())
 	d.pushid = d.regpushid(res.String())
+	if len(match) == 0 {
+		return ""
+	}
 	return match[1]
 
 }
@@ -388,6 +408,9 @@ func (d *DouyinLive) froomid() string {
 func (d *DouyinLive) regroomid(s string) string {
 	re := regexp.MustCompile(`roomId\\":\\"(\d+)\\"`)
 	match := re.FindStringSubmatch(s)
+	if len(match) == 0 {
+		return ""
+	}
 	return match[1]
 }
 
@@ -395,5 +418,8 @@ func (d *DouyinLive) regroomid(s string) string {
 func (d *DouyinLive) regpushid(s string) string {
 	re := regexp.MustCompile(`user_unique_id\\":\\"(\d+)\\"`)
 	match := re.FindStringSubmatch(s)
+	if len(match) == 0 {
+		return ""
+	}
 	return match[1]
 }

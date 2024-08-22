@@ -1,6 +1,6 @@
 module DouyinLive
 
-go 1.22.5
+go 1.22.6
 
 require (
 	github.com/dop251/goja v0.0.0-20240627195025-eb1f15ee67d2

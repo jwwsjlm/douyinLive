@@ -4,3 +4,7 @@
 /main/*.exe
 /protobuf/*.zip
 /main/main.7z
+/cmd/main/*.7z
+/cmd/main/.idea
+/cmd/main/douyinlive.exe
+/cmd/main/*.exe

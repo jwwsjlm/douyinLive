@@ -54,7 +54,7 @@ func main() {
 // startServer 启动ws服务端
 func startServer(port int) string {
 	for { // 一直循环，每次端口+1
-		if isPortAvailable(port) {
+		if checkPortAvailability(port) {
 			go func() {
 				if err := http.ListenAndServe(":"+strconv.Itoa(port), nil); err != nil {
 					panic(err)
@@ -70,20 +70,17 @@ func startServer(port int) string {
 	return cast.ToString(port)
 }
 
-// isPortAvailable 判断端口是否被占用
-func isPortAvailable(port int) bool {
-	addr := fmt.Sprintf("localhost:%d", port)
-	conn, err := net.Dial("tcp", addr)
+// checkPortAvailability 检查本地端口是否可用
+func checkPortAvailability(port int) bool {
+	// 尝试连接到 localhost 上的指定端口
+	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
-		return true // 端口可能被占用
+		// 如果连接失败，认为端口可用
+		return true
 	}
-	defer func(conn net.Conn) {
-		err := conn.Close()
-		if err != nil {
-			panic(err)
-		}
-	}(conn)
-	return false // 端口未被占用
+	// 如果连接成功，关闭连接并认为端口不可用
+	conn.Close()
+	return false
 }
 
 // Subscribe 订阅更新

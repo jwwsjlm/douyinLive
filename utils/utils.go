@@ -1,11 +1,11 @@
 package utils
 
 import (
-	"DouyinLive/generated"
-	"DouyinLive/generated/douyin"
 	"bytes"
 	"compress/gzip"
 	"crypto/md5"
+	"douyinLive/generated"
+	"douyinLive/generated/douyin"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"

@@ -1,11 +1,12 @@
 package douyinlive
 
 import (
-	"DouyinLive/generated/douyin"
-	"DouyinLive/jssrc"
-	"DouyinLive/utils"
 	"bytes"
 	"compress/gzip"
+	"douyinLive/generated/douyin"
+	"douyinLive/jssrc"
+	"douyinLive/utils"
+
 	"fmt"
 	"io"
 	"log"

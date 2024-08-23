@@ -1,9 +1,9 @@
 package main
 
 import (
-	douyinlive "DouyinLive"
-	"DouyinLive/generated/douyin"
-	"DouyinLive/utils"
+	"douyinLive"
+	"douyinLive/generated/douyin"
+	"douyinLive/utils"
 	"encoding/hex"
 	"fmt"
 	"github.com/gorilla/websocket"

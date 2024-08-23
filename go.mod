@@ -1,4 +1,4 @@
-module douyinLive
+module douyinlive
 
 go 1.22.6
 

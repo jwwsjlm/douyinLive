@@ -1,9 +1,9 @@
 package main
 
 import (
-	"douyinLive"
-	"douyinLive/generated/douyin"
-	"douyinLive/utils"
+	"douyinlive"
+	"douyinlive/generated/douyin"
+	"douyinlive/utils"
 	"encoding/hex"
 	"fmt"
 	"github.com/gorilla/websocket"
@@ -41,6 +41,7 @@ func main() {
 	})
 	p := startServer(cast.ToInt(port))
 	log.Println("wss服务启动成功,链接地址为:ws://127.0.0.1:" + p + "/\n" + "直播地址:" + room)
+
 	d, err := douyinlive.NewDouyinLive(room)
 	if err != nil {
 		panic("抖音链接失败:" + err.Error())

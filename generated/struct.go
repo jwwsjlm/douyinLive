@@ -1,7 +1,7 @@
 package generated
 
 import (
-	"douyinLive/generated/douyin"
+	"douyinlive/generated/douyin"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 

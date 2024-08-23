@@ -3,9 +3,9 @@ package douyinlive
 import (
 	"bytes"
 	"compress/gzip"
-	"douyinLive/generated/douyin"
-	"douyinLive/jssrc"
-	"douyinLive/utils"
+	"douyinlive/generated/douyin"
+	"douyinlive/jssrc"
+	"douyinlive/utils"
 
 	"fmt"
 	"io"

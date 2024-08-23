@@ -2,7 +2,7 @@ package douyinlive
 
 import (
 	"compress/gzip"
-	"douyinLive/generated/douyin"
+	"douyinlive/generated/douyin"
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
 	"net/http"

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"douyinlive/generated/douyin"
-	"douyinlive/js"
+	"douyinlive/jsScript"
 	"douyinlive/utils"
 	"fmt"
 	"io"

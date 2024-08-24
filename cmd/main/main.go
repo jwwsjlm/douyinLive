@@ -6,138 +6,139 @@ import (
 	"douyinlive/utils"
 	"encoding/hex"
 	"fmt"
-	"github.com/gorilla/websocket"
-	"github.com/spf13/cast"
-	"github.com/spf13/pflag"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 	"log"
 	"net"
 	"net/http"
 	"strconv"
 	"sync"
+
+	"github.com/gorilla/websocket"
+	"github.com/spf13/cast"
+	"github.com/spf13/pflag"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
-var agentlist sync.Map
-var unknown bool
+var (
+	agentlist sync.Map
+	unknown   bool
+)
 
 func main() {
 	var port string
-	pflag.StringVar(&port, "port", "18080", "ws端口")
 	var room string
-	pflag.StringVar(&room, "room", "****", "房间号")
-	var unknown bool
-	pflag.BoolVar(&unknown, "unknown", false, "未知源pb消息是否输出")
+	pflag.StringVar(&port, "port", "18080", "WebSocket 服务端口")
+	pflag.StringVar(&room, "room", "****", "抖音直播房间号")
+	pflag.BoolVar(&unknown, "unknown", false, "是否输出未知源的pb消息")
 	pflag.Parse()
-	// 创建WebSocket升级器
+
+	// 创建 WebSocket 升级器
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
-			return true // 允许所有CORS请求，实际应用中应根据需要设置
+			return true // 允许所有 CORS 请求，实际应用中应根据需要设置
 		},
 	}
-	// 设置WebSocket路由
+
+	// 设置 WebSocket 路由
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(upgrader, w, r)
 	})
-	p := startServer(cast.ToInt(port))
-	log.Println("wss服务启动成功,链接地址为:ws://127.0.0.1:" + p + "/\n" + "直播地址:" + room)
 
+	// 启动 WebSocket 服务器
+	p := startServer(cast.ToInt(port))
+	log.Printf("WebSocket 服务启动成功，地址为: ws://127.0.0.1:%s/\n直播房间: %s\n", p, room)
+
+	// 创建 DouyinLive 实例
 	d, err := douyinlive.NewDouyinLive(room)
 	if err != nil {
-		panic("抖音链接失败:" + err.Error())
+		log.Fatalf("抖音链接失败: %v", err)
 	}
 
+	// 订阅事件
 	d.Subscribe(Subscribe)
-	//开始
+	// 开始处理
 	d.Start()
 }
 
-// startServer 启动ws服务端
+// startServer 启动 WebSocket 服务端
 func startServer(port int) string {
-	for { // 一直循环，每次端口+1
+	for {
 		if checkPortAvailability(port) {
 			go func() {
 				if err := http.ListenAndServe(":"+strconv.Itoa(port), nil); err != nil {
-					panic(err)
+					log.Fatalf("服务器启动失败: %v", err)
 				}
 			}()
 			break
-		} else {
-			port++ // 如果端口被占用，增加端口号
 		}
+		port++ // 如果端口被占用，增加端口号
 	}
 
 	log.Printf("服务器成功启动在端口 %d\n", port)
-	return cast.ToString(port)
+	return strconv.Itoa(port)
 }
 
 // checkPortAvailability 检查本地端口是否可用
 func checkPortAvailability(port int) bool {
-	// 尝试连接到 localhost 上的指定端口
 	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
-		// 如果连接失败，认为端口可用
-		return true
+		return true // 如果连接失败，认为端口可用
 	}
-	// 如果连接成功，关闭连接并认为端口不可用
 	conn.Close()
-	return false
+	return false // 如果连接成功，认为端口不可用
 }
 
-// Subscribe 订阅更新
+// Subscribe 处理订阅的更新
 func Subscribe(eventData *douyin.Message) {
-	var marshal []byte
 	msg, err := utils.MatchMethod(eventData.Method)
 	if err != nil {
-		if unknown == true {
-			log.Println("本条消息.暂时没有源pb.无法处理.", err, hex.EncodeToString(eventData.Payload))
-			return
+		if unknown {
+			log.Printf("未知消息，无法处理: %v, %s\n", err, hex.EncodeToString(eventData.Payload))
 		}
+		return
 	}
-	if msg != nil {
 
-		err := proto.Unmarshal(eventData.Payload, msg)
-		if err != nil {
-			log.Println("unmarshal:", err, eventData.Method)
+	if msg != nil {
+		if err := proto.Unmarshal(eventData.Payload, msg); err != nil {
+			log.Printf("反序列化失败: %v, 方法: %s\n", err, eventData.Method)
 			return
 		}
-		marshal, err = protojson.Marshal(msg)
+
+		marshal, err := protojson.Marshal(msg)
 		if err != nil {
-			log.Println("protojson:unmarshal:", err)
+			log.Printf("JSON 序列化失败: %v\n", err)
 			return
 		}
+
 		RangeConnections(func(agentID string, conn *websocket.Conn) {
-			err := conn.WriteMessage(websocket.TextMessage, marshal)
-			if err != nil {
-				log.Println("Error sending message to agent", agentID, ":", err)
+			if err := conn.WriteMessage(websocket.TextMessage, marshal); err != nil {
+				log.Printf("发送消息到客户端 %s 失败: %v\n", agentID, err)
 			}
 		})
-
 	}
-
 }
 
-// StoreConnection 储存ws客户
+// StoreConnection 储存 WebSocket 客户端连接
 func StoreConnection(agentID string, conn *websocket.Conn) {
 	agentlist.Store(agentID, conn)
 }
 
-// GetConnection 获取一个链接
+// GetConnection 获取 WebSocket 客户端连接
 func GetConnection(agentID string) (*websocket.Conn, bool) {
 	value, ok := agentlist.Load(agentID)
 	if !ok {
 		return nil, false
 	}
-	conn, ok := value.(*websocket.Conn) // 类型断言
+	conn, ok := value.(*websocket.Conn)
 	return conn, ok
 }
 
-// DeleteConnection 删除一个ws客户
+// DeleteConnection 删除 WebSocket 客户端连接
 func DeleteConnection(agentID string) {
 	agentlist.Delete(agentID)
 }
 
-// RangeConnections 遍历ws客户端
+// RangeConnections 遍历 WebSocket 客户端连接
 func RangeConnections(f func(agentID string, conn *websocket.Conn)) {
 	agentlist.Range(func(key, value interface{}) bool {
 		agentID, ok := key.(string)
@@ -152,6 +153,8 @@ func RangeConnections(f func(agentID string, conn *websocket.Conn)) {
 		return true
 	})
 }
+
+// GetConnectionCount 获取当前连接数
 func GetConnectionCount() int {
 	count := 0
 	agentlist.Range(func(key, value interface{}) bool {
@@ -161,42 +164,37 @@ func GetConnectionCount() int {
 	return count
 }
 
-// serveWs 处理ws请求
+// serveWs 处理 WebSocket 请求
 func serveWs(upgrader websocket.Upgrader, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println("upgrade:", err)
+		log.Printf("升级 WebSocket 失败: %v\n", err)
 		return
 	}
+	defer conn.Close()
 
-	defer func(conn *websocket.Conn) {
-		err := conn.Close()
-		if err != nil {
-			log.Println(err)
-		}
-	}(conn)
 	sec := r.Header.Get("Sec-WebSocket-Key")
 	StoreConnection(sec, conn)
-	log.Println("当前连接数", GetConnectionCount())
+	log.Printf("当前连接数: %d\n", GetConnectionCount())
+
 	defer func() {
-		log.Println(sec, "断开连接")
+		log.Printf("客户端 %s 断开连接\n", sec)
 		DeleteConnection(sec)
 	}()
-	// 处理WebSocket消息
+
+	// 处理 WebSocket 消息
 	for {
 		mt, message, err := conn.ReadMessage()
 		if err != nil {
-			log.Println("read:", err)
+			log.Printf("读取消息失败: %v\n", err)
 			break
 		}
-		log.Printf("recv: %s", message)
+		log.Printf("收到消息: %s\n", message)
 		if string(message) == "ping" {
 			if err := conn.WriteMessage(mt, []byte("pong")); err != nil {
-				log.Println("write:", err)
+				log.Printf("写入消息失败: %v\n", err)
 				break
 			}
 		}
-		// 回显消息
-
 	}
 }

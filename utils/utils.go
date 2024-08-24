@@ -17,48 +17,31 @@ import (
 	"strings"
 )
 
-// HasGzipEncoding 判断消息体是否包含gzip
-func HasGzipEncoding(h []*douyin.HeadersList) bool {
-	n := false
-	for _, v := range h {
-
-		if v.Key == "compress_type" {
-			if v.Value == "gzip" {
-				n = true
-
-				break
-			}
+// HasGzipEncoding 判断消息头中是否包含gzip编码
+func HasGzipEncoding(headers []*douyin.HeadersList) bool {
+	for _, header := range headers {
+		if header.Key == "compress_type" && header.Value == "gzip" {
+			return true
 		}
 	}
-	return n
+	return false
 }
 
-// GetxMSStub 拼接map返回md5.hex
+// GetxMSStub 拼接map并返回其MD5哈希值的十六进制字符串
 func GetxMSStub(params *orderedmap.OrderedMap) string {
-	// 使用 strings.Builder 构建签名字符串
 	var sigParams strings.Builder
-	first := true
-	for _, key := range params.Keys() {
-		if !first {
-			// 如果不是第一个参数，需要在参数之间加上逗号
+	for i, key := range params.Keys() {
+		if i > 0 {
 			sigParams.WriteString(",")
-
-		} else {
-
-			first = false
-
 		}
-		//
 		value, _ := params.Get(key)
 		sigParams.WriteString(fmt.Sprintf("%s=%s", key, value))
 	}
-	//
 	hash := md5.Sum([]byte(sigParams.String()))
-
-	//
 	return hex.EncodeToString(hash[:])
 }
 
+// getUserID 生成随机用户ID
 func getUserID() string {
 	// 生成7300000000000000000到7999999999999999999之间的随机数
 	randomNumber := rand.Int63n(7000000000000000000 + 1)
@@ -66,68 +49,51 @@ func getUserID() string {
 	return strconv.FormatInt(randomNumber, 10)
 }
 
-// GenerateMsToken 获得随机生成的token
+// GenerateMsToken 生成随机的msToken
 func GenerateMsToken(length int) string {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+="
-
 	b := make([]byte, length)
-	for i := 0; i < length; i++ {
-		// 生成0到charset长度之间的随机数
-		randInt := rand.Intn(len(charset))
-
-		// 将随机数转换为字符集中的字符
-		b[i] = charset[randInt]
+	for i := range b {
+		b[i] = charset[rand.Intn(len(charset))]
 	}
-
 	return string(b) + "=_"
 }
 
-// MatchMethod 匹配处理函数
-func MatchMethod(Method string) (protoreflect.ProtoMessage, error) {
-	if createMessage, ok := generated.MessageMap[Method]; ok {
+// MatchMethod 根据方法名匹配并返回对应的ProtoMessage
+func MatchMethod(method string) (protoreflect.ProtoMessage, error) {
+	if createMessage, ok := generated.MessageMap[method]; ok {
 		return createMessage(), nil
 	}
-	return nil, errors.New("未知消息: " + Method)
+	return nil, errors.New("未知消息: " + method)
 }
 
-// GzipCompressAndBase64Encode 消息进行gzip压缩转为base64
+// GzipCompressAndBase64Encode 将数据进行gzip压缩并进行Base64编码
 func GzipCompressAndBase64Encode(data []byte) (string, error) {
-	// 创建 gzip 压缩器
 	var b bytes.Buffer
 	w := gzip.NewWriter(&b)
 
-	// 压缩数据
-	_, err := w.Write(data)
-	if err != nil {
+	if _, err := w.Write(data); err != nil {
 		return "", err
 	}
-
-	// 关闭压缩器
 	if err := w.Close(); err != nil {
 		return "", err
 	}
 
-	// 获取压缩后的数据
-	compressedData := b.Bytes()
-
-	// 进行 Base64 编码
-	encodedData := base64.StdEncoding.EncodeToString(compressedData)
-
-	return encodedData, nil
+	return base64.StdEncoding.EncodeToString(b.Bytes()), nil
 }
 
-// NewOrderedMap 创建有序map
-func NewOrderedMap(r, p string) *orderedmap.OrderedMap {
+// NewOrderedMap 创建一个有序的map
+func NewOrderedMap(roomID, pushID string) *orderedmap.OrderedMap {
 	smap := orderedmap.NewOrderedMap()
 	smap.Set("live_id", "1")
 	smap.Set("aid", "6383")
 	smap.Set("version_code", "180800")
 	smap.Set("webcast_sdk_version", "1.0.14-beta.0")
-	smap.Set("room_id", r)
+	smap.Set("room_id", roomID)
 	smap.Set("sub_room_id", "")
 	smap.Set("sub_channel_id", "")
 	smap.Set("did_rule", "3")
-	smap.Set("user_unique_id", p)
+	smap.Set("user_unique_id", pushID)
 	smap.Set("device_platform", "web")
 	smap.Set("device_type", "")
 	smap.Set("ac", "")
@@ -135,10 +101,10 @@ func NewOrderedMap(r, p string) *orderedmap.OrderedMap {
 	return smap
 }
 
-// RandomUserAgent 随机浏览器UA
+// RandomUserAgent 生成随机的浏览器用户代理字符串
 func RandomUserAgent() string {
 	osList := []string{
-		"(Windows NT 10.0; WOW64)", "(Windows NT 10.0; WOW64)", "(Windows NT 10.0; Win64; x64)",
+		"(Windows NT 10.0; WOW64)", "(Windows NT 10.0; Win64; x64)",
 		"(Windows NT 6.3; WOW64)", "(Windows NT 6.3; Win64; x64)",
 		"(Windows NT 6.1; Win64; x64)", "(Windows NT 6.1; WOW64)",
 		"(X11; Linux x86_64)",
@@ -146,15 +112,12 @@ func RandomUserAgent() string {
 	}
 
 	chromeVersionList := []string{
-		"110.0.5481.77", "110.0.5481.30", "109.0.5414.74", "108.0.5359.71", "108.0.5359.22",
-		// ... 其他版本号
-		"98.0.4758.48", "97.0.4692.71",
+		"110.0.5481.77", "110.0.5481.30", "109.0.5414.74", "108.0.5359.71",
+		"108.0.5359.22", "98.0.4758.48", "97.0.4692.71",
 	}
 
 	os := osList[rand.Intn(len(osList))]
-	//
-
 	chromeVersion := chromeVersionList[rand.Intn(len(chromeVersionList))]
-	//return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+
 	return fmt.Sprintf("Mozilla/5.0 %s AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", os, chromeVersion)
 }

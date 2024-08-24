@@ -28,18 +28,18 @@ const (
 
 type EventHandler func(eventData *douyin.Message)
 type DouyinLive struct {
-	wssurl        string
-	headers       http.Header
-	c             *req.Client
 	ttwid         string
 	roomid        string
 	liveid        string
 	liveurl       string
 	userAgent     string
-	pushid        string
-	Conn          *websocket.Conn
+	c             *req.Client
 	eventHandlers []EventHandler
-	gzip          *gzip.Reader
-	isLiveClosed  bool
+	headers       http.Header
 	buffers       *sync.Pool
+	gzip          *gzip.Reader
+	Conn          *websocket.Conn
+	wssurl        string
+	pushid        string
+	isLiveClosed  bool
 }

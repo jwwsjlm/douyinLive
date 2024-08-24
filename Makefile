@@ -5,11 +5,12 @@ CMD_PATH := cmd/main/main.go
 GO_BUILD := go build
 GO_CLEAN := go clean
 GO_TIDY := go mod tidy
+LDFLAGS := -ldflags="-s -w"
 
 # Build binary for Windows
 build-windows:
 	@echo "Building application for Windows..."
-	$(GO_BUILD) -o $(BINARY_NAME)-windows.exe $(CMD_PATH)
+	$(GO_BUILD) $(LDFLAGS) -o $(BINARY_NAME)-windows.exe $(CMD_PATH)
 
 # Install dependencies
 install:

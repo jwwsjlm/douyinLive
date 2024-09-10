@@ -7,6 +7,10 @@ import (
 	"douyinlive/jsScript"
 	"douyinlive/utils"
 	"fmt"
+	"github.com/gorilla/websocket"
+	"github.com/imroc/req/v3"
+	"github.com/spf13/cast"
+	"google.golang.org/protobuf/proto"
 	"io"
 	"log"
 	"net/http"
@@ -14,11 +18,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/gorilla/websocket"
-	"github.com/imroc/req/v3"
-	"github.com/spf13/cast"
-	"google.golang.org/protobuf/proto"
 )
 
 // 正则表达式用于提取 roomID 和 pushID

@@ -1951,3 +1951,13 @@ message IntroduceCardDisplayInfo {
   int64 display_timer_span = 3;       // 展示定时间隔，64位整数
   int64 display_timer_loop_cnt = 4;   // 展示定时循环次数，64位整数
 }
+message SandwichBorderMessage  {
+  Common common = 1;  // 对应 JavaScript 中的 common 字段
+  SandwichBorder sandwich_border_info = 2;  // 对应 JavaScript 中的 sandwich_border_info 字段
+}
+message SandwichBorder {
+    double top = 1;    // 对应 JavaScript 中的 top 字段
+    double bottom = 2; // 对应 JavaScript 中的 bottom 字段
+    double left = 3;   // 对应 JavaScript 中的 left 字段
+    double right = 4;  // 对应 JavaScript 中的 right 字段
+}

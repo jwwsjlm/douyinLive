@@ -39,4 +39,10 @@ var MessageMap = map[string]func() protoreflect.ProtoMessage{
 	"WebcastGrowthTaskMessage":           func() protoreflect.ProtoMessage { return &douyin.GrowthTaskMessage{} },
 	"WebcastGameCPBaseMessage":           func() protoreflect.ProtoMessage { return &douyin.GameCPBaseMessage{} },
 	"WebcastSandwichBorderMessage":       func() protoreflect.ProtoMessage { return &douyin.SandwichBorderMessage{} },
+	"WebcastLiveEcomGeneralMessage": func() protoreflect.ProtoMessage {
+		return &douyin.LiveEcomGeneralMessage{}
+	},
+	"WebcastLiveShoppingMessage": func() protoreflect.ProtoMessage {
+		return &douyin.LiveShoppingMessage{}
+	},
 }

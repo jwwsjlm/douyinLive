@@ -108,9 +108,9 @@ message GiftMessage {
   Common common = 1;                // 公共信息
   int64 gift_id = 2;                // 礼物ID
   string fan_ticket_count = 3;      // 粉丝票数量
-  string group_count = 4;          // 组数
-  string repeat_count = 5;         // 重复次数
-  string combo_count = 6;          // 组合数
+  uint64  group_count = 4;          // 组数
+  uint64 repeat_count = 5;         // 重复次数
+  uint64 combo_count = 6;          // 组合数
   User user = 7;                    // 用户信息
   User to_user = 8;                // 接收用户信息
   int32 repeat_end = 9;             // 重复结束标志
@@ -5210,13 +5210,13 @@ message RoomDataSyncMessage {
   Common common = 1;
   
   // roomID 字段，整型字符串（int64String）
-  string roomID = 2;
+  uint64  roomID = 2;
   
   // syncKey 字段，字符串类型
   string syncKey = 3;
   
   // version 字段，整型字符串（int64String）
-  string version = 4;
+  uint64 version = 4;
   
   // payload 字段，字节类型（bytes）
   bytes payload = 5;
@@ -5244,19 +5244,19 @@ message DecotationDetail{
 }
 message Decoration {
   // id 字段，整型字符串（int64String）
-  string id = 1;
+  uint64 id = 1;
   
   // image 字段，引用 Image 消息类型
   Image image = 2;
   
   // type 字段，整型字符串（int64String）
-  string type = 3;
+  uint64 type = 3;
   
   // input_rect 字段，整型字符串（int64String）列表
-  repeated string input_rect = 4;
+  repeated uint64 input_rect = 4;
   
   // text_size 字段，整型字符串（int64String）
-  string text_size = 5;
+  uint64 text_size = 5;
   
   // text_color 字段，字符串类型
   string text_color = 6;
@@ -5265,28 +5265,28 @@ message Decoration {
   string content = 7;
   
   // max_length 字段，整型字符串（int64String）
-  string max_length = 8;
+  uint64 max_length = 8;
   
   // status 字段，整型字符串（int64String）
-  string status = 9;
+  uint64 status = 9;
   
   // h 字段，整型字符串（int64String）
-  string h = 10;
+  uint64 h = 10;
   
   // x 字段，整型字符串（int64String）
-  string x = 11;
+  uint64 x = 11;
   
   // w 字段，整型字符串（int64String）
-  string w = 12;
+  uint64 w = 12;
   
   // y 字段，整型字符串（int64String）
-  string y = 13;
+  uint64 y = 13;
   
   // kind 字段，整型字符串（int64String）
-  string kind = 14;
+  uint64 kind = 14;
   
   // sub_type 字段，整型字符串（int64String）
-  string sub_type = 15;
+  uint64 sub_type = 15;
   
   // reservation 字段，引用 Reservation 消息类型
   Reservation reservation = 16;
@@ -5295,13 +5295,13 @@ message Decoration {
   Image nine_patch_image = 17;
   
   // text_special_effects 字段，整型字符串（int64String）列表
-  repeated string text_special_effects = 18;
+  repeated uint64 text_special_effects = 18;
   
   // text_image_adjustable_start_position 字段，整型字符串（int64String）
-  string text_image_adjustable_start_position = 19;
+  uint64 text_image_adjustable_start_position = 19;
   
   // text_image_adjustable_end_position 字段，整型字符串（int64String）
-  string text_image_adjustable_end_position = 20;
+  uint64 text_image_adjustable_end_position = 20;
   
   // text_font_config 字段，引用 DecorationFontConfig 消息类型
   DecorationFontConfig text_font_config = 21;
@@ -5311,22 +5311,22 @@ message Decoration {
 }
 message Reservation {
   // appointment_id 字段，整型字符串（int64String）
-  string appointment_id = 1;
+  uint64 appointment_id = 1;
   
   // anchor_id 字段，整型字符串（int64String）
-  string anchor_id = 2;
+  uint64 anchor_id = 2;
   
   // room_id 字段，整型字符串（int64String）
-  string room_id = 3;
+  uint64 room_id = 3;
   
   // start_time 字段，整型字符串（int64String）
-  string start_time = 4;
+  uint64 start_time = 4;
   
   // end_time 字段，整型字符串（int64String）
-  string end_time = 5;
+  uint64 end_time = 5;
   
   // btn_rect 字段，整型字符串（int64String）列表，假设它是一个矩形区域
-  repeated string btn_rect = 6;
+  repeated uint64 btn_rect = 6;
   
   // btn_color 字段，字符串类型
   string btn_color = 7;
@@ -5336,13 +5336,13 @@ message Reservation {
 }
 message DecorationFontConfig {
   // FontID 字段，整型字符串（int64String）
-  string FontID = 1;
+  uint64 FontID = 1;
   
   // DownloadUrl 字段，字符串类型
   string DownloadUrl = 2;
   
   // Status 字段，整型字符串（int64String）
-  string Status = 3;
+  uint64 Status = 3;
   
   // font_name 字段，字符串类型
   string font_name = 4;
@@ -5352,19 +5352,19 @@ message LinkMicAudienceKtvMessage {
   Common common = 1;
   
   // message_type 字段，整型字符串（int64String）
-  string message_type = 2;
+  uint64 message_type = 2;
   
   // list_info 字段，是一个可重复的 ListInfo 消息类型列表
   repeated ListInfo list_info = 3;
   
   // want_sing_count 字段，整型字符串（int64String）
-  string want_sing_count = 4;
+  uint64 want_sing_count = 4;
   
   // want_sing_song_threshold 字段，整型字符串（int64String）
-  string want_sing_song_threshold = 5;
+  uint64 want_sing_song_threshold = 5;
   
   // sung_song_count 字段，整型字符串（int64String）
-  string sung_song_count = 6;
+  uint64 sung_song_count = 6;
   
   // is_downgrade 字段，布尔类型
   bool is_downgrade = 7;
@@ -5373,13 +5373,13 @@ message LinkMicAudienceKtvMessage {
   repeated SongUniqueInfo all_song_unique_list = 8;
   message SongUniqueInfo {
     // song_id 字段，整型字符串（int64String）
-    string song_id = 1;
+    uint64 song_id = 1;
     
     // user_id 字段，整型字符串（int64String）
-    string user_id = 2;
+    uint64 user_id = 2;
     
     // song_type 字段，整型字符串（int64String）
-    string song_type = 3;
+    uint64 song_type = 3;
     
     // is_public 字段，布尔类型
     bool is_public = 4;
@@ -5396,7 +5396,7 @@ message ListInfo {
 
 message KtvSongStruct {
   // id 字段，整型字符串（int64String）
-  string id = 1;
+  uint64 id = 1;
   
   // title 字段，字符串类型
   string title = 2;
@@ -5405,7 +5405,7 @@ message KtvSongStruct {
   string author = 3;
   
   // lyric_type 字段，整型字符串（int64String）
-  string lyric_type = 4;
+  uint64 lyric_type = 4;
   
   // song_url 字段，字符串类型
   string song_url = 5;
@@ -5414,13 +5414,13 @@ message KtvSongStruct {
   repeated string lyric_url_list = 6;
   
   // duration 字段，整型字符串（int64String）
-  string duration = 7;
+  uint64 duration = 7;
   
   // cover_url 字段，字符串类型
   string cover_url = 8;
   
   // song_pattern 字段，整型字符串（int64String）
-  string song_pattern = 9;
+  uint64 song_pattern = 9;
   
   // preview_start_time 字段，双精度浮点数
   double preview_start_time = 10;
@@ -5480,13 +5480,13 @@ message KtvSongStruct {
   string add_song_source = 29;
   
   // total_order_with_cur_anchor 字段，整型字符串（int64String）
-  string total_order_with_cur_anchor = 30;
+  uint64 total_order_with_cur_anchor = 30;
   
   // global_total_order 字段，整型字符串（int64String）
-  string global_total_order = 31;
+  uint64 global_total_order = 31;
   
   // artist_ids 字段，整型字符串（int64String）列表
-  repeated string artist_ids = 32;
+  repeated uint64 artist_ids = 32;
   
   // id_str 字段，字符串类型
   string id_str = 33;
@@ -5525,10 +5525,10 @@ message KtvSongStruct {
     string url = 1;
     
     // song_patten 字段，整型字符串（int64String）
-    string song_patten = 2;
+    uint64 song_patten = 2;
     
     // audio_id 字段，整型字符串（int64String）
-    string audio_id = 3;
+    uint64 audio_id = 3;
     
     // volume_lufs 字段，双精度浮点数
     double volume_lufs = 4;
@@ -5543,7 +5543,7 @@ message KtvSongStruct {
     string beats_point_url = 7;
     
     // create_time 字段，整型字符串（int64String）
-    string create_time = 8;
+    uint64 create_time = 8;
     
     // file_hash 字段，字符串类型
     string file_hash = 9;
@@ -5553,10 +5553,10 @@ message KtvSongStruct {
     UserInfo top_user = 1;
     
     // score 字段，整型字符串（int64String）
-    string score = 2;
+    uint64 score = 2;
     
     // order_count 字段，整型字符串（int64String）
-    string order_count = 3;
+    uint64 order_count = 3;
     
     // has_added 字段，布尔类型
     bool has_added = 4;
@@ -5585,7 +5585,7 @@ message PersonalSongInfo {
 
 message UserInfo {
   // id 字段，整型字符串（int64String）
-  string id = 1;
+  uint64 id = 1;
   
   // nickname 字段，字符串类型
   string nickname = 2;
@@ -5615,7 +5615,7 @@ message UserInfo {
   UserHighScoreSongTag high_score_song_tag = 10;
   
   // hit_midi_record_ab 字段，整型字符串（int64String）
-  string hit_midi_record_ab = 11;
+  uint64 hit_midi_record_ab = 11;
   
   // user_midi_score 字段，双精度浮点数（double）
   double user_midi_score = 12;
@@ -5626,19 +5626,19 @@ message UserInfo {
 
 message WantListenInfo {
   // want_listen_count 字段，整型字符串（int64String）
-  string want_listen_count = 1;
+  uint64 want_listen_count = 1;
 }
 
 message MusicInterval {
   // StartTimeMillisecond 字段，整型字符串（int64String）
-  string StartTimeMillisecond = 1;
+  uint64 StartTimeMillisecond = 1;
   
   // DurationMillisecond 字段，整型字符串（int64String）
-  string DurationMillisecond = 2;
+  uint64 DurationMillisecond = 2;
 }
 message ChorusVideoInfo {
   // item_id 字段，整型字符串（int64String）
-  string item_id = 1;
+  uint64 item_id = 1;
   
   // item_description 字段，字符串类型
   string item_description = 2;
@@ -5647,13 +5647,13 @@ message ChorusVideoInfo {
   string item_url = 3;
   
   // author_id 字段，整型字符串（int64String）
-  string author_id = 4;
+  uint64 author_id = 4;
   
   // author_name 字段，字符串类型
   string author_name = 5;
   
   // use_times 字段，整型字符串（int64String）
-  string use_times = 6;
+  uint64 use_times = 6;
   
   // image 字段，Image 消息类型
   Image image = 7;
@@ -5695,13 +5695,13 @@ message Quiz {
   int32 quiz_status = 4;
   
   // countdown_time 字段，整型字符串（int64String）
-  string countdown_time = 5;
+  uint64 countdown_time = 5;
   
   // win_option 字段，整型字符串（int64String）
-  string win_option = 6;
+  uint64 win_option = 6;
   
   // bet_option 字段，整型字符串（int64String）
-  string bet_option = 7;
+  uint64 bet_option = 7;
   
   // gain 字段，字符串类型
   string gain = 8;
@@ -5710,7 +5710,7 @@ message Quiz {
   string template_id = 9;
   
   // absolute_end_time 字段，整型字符串（int64String）
-  string absolute_end_time = 10;
+  uint64 absolute_end_time = 10;
 }
 message HotChatMessage {
   Common common = 1;                // 公共信息
@@ -5752,7 +5752,7 @@ message AudioChatMessage {
   string audio_url = 4;
   
   // audio_duration 字段，整型字符串（int64String）
-  string audio_duration = 5;
+  uint64 audio_duration = 5;
   
   // public_area_common 字段，引用 PublicAreaCommon 消息类型
   PublicAreaCommon public_area_common = 6;
@@ -5768,7 +5768,7 @@ message NotifyMessage {
   string schema = 2;
   
   // notify_type 字段，整型字符串（int64String）
-  string notify_type = 3;
+  uint64 notify_type = 3;
   
   // content 字段，字符串类型
   string content = 4;
@@ -5780,10 +5780,10 @@ message NotifyMessage {
   NotifyMessage.Extra extra = 6;
   
   // notify_class 字段，整型字符串（int64String）
-  string notify_class = 7;
+  uint64 notify_class = 7;
   
   // flex_setting 字段，整型字符串（int64String）列表
-  repeated string flex_setting = 8;
+  repeated uint64 flex_setting = 8;
   
   // biz_scene 字段，字符串类型
   string biz_scene = 100;

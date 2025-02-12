@@ -45,4 +45,7 @@ var MessageMap = map[string]func() protoreflect.ProtoMessage{
 	"WebcastLiveShoppingMessage": func() protoreflect.ProtoMessage {
 		return &douyin.LiveShoppingMessage{}
 	},
+	"WebcastChatLikeMessage": func() protoreflect.ProtoMessage {
+		return &douyin.ChatLikeMessage{}
+	},
 }

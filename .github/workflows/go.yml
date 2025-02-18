@@ -64,7 +64,7 @@ jobs:
 #          GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p artifacts/${{ matrix.target }}
-          go build -v -o artifacts/${{ matrix.target }}/${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./...
+          go build -v -o artifacts/${{ matrix.target }}/${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} .
           
           # 实时验证输出文件
           echo "编译已完成，文件列表："

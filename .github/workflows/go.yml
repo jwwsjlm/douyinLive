@@ -7,7 +7,7 @@ on:
 
 env:
   GO_VERSION: '1.23'
-  APP_NAME: 'douyinLive's
+  APP_NAME: 'douyinLive'
   BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:

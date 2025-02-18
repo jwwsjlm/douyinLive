@@ -1,39 +1,106 @@
-# .github/workflows/go.yml
-name: 🚀 Multi-Platform Build
+# .github/workflows/build.yml
+name: Build
 
 on:
-  workflow_dispatch:
-    inputs:
-      app_name:
-        description: 'Application Name'
-        required: true
-        default: 'douyinlive'
-
-env:
-  DEFAULT_APP_NAME: 'douyinlive'  # 默认应用名称
+  push:
+    branches:
+      - '*'
+  workflow_dispatch:  # 支持手动触发
 
 jobs:
-  cross-build:
-    name: 🛠️ Build ${{ inputs.app_name || env.DEFAULT_APP_NAME }}
+  build:
+    name: Build
     runs-on: ubuntu-latest
-    env:
-      APP_NAME: ${{ inputs.app_name || env.DEFAULT_APP_NAME }}
-      BUILD_VERSION: ${{ github.run_id }}
-
-    strategy:
-      matrix:
-        platform: 
-          - { os: windows,  arch: amd64, ext: exe }
-          - { os: linux,    arch: amd64, ext: '' }
 
     steps:
-    - name: 🔍 Checkout Code
+    - name: Check out code
       uses: actions/checkout@v4
 
-    - name: 🚀 Build Binary
-      shell: bash
-      env:
-        OUTPUT_FILE: ${{ env.APP_NAME }}-${{ env.BUILD_VERSION }}-${{ matrix.platform.os }}-${{ matrix.platform.arch }}${{ matrix.platform.ext }}
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+        check-latest: true
+        cache: true
+
+    - name: Get dependencies
       run: |
-        echo "Building: ${OUTPUT_FILE}"
-        GOOS=${{ matrix.platform.os }} GOARCH=${{ matrix.platform.arch }} go build -o ${OUTPUT_FILE}
+        go mod init github.com/BlueSkyXN/DeepAI
+        go mod tidy
+    - name: Build for Windows
+      run: |
+        GOOS=windows GOARCH=amd64 go build -o DeepAI-windows-amd64.exe
+        GOOS=windows GOARCH=386 go build -o DeepAI-windows-386.exe
+    - name: Build for Linux
+      run: |
+        GOOS=linux GOARCH=amd64 go build -o DeepAI-linux-amd64
+        GOOS=linux GOARCH=386 go build -o DeepAI-linux-386
+        GOOS=linux GOARCH=arm64 go build -o DeepAI-linux-arm64
+        chmod +x DeepAI-linux-*
+    - name: Build for macOS
+      run: |
+        GOOS=darwin GOARCH=amd64 go build -o DeepAI-darwin-amd64
+        GOOS=darwin GOARCH=arm64 go build -o DeepAI-darwin-arm64
+        chmod +x DeepAI-darwin-*
+    - name: Upload All Binaries as Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: DeepAI-binaries-all
+        path: |
+          DeepAI-windows-amd64.exe
+          DeepAI-windows-386.exe
+          DeepAI-linux-amd64
+          DeepAI-linux-386
+          DeepAI-linux-arm64
+          DeepAI-darwin-amd64
+          DeepAI-darwin-arm64
+        retention-days: 90  # 保留90天
+
+    - name: Upload Windows amd64 Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: DeepAI-windows-amd64
+        path: DeepAI-windows-amd64.exe
+        retention-days: 90
+
+    - name: Upload Windows 386 Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: DeepAI-windows-386
+        path: DeepAI-windows-386.exe
+        retention-days: 90
+
+    - name: Upload Linux amd64 Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: DeepAI-linux-amd64
+        path: DeepAI-linux-amd64
+        retention-days: 90
+
+    - name: Upload Linux 386 Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: DeepAI-linux-386
+        path: DeepAI-linux-386
+        retention-days: 90
+
+    - name: Upload Linux arm64 Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: DeepAI-linux-arm64
+        path: DeepAI-linux-arm64
+        retention-days: 90
+
+    - name: Upload macOS amd64 Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: DeepAI-darwin-amd64
+        path: DeepAI-darwin-amd64
+        retention-days: 90
+
+    - name: Upload macOS arm64 Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: DeepAI-darwin-arm64
+        path: DeepAI-darwin-arm64
+        retention-days: 90

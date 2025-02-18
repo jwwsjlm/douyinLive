@@ -75,14 +75,14 @@ jobs:
 
       - name: Prepare Release Bundle
         run: |
-          mkdir -p "${RELEASE_DIR}/bin"
-          find artifacts -type f -exec cp {} "${RELEASE_DIR}/bin/" \;
-          (cd "${RELEASE_DIR}/bin" && sha256sum *) > "${RELEASE_DIR}/checksums.txt"
-          echo "Build ID: ${{ github.run_id }}" > "${RELEASE_DIR}/BUILD_INFO"
-          date -u +'%Y-%m-%dT%H:%M:%SZ' >> "${RELEASE_DIR}/BUILD_INFO"
+          mkdir -p "${{RELEASE_DIR}}/bin"
+          find artifacts -type f -exec cp {} ${{RELEASE_DIR}}/bin/" \;
+          (cd "$${{RELEASE_DIR}}/bin" && sha256sum *) > "${{RELEASE_DIR}}/checksums.txt"
+          echo "Build ID: ${{ github.run_id }}" > "${{RELEASE_DIR}}/BUILD_INFO"
+          date -u +'%Y-%m-%dT%H:%M:%SZ' >> "${{RELEASE_DIR}}/BUILD_INFO"
 
       - name: Create Compressed Package
-        run: tar czvf "${RELEASE_DIR}.tgz" -C "${RELEASE_DIR}" .
+        run: tar czvf "${{RELEASE_DIR}}.tgz" -C "${{RELEASE_DIR}}" .
 
       - name: Dynamic Release
         uses: softprops/action-gh-release@v1
@@ -97,7 +97,7 @@ jobs:
             - Windows amd64
             - Linux ARM64
           files: |
-            ${RELEASE_DIR}.tgz
-            ${RELEASE_DIR}/checksums.txt
+            ${{RELEASE_DIR}}.tgz
+            ${{RELEASE_DIR}}/checksums.txt
           draft: false
           prerelease: ${{ !contains(github.ref, 'refs/tags/') }}

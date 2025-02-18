@@ -112,6 +112,7 @@ jobs:
             - 构建ID: ${{ env.BUILD_ID }}
             - 编译时间: ${{ needs.setup.outputs.timestamp }}
             - 编译系统: Ubuntu (Cross-Compile)
+            
             **提交信息：**
                   ${{ github.event.inputs.commitMessage || github.event.head_commit.message }}
           files: |

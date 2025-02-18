@@ -20,7 +20,7 @@ jobs:
       - name: Generate Metadata
         id: setup
         run: |
-          TIMESTAMP=$(date -u +'%Y%m%dT%H%M%SZ')
+          TIMESTAMP=$(date -u +'%Y%m%d-%H%M%S')
           echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
 
   # Windows 构建作业
@@ -109,7 +109,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: "nightly-${{ vars.BUILD_TAG }}"
+          tag_name: "v1-nighty-${{ vars.BUILD_TAG }}"
           name: "Release ${{ vars.BUILD_TAG }}"
           files: |
             ${RELEASE_DIR}.tgz

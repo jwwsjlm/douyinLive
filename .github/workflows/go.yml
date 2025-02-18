@@ -68,7 +68,14 @@ jobs:
           pattern: |
             windows-exe
             linux-bin
-
+    # 新增路径调试步骤
+      - name: Debug Path Structure
+        run: |
+         echo "当前工作目录: $PWD"
+         echo "目录结构:"
+         ls -alh
+          echo "Artifacts 目录内容:"
+         ls -R artifacts || echo "尚未创建 artifacts 目录"
       - name: Validate Files
         run: |
           echo "文件结构验证:"

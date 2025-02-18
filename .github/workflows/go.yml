@@ -80,9 +80,6 @@ jobs:
         run: |
           echo "文件结构验证:"
           ls -R artifacts
-          # 关键校验点
-#          [ -f windows-exe/${{ env.APP_NAME }}.exe ] || exit 1
-#          [ -f linux-bin/${{ env.APP_NAME }}-linux-arm64 ] || exit 1
 
       - name: Generate Checksums
         run: |

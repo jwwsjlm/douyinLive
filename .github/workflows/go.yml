@@ -72,6 +72,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: '*-bin'  # 匹配 windows-bin 和 linux-bin
 
       - name: Prepare Release Bundle
         run: |
@@ -85,7 +86,7 @@ jobs:
         run: tar czvf "${{RELEASE_DIR}}.tgz" -C "${{RELEASE_DIR}}" .
 
       - name: Dynamic Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           # 根据触发类型自动生成版本信息
           tag_name: ${{ contains(github.ref, 'refs/tags/') && github.ref_name || format('nightly-{0}', env.RELEASE_DIR) }}

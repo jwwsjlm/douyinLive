@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: Download dependencies
@@ -64,7 +64,7 @@ jobs:
 #          GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p artifacts/${{ matrix.target }}
-          go build -v -o artifacts/${{ matrix.target }}/${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          go build -v -o artifacts/${{ matrix.target }}/${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }} ./...
           
           # 实时验证输出文件
           echo "编译已完成，文件列表："

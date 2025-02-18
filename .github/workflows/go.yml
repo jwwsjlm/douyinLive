@@ -25,7 +25,6 @@ jobs:
 
     - name: Get dependencies
       run: |
-        go mod init github.com/jwwsjlm/douyinLive
         go mod tidy
     - name: Build for Windows
       run: |

@@ -25,82 +25,82 @@ jobs:
 
     - name: Get dependencies
       run: |
-        go mod init github.com/BlueSkyXN/DeepAI
+        go mod init github.com/jwwsjlm/douyinLive
         go mod tidy
     - name: Build for Windows
       run: |
-        GOOS=windows GOARCH=amd64 go build -o DeepAI-windows-amd64.exe
-        GOOS=windows GOARCH=386 go build -o DeepAI-windows-386.exe
+        GOOS=windows GOARCH=amd64 go build -o douyinLive-windows-amd64.exe
+        GOOS=windows GOARCH=386 go build -o douyinLive-windows-386.exe
     - name: Build for Linux
       run: |
-        GOOS=linux GOARCH=amd64 go build -o DeepAI-linux-amd64
-        GOOS=linux GOARCH=386 go build -o DeepAI-linux-386
-        GOOS=linux GOARCH=arm64 go build -o DeepAI-linux-arm64
-        chmod +x DeepAI-linux-*
+        GOOS=linux GOARCH=amd64 go build -o douyinLive-linux-amd64
+        GOOS=linux GOARCH=386 go build -o douyinLive-linux-386
+        GOOS=linux GOARCH=arm64 go build -o douyinLive-linux-arm64
+        chmod +x douyinLive-linux-*
     - name: Build for macOS
       run: |
-        GOOS=darwin GOARCH=amd64 go build -o DeepAI-darwin-amd64
-        GOOS=darwin GOARCH=arm64 go build -o DeepAI-darwin-arm64
-        chmod +x DeepAI-darwin-*
+        GOOS=darwin GOARCH=amd64 go build -o douyinLive-darwin-amd64
+        GOOS=darwin GOARCH=arm64 go build -o douyinLive-darwin-arm64
+        chmod +x douyinLive-darwin-*
     - name: Upload All Binaries as Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: DeepAI-binaries-all
+        name: douyinLive-binaries-all
         path: |
-          DeepAI-windows-amd64.exe
-          DeepAI-windows-386.exe
-          DeepAI-linux-amd64
-          DeepAI-linux-386
-          DeepAI-linux-arm64
-          DeepAI-darwin-amd64
-          DeepAI-darwin-arm64
+          douyinLive-windows-amd64.exe
+          douyinLive-windows-386.exe
+          douyinLive-linux-amd64
+          douyinLive-linux-386
+          douyinLive-linux-arm64
+          douyinLive-darwin-amd64
+          douyinLive-darwin-arm64
         retention-days: 90  # 保留90天
 
     - name: Upload Windows amd64 Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: DeepAI-windows-amd64
-        path: DeepAI-windows-amd64.exe
+        name: douyinLive-windows-amd64
+        path: douyinLive-windows-amd64.exe
         retention-days: 90
 
     - name: Upload Windows 386 Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: DeepAI-windows-386
-        path: DeepAI-windows-386.exe
+        name: douyinLive-windows-386
+        path: douyinLive-windows-386.exe
         retention-days: 90
 
     - name: Upload Linux amd64 Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: DeepAI-linux-amd64
-        path: DeepAI-linux-amd64
+        name: douyinLive-linux-amd64
+        path: douyinLive-linux-amd64
         retention-days: 90
 
     - name: Upload Linux 386 Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: DeepAI-linux-386
-        path: DeepAI-linux-386
+        name: douyinLive-linux-386
+        path: douyinLive-linux-386
         retention-days: 90
 
     - name: Upload Linux arm64 Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: DeepAI-linux-arm64
-        path: DeepAI-linux-arm64
+        name: douyinLive-linux-arm64
+        path: douyinLive-linux-arm64
         retention-days: 90
 
     - name: Upload macOS amd64 Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: DeepAI-darwin-amd64
-        path: DeepAI-darwin-amd64
+        name: douyinLive-darwin-amd64
+        path: douyinLive-darwin-amd64
         retention-days: 90
 
     - name: Upload macOS arm64 Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: DeepAI-darwin-arm64
-        path: DeepAI-darwin-arm64
+        name: douyinLive-darwin-arm64
+        path: douyinLive-darwin-arm64
         retention-days: 90

@@ -21,7 +21,7 @@ jobs:
       contents: write
     env:
       RELEASE_NAME: "release-${{ vars.BUILD_ID }}"
-      BUILD_ID: ${{ env.BUILD_ID }}  # 显式声明传递
+      BUILD_ID: ${{ vars.BUILD_ID }}  # 显式声明传递
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4

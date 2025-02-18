@@ -50,6 +50,7 @@ jobs:
       - run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=${{ env.GOARCH }} \
           go build -o artifacts/${{ env.APP_NAME }}-linux-${{ env.GOARCH }}
+          ls -l artifacts/linux-bin
       - uses: actions/upload-artifact@v4
         with:
           name: linux-bin

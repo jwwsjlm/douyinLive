@@ -30,8 +30,11 @@ jobs:
       - uses: actions/setup-go@v4
         with:
           go-version: ${{ env.GO_VERSION }}
+
       - run: |
-          GOOS=windows GOARCH=amd64 go build -o ${{ env.APP_NAME }}-windows-amd64-${{ needs.setup.outputs.timestamp }}.exe
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go build -o ${{ env.APP_NAME }}-windows-amd64-${{ needs.setup.outputs.timestamp }}.exe
       - uses: actions/upload-artifact@v4
         with:
           name: windows-amd64-bin

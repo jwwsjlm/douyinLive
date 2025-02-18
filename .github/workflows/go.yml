@@ -42,13 +42,82 @@ jobs:
   build-linux-arm64:
     needs: setup
     runs-on: ubuntu-latest
-    steps: [...]  # 类似Windows构建步骤
+    env:
+      GOARCH: arm64
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # 优化大仓库的检出速度
 
-  # MacOS 构建作业
+      - name: Setup Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true  # 确保获取最新补丁版本
+
+      - name: Build for Linux ARM64
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=${{ env.GOARCH }} \
+          go build -trimpath -ldflags "-s -w" \
+          -o ${{ env.APP_NAME }}-linux-${{ env.GOARCH }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: linux-bin
+          path: |
+            ${{ env.APP_NAME }}-linux-${{ env.GOARCH }}
+          retention-days: 3  # 自动清理旧产物
+
+
   build-darwin-universal:
     needs: setup
     runs-on: macos-latest
-    steps: [...]  # 类似Windows构建步骤
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "10.15"  # 指定最小支持版本
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |  # 优化大仓库检出
+            src/
+            go.mod
+            go.sum
+
+      - name: Setup Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true  # 启用模块缓存
+
+      - name: Build Universal Binary
+        run: |
+          # 同时构建amd64和arm64
+          GOARCH=amd64 go build -o ${{ env.APP_NAME }}-darwin-amd64
+          GOARCH=arm64 go build -o ${{ env.APP_NAME }}-darwin-arm64
+          
+          # 使用lipo合并通用二进制
+          sudo xcode-select --switch /Applications/Xcode_14.2.app/Contents/Developer
+          lipo -create -output ${{ env.APP_NAME }} \
+            ${{ env.APP_NAME }}-darwin-amd64 \
+            ${{ env.APP_NAME }}-darwin-arm64
+
+      - name: Notarization Prep  # 苹果公证准备
+        if: github.event_name != 'pull_request'
+        run: |
+          codesign --force --sign - --timestamp \
+          --options runtime \
+          --entitlements entitlements.plist \
+          ${{ env.APP_NAME }}
+
+      - name: Upload Universal Binary
+        uses: actions/upload-artifact@v3
+        with:
+          name: darwin-bin
+          path: ${{ env.APP_NAME }}
+          if-no-files-found: error
+
 
   # 部署作业
   deploy:

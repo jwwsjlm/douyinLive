@@ -1,0 +1,67 @@
+# .github/workflows/build.yml
+name: 🚀 Multi-Platform Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'Application Name'
+        required: true
+        default: 'douyinlive'
+
+env:
+  APP_NAME: ${{ inputs.app_name || 'douyinlive' }}
+  GO_MODULE: "github.com/jwwsjlm/douyinLive"
+  BUILD_VERSION: ${{ github.run_id }}
+
+jobs:
+  cross-build:
+    name: 🛠️ Build ${{ env.APP_NAME }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: 
+          - { os: windows,  arch: amd64, ext: exe }
+          - { os: windows,  arch: 386,   ext: exe }
+          - { os: linux,    arch: amd64, ext: ''  }
+          - { os: linux,    arch: 386,   ext: ''  }
+          - { os: linux,    arch: arm64, ext: ''  }
+          - { os: darwin,   arch: amd64, ext: ''  }
+          - { os: darwin,   arch: arm64, ext: ''  }
+
+    steps:
+    - name: 🔍 Checkout Code
+      uses: actions/checkout@v4
+
+    - name: ⚙️ Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+        cache: true
+
+    - name: 📦 Initialize Module
+      run: |
+        go mod init ${{ env.GO_MODULE }}
+        go mod tidy
+
+    - name: 🧪 Run Tests
+      run: go test -v ./...
+
+    - name: 🚀 Build Binary
+      shell: bash
+      env:
+        OUTPUT_FILE: ${{ env.APP_NAME }}-v${{ env.BUILD_VERSION }}-${{ matrix.platform.os }}-${{ matrix.platform.arch }}${{ matrix.platform.ext }}
+      run: |
+        GOOS=${{ matrix.platform.os }} GOARCH=${{ matrix.platform.arch }} go build -o $OUTPUT_FILE
+        [[ "${{ matrix.platform.os }}" != "windows" ]] && chmod +x $OUTPUT_FILE
+
+    - name: 📤 Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.APP_NAME }}-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+        path: ${{ env.OUTPUT_FILE }}
+        retention-days: 90

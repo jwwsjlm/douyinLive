@@ -1,9 +1,9 @@
-name: Go Build & Release Pipeline
+name: Multi-Arch Release Pipeline
 
 on:
   push:
     branches: [ main ]
-    tags: ['v*']  # 新增标签触发
+    tags: ['v*']
   workflow_dispatch:
 
 env:
@@ -20,10 +20,10 @@ jobs:
       - name: Generate Metadata
         id: setup
         run: |
-          TIMESTAMP=$(date -u +'%Y%m%d-%H%M%S')
-          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          TIMESTAMP=$(date -u +'%Y%m%dT%H%M%SZ')
+          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
 
-  build-windows-amd64:
+  build-windows:
     needs: setup
     runs-on: windows-latest
     steps:
@@ -34,71 +34,72 @@ jobs:
       - run: go build -o ${{ env.APP_NAME }}.exe
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-bin
+          name: windows-exe
           path: ${{ env.APP_NAME }}.exe
 
-  build-linux-arm64:
+  build-linux:
     needs: setup
     runs-on: ubuntu-latest
     env:
       GOARCH: arm64
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
       - uses: actions/setup-go@v4
         with:
           go-version: ${{ env.GO_VERSION }}
-          check-latest: true
       - run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=${{ env.GOARCH }} \
-          go build -trimpath -ldflags "-s -w" \
-          -o ${{ env.APP_NAME }}-linux-${{ env.GOARCH }}
+          go build -o ${{ env.APP_NAME }}-linux-${{ env.GOARCH }}
       - uses: actions/upload-artifact@v4
         with:
           name: linux-bin
           path: ${{ env.APP_NAME }}-linux-${{ env.GOARCH }}
-          retention-days: 3
 
-  deploy:
-    needs: [build-windows-amd64, build-linux-arm64]
+  release:
+    needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      RELEASE_DIR: "release-${{ needs.setup.outputs.timestamp }}"
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: '*-bin'  # 匹配 windows-bin 和 linux-bin
+          pattern: |
+            windows-exe
+            linux-bin
 
-      - name: Prepare Release Bundle
+      - name: Validate Files
         run: |
-          mkdir -p "${{RELEASE_DIR}}/bin"
-          find artifacts -type f -exec cp {} ${{RELEASE_DIR}}/bin/" \;
-          (cd "$${{RELEASE_DIR}}/bin" && sha256sum *) > "${{RELEASE_DIR}}/checksums.txt"
-          echo "Build ID: ${{ github.run_id }}" > "${{RELEASE_DIR}}/BUILD_INFO"
-          date -u +'%Y-%m-%dT%H:%M:%SZ' >> "${{RELEASE_DIR}}/BUILD_INFO"
+          echo "文件结构验证:"
+          ls -R artifacts
+          # 关键校验点
+          [ -f artifacts/windows-exe/${{ env.APP_NAME }}.exe ] || exit 1
+          [ -f artifacts/linux-bin/${{ env.APP_NAME }}-linux-arm64 ] || exit 1
 
-      - name: Create Compressed Package
-        run: tar czvf "${{RELEASE_DIR}}.tgz" -C "${{RELEASE_DIR}}" .
+      - name: Generate Checksums
+        run: |
+          mkdir -p checksums
+          cd artifacts/windows-exe && sha256sum * > ../../checksums/windows.sha256
+          cd ../linux-bin && sha256sum * > ../../checksums/linux.sha256
 
-      - name: Dynamic Release
-        uses: softprops/action-gh-release@v2
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          # 根据触发类型自动生成版本信息
-          tag_name: ${{ contains(github.ref, 'refs/tags/') && github.ref_name || format('nightly-{0}', env.RELEASE_DIR) }}
-          name: ${{ contains(github.ref, 'refs/tags/') && format('Release {0}', github.ref_name) || format('Nightly Build {0}', env.RELEASE_DIR) }}
+          tag_name: ${{ contains(github.ref, 'refs/tags/') && github.ref_name || format('nightly-{0}', needs.setup.outputs.timestamp) }}
+          name: ${{ contains(github.ref, 'refs/tags/') && format('Release {0}', github.ref_name) || format('Nightly Build {0}', needs.setup.outputs.timestamp) }}
           body: |
-            ${{ contains(github.ref, 'refs/tags/') && '正式版本发布' || '每日构建版本' }}
-            构建时间: ${{ env.RELEASE_DIR }}
-            包含架构:
-            - Windows amd64
-            - Linux ARM64
+            ## 多架构构建结果
+            **包含以下独立文件：**
+            - Windows x64 可执行文件 (.exe)
+            - Linux ARM64 二进制文件
+            **构建信息：**
+            - 构建ID: ${{ env.BUILD_ID }}
+            - 构建时间: ${{ needs.setup.outputs.timestamp }}
           files: |
-            ${{RELEASE_DIR}}.tgz
-            ${{RELEASE_DIR}}/checksums.txt
+            artifacts/windows-exe/${{ env.APP_NAME }}.exe
+            artifacts/linux-bin/${{ env.APP_NAME }}-linux-arm64
+            checksums/windows.sha256
+            checksums/linux.sha256
           draft: false
           prerelease: ${{ !contains(github.ref, 'refs/tags/') }}

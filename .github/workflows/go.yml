@@ -11,92 +11,6 @@ env:
   BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
-  setup:
-    runs-on: ubuntu-latest
-    outputs:
-      timestamp: ${{ steps.setup.outputs.timestamp }}
-    steps:
-      - name: Generate Build Metadata
-        id: setup
-        run: |
-          TIMESTAMP=$(date -u +'%Y%m%dT%H%M%SZ')
-          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
-
-  build-windows-amd64:
-    needs: setup
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Build Windows
-        shell: powershell
-        env:
-          GOOS: windows
-          GOARCH: amd64
-          CGO_ENABLED: 0
-        run: |
-          $outputFile = "${{ env.APP_NAME }}-windows-amd64-${{ needs.setup.outputs.timestamp }}.exe"
-          go build -ldflags "-X main.Version=${{ env.BUILD_ID }}" -o $outputFile
-          Write-Host "Built file: $outputFile"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-amd64-bin
-          path: ${{ env.APP_NAME }}-windows-amd64-${{ needs.setup.outputs.timestamp }}.exe
-
-  build-linux-arm64:
-    needs: setup
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v4
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Build Linux
-        env:
-          GOOS: linux
-          GOARCH: arm64
-        run: |
-          output_file="${{ env.APP_NAME }}-linux-arm64-${{ needs.setup.outputs.timestamp }}"
-          go build -ldflags "-X main.Version=${{ env.BUILD_ID }}" -o $output_file
-          chmod +x $output_file
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-arm64-bin
-          path: ${{ env.APP_NAME }}-linux-arm64-${{ needs.setup.outputs.timestamp }}
-
-  build-darwin-universal:
-    needs: setup
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v4
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Build Universal macOS
-        env:
-          GOOS: darwin
-          GOARCH: arm64  # 更新为Apple Silicon架构
-        run: |
-          output_file="${{ env.APP_NAME }}-darwin-universal-${{ needs.setup.outputs.timestamp }}"
-          go build -ldflags "-X main.Version=${{ env.BUILD_ID }}" -o $output_file
-          chmod +x $output_file
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: darwin-universal-bin
-          path: ${{ env.APP_NAME }}-darwin-universal-${{ needs.setup.outputs.timestamp }}
-
   deploy:
     needs:
       - build-windows-amd64
@@ -104,9 +18,10 @@ jobs:
       - build-darwin-universal
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # 添加发布权限
+      contents: write
     env:
       RELEASE_NAME: "release-${{ env.BUILD_ID }}"
+      BUILD_ID: ${{ env.BUILD_ID }}  # 显式声明传递
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -114,39 +29,25 @@ jobs:
           path: artifacts
 
       - name: Prepare Release Bundle
+        env:
+          BUILD_ID: ${{ env.BUILD_ID }}  # 步骤级环境变量声明
         run: |
-          mkdir -p ${{ env.RELEASE_NAME }}
+          # 使用双引号包裹变量防止空格问题
+          mkdir -p "release-${BUILD_ID}"
           
-          # 整理各平台文件
-          cp artifacts/windows-amd64-bin/*.exe ${{ env.RELEASE_NAME }}/
-          cp artifacts/linux-arm64-bin/* ${{ env.RELEASE_NAME }}/
-          cp artifacts/darwin-universal-bin/* ${{ env.RELEASE_NAME }}/
+          # 使用明确的路径引用
+          cp -r artifacts/* "release-${BUILD_ID}/"
           
-          # 生成校验文件
-          sha256sum ${{ env.RELEASE_NAME }}/* > checksum.txt
+          # 生成带构建ID的校验文件
+          sha256sum "release-${BUILD_ID}"/* > "checksum-${BUILD_ID}.txt"
           
-          # 创建压缩包
-          tar czvf ${{ env.RELEASE_NAME }}.tgz ${{ env.RELEASE_NAME }} checksum.txt
+          # 打包文件
+          tar czvf "release-${BUILD_ID}.tgz" "release-${BUILD_ID}" "checksum-${BUILD_ID}.txt"
 
-      - name: Generate Release Notes
-        id: changelog
-        run: |
-          COMMIT_LOG=$(git log --pretty=format:"- %h %s (%an)" -3 HEAD)
-          echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
-          echo "### Build Information" >> $GITHUB_ENV
-          echo "🕒 Timestamp: ${{ needs.setup.outputs.timestamp }}" >> $GITHUB_ENV
-          echo "🔧 Build ID: ${{ env.BUILD_ID }}" >> $GITHUB_ENV
-          echo "### Recent Changes" >> $GITHUB_ENV
-          echo "$COMMIT_LOG" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-      - name: Create GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: nightly-${{ needs.setup.outputs.timestamp }}
-          name: "Nightly Build ${{ needs.setup.outputs.timestamp }}"
-          body: ${{ env.RELEASE_NOTES }}
-          prerelease: true
+          tag_name: "nightly-${{ env.BUILD_ID }}"
+          name: "Release ${{ env.BUILD_ID }}"
           files: |
-            ${{ env.RELEASE_NAME }}.tgz
-            checksum.txt
+            release-${{ env.BUILD_ID }}.tgz

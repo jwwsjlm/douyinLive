@@ -5,6 +5,12 @@ on:
     branches: [ main ]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      commitMessage:
+        description: '提交信息（可选）'
+        required: false
+        default: '无提交信息'
+
 
 env:
   GO_VERSION: '1.23'
@@ -106,6 +112,8 @@ jobs:
             - 构建ID: ${{ env.BUILD_ID }}
             - 编译时间: ${{ needs.setup.outputs.timestamp }}
             - 编译系统: Ubuntu (Cross-Compile)
+            **提交信息：**
+                  ${{ github.event.inputs.commitMessage || github.event.head_commit.message }}
           files: |
             artifacts/**/*
             checksums/sha256sums.txt

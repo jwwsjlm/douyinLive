@@ -40,9 +40,10 @@ jobs:
             goos: windows
             goarch: amd64
           - target: linux
-            ext: bin
+            ext: ""
             goos: linux
             goarch: arm64
+
     steps:
       - uses: actions/checkout@v4
 
@@ -52,6 +53,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Build Binary
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p artifacts/${{ matrix.target }}
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \

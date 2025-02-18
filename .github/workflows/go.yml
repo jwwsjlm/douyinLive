@@ -81,7 +81,7 @@ jobs:
     permissions:
       contents: write
     env:
-      RELEASE_DIR: "release-${{ env.BUILD_TAG }}"
+      RELEASE_DIR: "release-${{ vars.BUILD_TAG }}"
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -109,7 +109,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: "nightly-${{ env.BUILD_TAG }}"
-          name: "Release ${{ env.BUILD_TAG }}"
+          tag_name: "nightly-${{ vars.BUILD_TAG }}"
+          name: "Release ${{ vars.BUILD_TAG }}"
           files: |
             ${RELEASE_DIR}.tgz

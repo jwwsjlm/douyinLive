@@ -81,24 +81,35 @@ jobs:
     permissions:
       contents: write
     env:
-      RELEASE_NAME: "release-${{ vars.BUILD_ID }}"
+      RELEASE_DIR: "release-${{ env.BUILD_TAG }}"
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: '*-bin'  # 明确匹配artifact名称
 
       - name: Prepare Release Bundle
         run: |
-          mkdir -p "release-${{ vars.BUILD_ID }}"
-          cp -r artifacts/* "release-${{ vars.BUILD_ID }}/"
-          sha256sum "release-${{ vars.BUILD_ID }}"/* > "checksum-${{ vars.BUILD_ID }}.txt"
-          tar czvf "release-${{ vars.BUILD_ID }}.tgz" "release-${{ vars.BUILD_ID }}" 
+          # 创建扁平化发布目录
+          mkdir -p "${RELEASE_DIR}/bin"
+          find artifacts -type f -exec cp {} "${RELEASE_DIR}/bin/" \;
+          
+          # 生成精确校验和
+          (cd "${RELEASE_DIR}/bin" && sha256sum *) > "${RELEASE_DIR}/checksums.txt"
+          
+          # 添加元数据
+          echo "Build ID: ${{ github.run_id }}" > "${RELEASE_DIR}/BUILD_INFO"
+          date -u +'%Y-%m-%dT%H:%M:%SZ' >> "${RELEASE_DIR}/BUILD_INFO"
 
-      - name: Create Release
+      - name: Create Compressed Package
+        run: |
+          tar czvf "${RELEASE_DIR}.tgz" -C "${RELEASE_DIR}" .
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: "nightly-${{ vars.BUILD_ID }}"
-          name: "Release ${{ vars.BUILD_ID }}"
+          tag_name: "nightly-${{ env.BUILD_TAG }}"
+          name: "Release ${{ env.BUILD_TAG }}"
           files: |
-            release-${{ vars.BUILD_ID }}.tgz
+            ${RELEASE_DIR}.tgz

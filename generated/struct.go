@@ -2,6 +2,7 @@ package generated
 
 import (
 	"douyinlive/generated/douyin"
+	"douyinlive/generated/new_douyin"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -45,7 +46,51 @@ var MessageMap = map[string]func() protoreflect.ProtoMessage{
 	"WebcastLiveShoppingMessage": func() protoreflect.ProtoMessage {
 		return &douyin.LiveShoppingMessage{}
 	},
-	"WebcastChatLikeMessage": func() protoreflect.ProtoMessage {
-		return &douyin.ChatLikeMessage{}
+	//"WebcastChatLikeMessage": func() protoreflect.ProtoMessage {
+	//	return &douyin.ChatLikeMessage{}
+	//},
+}
+var NewMessagemap = map[string]func() protoreflect.ProtoMessage{
+	"WebcastChatMessage":                 func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_ChatMessage{} },
+	"WebcastGiftMessage":                 func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GiftMessage{} },
+	"WebcastLikeMessage":                 func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_LikeMessage{} },
+	"WebcastMemberMessage":               func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_MemberMessage{} },
+	"WebcastSocialMessage":               func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_SocialMessage{} },
+	"WebcastRoomUserSeqMessage":          func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_RoomUserSeqMessage{} },
+	"WebcastFansclubMessage":             func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_FansclubMessage{} },
+	"WebcastControlMessage":              func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_ControlMessage{} },
+	"WebcastEmojiChatMessage":            func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_EmojiChatMessage{} },
+	"WebcastRoomStatsMessage":            func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_RoomStatsMessage{} },
+	"WebcastRoomMessage":                 func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_RoomMessage{} },
+	"WebcastRanklistHourEntranceMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_RanklistHourEntranceMessage{} },
+	"WebcastRoomRankMessage":             func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_RoomRankMessage{} },
+	"WebcastInRoomBannerMessage":         func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_InRoomBannerMessage{} },
+	"WebcastRoomDataSyncMessage":         func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_RoomDataSyncMessage{} },
+	"WebcastLuckyBoxTempStatusMessage":   func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_LuckyBoxTempStatusMessage{} },
+	"WebcastDecorationModifyMethod":      func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_DecorationModifyMessage{} },
+	"WebcastLinkMicAudienceKtvMessage":   func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_LinkMicAudienceKtvMessage{} },
+	"WebcastRoomStreamAdaptationMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_RoomStreamAdaptationMessage{} },
+	"WebcastQuizAudienceStatusMessage":   func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_QuizAudienceStatusMessage{} },
+	"WebcastHotChatMessage":              func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_HotChatMessage{} },
+	"WebcastHotRoomMessage":              func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_HotRoomMessage{} },
+	"WebcastAudioChatMessage":            func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_AudioChatMessage{} },
+	"WebcastRoomNotifyMessage":           func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_MediaRoomNoticeMessage{} },
+	"WebcastLuckyBoxMessage":             func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_LuckyBoxMessage{} },
+	"WebcastUpdateFanTicketMessage":      func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_UpdateFanTicketMessage{} },
+	"WebcastScreenChatMessage":           func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_ScreenChatMessage{} },
+	"WebcastNotifyEffectMessage":         func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_NotifyEffectMessage{} },
+	"WebcastBindingGiftMessage":          func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_BindingGiftMessage{} },
+	"WebcastTempStateAreaReachMessage":   func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_TempStateAreaReachMessage_Resource{} },
+	"WebcastGrowthTaskMessage":           func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GrowthTaskMessage{} },
+	"WebcastGameCPBaseMessage":           func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GameCPBaseMessage{} },
+	//"WebcastSandwichBorderMessage":       func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_san{} },
+	"WebcastLiveEcomGeneralMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LiveEcomGeneralMessage{}
 	},
+	"WebcastLiveShoppingMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LiveShoppingMessage{}
+	},
+	//"WebcastChatLikeMessage": func() protoreflect.ProtoMessage {
+	//	return &douyin.ChatLikeMessage{}
+	//},
 }

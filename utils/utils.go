@@ -61,7 +61,7 @@ func GenerateMsToken(length int) string {
 
 // MatchMethod 根据方法名匹配并返回对应的ProtoMessage
 func MatchMethod(method string) (protoreflect.ProtoMessage, error) {
-	if createMessage, ok := generated.MessageMap[method]; ok {
+	if createMessage, ok := generated.NewMessagemap[method]; ok {
 		return createMessage(), nil
 	}
 	return nil, errors.New("未知消息: " + method)

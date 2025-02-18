@@ -51,6 +51,11 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: ${{ env.GO_VERSION }}
+      - name: Clean and update dependencies
+        run: |
+          go clean -cache
+          go mod tidy
+          go mod download
 
       - name: Build Binary
         env:
@@ -60,6 +65,7 @@ jobs:
         run: |
           mkdir -p artifacts/${{ matrix.target }}
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+          go mod download \
             go build -o artifacts/${{ matrix.target }}/${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
           
           # 实时验证输出文件

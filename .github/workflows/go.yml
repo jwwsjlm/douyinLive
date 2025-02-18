@@ -11,6 +11,46 @@ env:
   BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
+  # 必须存在的无依赖初始作业
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      timestamp: ${{ steps.setup.outputs.timestamp }}
+    steps:
+      - name: Generate Metadata
+        id: setup
+        run: |
+          TIMESTAMP=$(date -u +'%Y%m%dT%H%M%SZ')
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+
+  # Windows 构建作业
+  build-windows-amd64:
+    needs: setup  # 正确声明依赖
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: go build -o ${{ env.APP_NAME }}.exe
+      - uses: actions/upload-artifact@v3
+        with:
+          name: windows-bin
+          path: ${{ env.APP_NAME }}.exe
+
+  # Linux 构建作业
+  build-linux-arm64:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps: [...]  # 类似Windows构建步骤
+
+  # MacOS 构建作业
+  build-darwin-universal:
+    needs: setup
+    runs-on: macos-latest
+    steps: [...]  # 类似Windows构建步骤
+
+  # 部署作业
   deploy:
     needs:
       - build-windows-amd64
@@ -21,7 +61,6 @@ jobs:
       contents: write
     env:
       RELEASE_NAME: "release-${{ vars.BUILD_ID }}"
-      BUILD_ID: ${{ vars.BUILD_ID }}  # 显式声明传递
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -29,20 +68,11 @@ jobs:
           path: artifacts
 
       - name: Prepare Release Bundle
-        env:
-          BUILD_ID: ${{ vars.BUILD_ID }}  # 步骤级环境变量声明
         run: |
-          # 使用双引号包裹变量防止空格问题
-          mkdir -p "release-${BUILD_ID}"
-          
-          # 使用明确的路径引用
-          cp -r artifacts/* "release-${BUILD_ID}/"
-          
-          # 生成带构建ID的校验文件
-          sha256sum "release-${BUILD_ID}"/* > "checksum-${BUILD_ID}.txt"
-          
-          # 打包文件
-          tar czvf "release-${BUILD_ID}.tgz" "release-${BUILD_ID}" "checksum-${BUILD_ID}.txt"
+          mkdir -p "release-${{ vars.BUILD_ID }}"
+          cp -r artifacts/* "release-${{ vars.BUILD_ID }}/"
+          sha256sum "release-${{ vars.BUILD_ID }}"/* > "checksum-${{ vars.BUILD_ID }}.txt"
+          tar czvf "release-${{ vars.BUILD_ID }}.tgz" "release-${{ vars.BUILD_ID }}" 
 
       - name: Create Release
         uses: softprops/action-gh-release@v1

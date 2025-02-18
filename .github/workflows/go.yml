@@ -79,8 +79,8 @@ jobs:
           tree artifacts || find artifacts -type f
           
           # 严格文件存在性检查
-          [ -f artifacts/linux/$APP_NAME-linux-arm64.bin ] || (echo "❌ Linux文件缺失"; exit 1)
-          [ -f artifacts/windows/$APP_NAME-windows-amd64.exe ] || (echo "❌ Windows文件缺失"; exit 1)
+          [ -f artifacts/linux-binaries/$APP_NAME-linux-arm64.bin ] || (echo "❌ Linux文件缺失"; exit 1)
+          [ -f artifacts/windows-binaries/$APP_NAME-windows-amd64.exe ] || (echo "❌ Windows文件缺失"; exit 1)
           
 
       - name: Generate Checksums

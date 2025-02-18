@@ -52,9 +52,8 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Clean and update dependencies
-        run: |
-          go mod tidy
+      - name: Download dependencies
+        run: go mod download
       - name: List all Go packages
         run: go list ./...
 
@@ -65,7 +64,7 @@ jobs:
 #          GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p artifacts/${{ matrix.target }}
-          go build -o artifacts/${{ matrix.target }}/${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          go build -v -o artifacts/${{ matrix.target }}/${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
           
           # 实时验证输出文件
           echo "编译已完成，文件列表："

@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: write
     env:
-      RELEASE_NAME: "release-${{ env.BUILD_ID }}"
+      RELEASE_NAME: "release-${{ vars.BUILD_ID }}"
       BUILD_ID: ${{ env.BUILD_ID }}  # 显式声明传递
     steps:
       - name: Download Artifacts
@@ -30,7 +30,7 @@ jobs:
 
       - name: Prepare Release Bundle
         env:
-          BUILD_ID: ${{ env.BUILD_ID }}  # 步骤级环境变量声明
+          BUILD_ID: ${{ vars.BUILD_ID }}  # 步骤级环境变量声明
         run: |
           # 使用双引号包裹变量防止空格问题
           mkdir -p "release-${BUILD_ID}"
@@ -47,7 +47,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: "nightly-${{ env.BUILD_ID }}"
-          name: "Release ${{ env.BUILD_ID }}"
+          tag_name: "nightly-${{ vars.BUILD_ID }}"
+          name: "Release ${{ vars.BUILD_ID }}"
           files: |
-            release-${{ env.BUILD_ID }}.tgz
+            release-${{ vars.BUILD_ID }}.tgz

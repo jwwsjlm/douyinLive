@@ -3,6 +3,7 @@ name: Go Build & Release Pipeline
 on:
   push:
     branches: [ main ]
+    tags: ['v*']  # 新增标签触发
   workflow_dispatch:
 
 env:
@@ -11,7 +12,6 @@ env:
   BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
-  # 必须存在的无依赖初始作业
   setup:
     runs-on: ubuntu-latest
     outputs:
@@ -23,9 +23,8 @@ jobs:
           TIMESTAMP=$(date -u +'%Y%m%d-%H%M%S')
           echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
 
-  # Windows 构建作业
   build-windows-amd64:
-    needs: setup  # 正确声明依赖
+    needs: setup
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,78 +37,67 @@ jobs:
           name: windows-bin
           path: ${{ env.APP_NAME }}.exe
 
-  # Linux 构建作业
   build-linux-arm64:
     needs: setup
     runs-on: ubuntu-latest
     env:
       GOARCH: arm64
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # 优化大仓库的检出速度
-
-      - name: Setup Go ${{ env.GO_VERSION }}
-        uses: actions/setup-go@v4
+          fetch-depth: 2
+      - uses: actions/setup-go@v4
         with:
           go-version: ${{ env.GO_VERSION }}
-          check-latest: true  # 确保获取最新补丁版本
-
-      - name: Build for Linux ARM64
-        run: |
+          check-latest: true
+      - run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=${{ env.GOARCH }} \
           go build -trimpath -ldflags "-s -w" \
           -o ${{ env.APP_NAME }}-linux-${{ env.GOARCH }}
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: linux-bin
-          path: |
-            ${{ env.APP_NAME }}-linux-${{ env.GOARCH }}
-          retention-days: 3  # 自动清理旧产物
+          path: ${{ env.APP_NAME }}-linux-${{ env.GOARCH }}
+          retention-days: 3
 
-
-
-  # 部署作业
   deploy:
-    needs:
-      - build-windows-amd64
-      - build-linux-arm64
+    needs: [build-windows-amd64, build-linux-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      RELEASE_DIR: "release${{ vars.BUILD_TAG }}"
+      RELEASE_DIR: "release-${{ needs.setup.outputs.timestamp }}"
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: '*-bin'  # 明确匹配artifact名称
 
       - name: Prepare Release Bundle
         run: |
-          # 创建扁平化发布目录
           mkdir -p "${RELEASE_DIR}/bin"
           find artifacts -type f -exec cp {} "${RELEASE_DIR}/bin/" \;
-          
-          # 生成精确校验和
           (cd "${RELEASE_DIR}/bin" && sha256sum *) > "${RELEASE_DIR}/checksums.txt"
-          
-          # 添加元数据
           echo "Build ID: ${{ github.run_id }}" > "${RELEASE_DIR}/BUILD_INFO"
           date -u +'%Y-%m-%dT%H:%M:%SZ' >> "${RELEASE_DIR}/BUILD_INFO"
 
       - name: Create Compressed Package
-        run: |
-          tar czvf "${RELEASE_DIR}.tgz" -C "${RELEASE_DIR}" .
+        run: tar czvf "${RELEASE_DIR}.tgz" -C "${RELEASE_DIR}" .
 
-      - name: Create GitHub Release
+      - name: Dynamic Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: "nightly-${{ vars.BUILD_TAG }}"
-          name: "Release ${{ vars.BUILD_TAG }}"
+          # 根据触发类型自动生成版本信息
+          tag_name: ${{ contains(github.ref, 'refs/tags/') && github.ref_name || format('nightly-{0}', env.RELEASE_DIR) }}
+          name: ${{ contains(github.ref, 'refs/tags/') && format('Release {0}', github.ref_name) || format('Nightly Build {0}', env.RELEASE_DIR) }}
+          body: |
+            ${{ contains(github.ref, 'refs/tags/') && '正式版本发布' || '每日构建版本' }}
+            构建时间: ${{ env.RELEASE_DIR }}
+            包含架构:
+            - Windows amd64
+            - Linux ARM64
           files: |
             ${RELEASE_DIR}.tgz
+            ${RELEASE_DIR}/checksums.txt
+          draft: false
+          prerelease: ${{ !contains(github.ref, 'refs/tags/') }}

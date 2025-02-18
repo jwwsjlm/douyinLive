@@ -81,13 +81,13 @@ jobs:
           echo "文件结构验证:"
           ls -R artifacts
           # 关键校验点
-          [ -f artifacts/windows-exe/${{ env.APP_NAME }}.exe ] || exit 1
-          [ -f artifacts/linux-bin/${{ env.APP_NAME }}-linux-arm64 ] || exit 1
+          [ -f windows-exe/${{ env.APP_NAME }}.exe ] || exit 1
+          [ -f linux-bin/${{ env.APP_NAME }}-linux-arm64 ] || exit 1
 
       - name: Generate Checksums
         run: |
           mkdir -p checksums
-          cd artifacts/windows-exe && sha256sum * > ../../checksums/windows.sha256
+          cd windows-exe && sha256sum * > ../../checksums/windows.sha256
           cd ../linux-bin && sha256sum * > ../../checksums/linux.sha256
 
       - name: Create Release
@@ -104,8 +104,8 @@ jobs:
             - 构建ID: ${{ env.BUILD_ID }}
             - 构建时间: ${{ needs.setup.outputs.timestamp }}
           files: |
-            artifacts/windows-exe/${{ env.APP_NAME }}.exe
-            artifacts/linux-bin/${{ env.APP_NAME }}-linux-arm64
+            windows-exe/${{ env.APP_NAME }}.exe
+            linux-bin/${{ env.APP_NAME }}-linux-arm64
             checksums/windows.sha256
             checksums/linux.sha256
           draft: false

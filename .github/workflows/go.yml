@@ -13,7 +13,7 @@ on:
 
 
 env:
-  GO_VERSION: '1.23'
+  GO_VERSION: '1.23.6'
   APP_NAME: 'douyinLive'
   BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -64,8 +64,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p artifacts/${{ matrix.target }}
-          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-            go build -o artifacts/${{ matrix.target }}/${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          go build -o artifacts/${{ matrix.target }}/${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
           
           # 实时验证输出文件
           echo "编译已完成，文件列表："

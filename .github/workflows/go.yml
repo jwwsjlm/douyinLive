@@ -1,105 +1,93 @@
-# .github/workflows/build.yml
-name: Build
+name: Go Build Pipeline
 
 on:
   push:
-    branches:
-      - '*'
-  workflow_dispatch:  # 支持手动触发
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.23'
+  APP_NAME: 'douyinLive's
+  BUILD_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
-  build:
-    name: Build
+  setup:
     runs-on: ubuntu-latest
-
+    outputs:
+      timestamp: ${{ steps.setup.outputs.timestamp }}
     steps:
-    - name: Check out code
-      uses: actions/checkout@v4
+      - name: Generate Build Metadata
+        id: setup
+        run: |
+          TIMESTAMP=$(date -u +'%Y%m%dT%H%M%SZ')
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.23'
-        check-latest: true
-        cache: true
+  build-windows-amd64:
+    needs: setup
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: |
+          GOOS=windows GOARCH=amd64 go build -o ${{ env.APP_NAME }}-windows-amd64-${{ needs.setup.outputs.timestamp }}.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64-bin
+          path: ${{ env.APP_NAME }}-windows-amd64-${{ needs.setup.outputs.timestamp }}.exe
 
-    - name: Get dependencies
-      run: |
-        go mod tidy
-    - name: Build for Windows
-      run: |
-        GOOS=windows GOARCH=amd64 go build -o douyinLive-windows-amd64.exe
-        GOOS=windows GOARCH=386 go build -o douyinLive-windows-386.exe
-    - name: Build for Linux
-      run: |
-        GOOS=linux GOARCH=amd64 go build -o douyinLive-linux-amd64
-        GOOS=linux GOARCH=386 go build -o douyinLive-linux-386
-        GOOS=linux GOARCH=arm64 go build -o douyinLive-linux-arm64
-        chmod +x douyinLive-linux-*
-    - name: Build for macOS
-      run: |
-        GOOS=darwin GOARCH=amd64 go build -o douyinLive-darwin-amd64
-        GOOS=darwin GOARCH=arm64 go build -o douyinLive-darwin-arm64
-        chmod +x douyinLive-darwin-*
-    - name: Upload All Binaries as Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: douyinLive-binaries-all
-        path: |
-          douyinLive-windows-amd64.exe
-          douyinLive-windows-386.exe
-          douyinLive-linux-amd64
-          douyinLive-linux-386
-          douyinLive-linux-arm64
-          douyinLive-darwin-amd64
-          douyinLive-darwin-arm64
-        retention-days: 90  # 保留90天
+  build-linux-arm64:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: |
+          GOOS=linux GOARCH=arm64 go build -o ${{ env.APP_NAME }}-linux-arm64-${{ needs.setup.outputs.timestamp }}
+          chmod +x ${{ env.APP_NAME }}-linux-arm64-${{ needs.setup.outputs.timestamp }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64-bin
+          path: ${{ env.APP_NAME }}-linux-arm64-${{ needs.setup.outputs.timestamp }}
 
-    - name: Upload Windows amd64 Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: douyinLive-windows-amd64
-        path: douyinLive-windows-amd64.exe
-        retention-days: 90
+  build-darwin-universal:
+    needs: setup
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: |
+          go build -o ${{ env.APP_NAME }}-darwin-universal-${{ needs.setup.outputs.timestamp }}
+          chmod +x ${{ env.APP_NAME }}-darwin-universal-${{ needs.setup.outputs.timestamp }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin-universal-bin
+          path: ${{ env.APP_NAME }}-darwin-universal-${{ needs.setup.outputs.timestamp }}
 
-    - name: Upload Windows 386 Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: douyinLive-windows-386
-        path: douyinLive-windows-386.exe
-        retention-days: 90
+  deploy:
+    needs:
+      - build-windows-amd64
+      - build-linux-arm64
+      - build-darwin-universal
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
-    - name: Upload Linux amd64 Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: douyinLive-linux-amd64
-        path: douyinLive-linux-amd64
-        retention-days: 90
+      - name: Prepare Release Bundle
+        run: |
+          mkdir release-${{ env.BUILD_ID }}
+          cp artifacts/*/* release-${{ env.BUILD_ID }}/
+          tar czvf release-${{ env.BUILD_ID }}.tgz release-${{ env.BUILD_ID }}
 
-    - name: Upload Linux 386 Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: douyinLive-linux-386
-        path: douyinLive-linux-386
-        retention-days: 90
-
-    - name: Upload Linux arm64 Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: douyinLive-linux-arm64
-        path: douyinLive-linux-arm64
-        retention-days: 90
-
-    - name: Upload macOS amd64 Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: douyinLive-darwin-amd64
-        path: douyinLive-darwin-amd64
-        retention-days: 90
-
-    - name: Upload macOS arm64 Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: douyinLive-darwin-arm64
-        path: douyinLive-darwin-arm64
-        retention-days: 90
+      - uses: actions/upload-artifact@v4
+        with:
+          name: full-release
+          path: release-${{ env.BUILD_ID }}.tgz

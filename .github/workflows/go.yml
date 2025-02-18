@@ -54,7 +54,8 @@ jobs:
       - name: Clean and update dependencies
         run: |
           go mod tidy
-
+      - name: List all Go packages
+        run: go list ./...
 
       - name: Build Binary
         env:

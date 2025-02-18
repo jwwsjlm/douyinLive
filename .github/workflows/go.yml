@@ -31,7 +31,6 @@ jobs:
 
   build:
     needs: setup
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
@@ -39,11 +38,13 @@ jobs:
             ext: .exe
             goos: windows
             goarch: amd64
+            os: windows-latest
           - target: linux
             ext: ""
             goos: linux
             goarch: arm64
-
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 

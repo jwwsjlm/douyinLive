@@ -36,7 +36,7 @@ jobs:
       matrix:
         include:
           - target: windows
-            ext: exe
+            ext: .exe
             goos: windows
             goarch: amd64
           - target: linux
@@ -60,7 +60,7 @@ jobs:
         run: |
           mkdir -p artifacts/${{ matrix.target }}
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-            go build -o artifacts/${{ matrix.target }}/${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}
+            go build -o artifacts/${{ matrix.target }}/${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
           
           # 实时验证输出文件
           echo "编译已完成，文件列表："
@@ -90,7 +90,7 @@ jobs:
           tree artifacts || find artifacts -type f
           
           # 严格文件存在性检查
-          [ -f artifacts/linux-binaries/$APP_NAME-linux-arm64.bin ] || (echo "❌ Linux文件缺失"; exit 1)
+          [ -f artifacts/linux-binaries/$APP_NAME-linux-arm64 ] || (echo "❌ Linux文件缺失"; exit 1)
           [ -f artifacts/windows-binaries/$APP_NAME-windows-amd64.exe ] || (echo "❌ Windows文件缺失"; exit 1)
           
 

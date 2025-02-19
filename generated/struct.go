@@ -50,7 +50,9 @@ var MessageMap = map[string]func() protoreflect.ProtoMessage{
 	//	return &douyin.ChatLikeMessage{}
 	//},
 }
-var NewMessagemap = map[string]func() protoreflect.ProtoMessage{
+
+// NewMessage 匹配抖音直播消息
+var NewMessage = map[string]func() protoreflect.ProtoMessage{
 	"WebcastChatMessage":                 func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_ChatMessage{} },
 	"WebcastGiftMessage":                 func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GiftMessage{} },
 	"WebcastLikeMessage":                 func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_LikeMessage{} },
@@ -83,14 +85,62 @@ var NewMessagemap = map[string]func() protoreflect.ProtoMessage{
 	"WebcastTempStateAreaReachMessage":   func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_TempStateAreaReachMessage_Resource{} },
 	"WebcastGrowthTaskMessage":           func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GrowthTaskMessage{} },
 	"WebcastGameCPBaseMessage":           func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GameCPBaseMessage{} },
-	//"WebcastSandwichBorderMessage":       func() protoreflect.ProtoMessage { return &new_douyin.webcast_im_bor{} },
+	"WebcastSandwichBorderMessage":       func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_SandwichBorderMessage{} },
 	"WebcastLiveEcomGeneralMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_LiveEcomGeneralMessage{}
 	},
 	"WebcastLiveShoppingMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_LiveShoppingMessage{}
 	},
-	//"WebcastChatLikeMessage": func() protoreflect.ProtoMessage {
-	//	return &new_douyin.webcast_data_chat{}
-	//},
+	"WebcastChatLikeMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_ChatLikeMessage{}
+	},
+	"WebcastLinkmicOrderSingScoreMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkmicOrderSingScoreMessage{}
+	},
+	"WebcastLinkerContributeMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkerContributeMessage{}
+	},
+	"WebcastLinkMicSendEmojiMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkMicSendEmojiMessage{}
+	},
+	"WebcastLinkmicPlaymodeMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkmicPlaymodeMessage{}
+	},
+	"WebcastActivityEmojiGroupsMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_ActivityEmojiGroupsMessage{}
+	},
+	"WebcastLinkmicPlayModeUpdateScoreMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkmicPlayModeUpdateScoreMessage{}
+	},
+	"WebcastLinkMicMethod": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkMicMethod{}
+	},
+	"WebcastLinkMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkMessage{}
+	},
+	"WebcastLinkmicOrderSingMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkmicOrderSingMessage{}
+	},
+	"WebcastLinkMicPositionMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkMicPositionMessage{}
+	},
+	"WebcastLinkmicEnlargeGuestMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkmicEnlargeGuestMessage{}
+	},
+	"WebcastLinkmicProfitMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkmicProfitMessage{}
+	},
+	"WebcastGiftIconFlashMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_GiftIconFlashMessage{}
+	},
+	"WebcastGiftSortMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_GiftSortMessage{}
+	},
+	"WebcastPrivilegeScreenChatMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_PrivilegeScreenChatMessage{}
+	},
+	"WebcastExhibitionChatMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_ExhibitionChatMessage{}
+	},
 }

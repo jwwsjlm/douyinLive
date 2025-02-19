@@ -4,13 +4,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"douyinlive/generated/douyin"
+	"douyinlive/generated/new_douyin"
 	"douyinlive/jsScript"
 	"douyinlive/utils"
 	"fmt"
-	"github.com/gorilla/websocket"
-	"github.com/imroc/req/v3"
-	"github.com/spf13/cast"
-	"google.golang.org/protobuf/proto"
 	"io"
 	"log"
 	"net/http"
@@ -18,6 +15,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/imroc/req/v3"
+	"github.com/spf13/cast"
+	"google.golang.org/protobuf/proto"
 )
 
 // 正则表达式用于提取 roomID 和 pushID
@@ -188,9 +190,9 @@ func (d *DouyinLive) Start() {
 			}
 		}
 	}()
-	var pbPac = &douyin.PushFrame{}
-	var pbResp = &douyin.Response{}
-	var pbAck = &douyin.PushFrame{}
+	var pbPac = &new_douyin.Webcast_Im_PushFrame{}
+	var pbResp = &new_douyin.Webcast_Im_Response{}
+	var pbAck = &new_douyin.Webcast_Im_PushFrame{}
 	for d.isLiveClosed {
 		messageType, message, err := d.Conn.ReadMessage()
 		if err != nil {
@@ -207,7 +209,7 @@ func (d *DouyinLive) Start() {
 					log.Println("解析消息失败：", err)
 					continue
 				}
-				n := utils.HasGzipEncoding(pbPac.HeadersList)
+				n := utils.HasGzipEncoding(pbPac.Headers)
 				if n && pbPac.PayloadType == "msg" {
 					uncompressedData, err := d.GzipUnzipReset(pbPac.Payload)
 					if err != nil {
@@ -222,7 +224,7 @@ func (d *DouyinLive) Start() {
 					}
 					if pbResp.NeedAck {
 						pbAck.Reset()
-						pbAck.LogId = pbPac.LogId
+						pbAck.LogID = pbPac.LogID
 						pbAck.PayloadType = "ack"
 						pbAck.Payload = []byte(pbResp.InternalExt)
 
@@ -289,15 +291,15 @@ func (d *DouyinLive) StitchUrl() string {
 }
 
 // emit 触发事件处理器
-func (d *DouyinLive) emit(eventData *douyin.Message) {
+func (d *DouyinLive) emit(eventData *new_douyin.Webcast_Im_Message) {
 	for _, handler := range d.eventHandlers {
 		handler(eventData)
 	}
 }
 
 // ProcessingMessage 处理接收到的消息
-func (d *DouyinLive) ProcessingMessage(response *douyin.Response) {
-	for _, data := range response.MessagesList {
+func (d *DouyinLive) ProcessingMessage(response *new_douyin.Webcast_Im_Response) {
+	for _, data := range response.Messages {
 		d.emit(data)
 		if data.Method == "WebcastControlMessage" {
 			msg := &douyin.ControlMessage{}

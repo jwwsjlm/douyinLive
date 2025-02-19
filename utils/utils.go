@@ -5,7 +5,7 @@ import (
 	"compress/gzip"
 	"crypto/md5"
 	"douyinlive/generated"
-	"douyinlive/generated/douyin"
+	"douyinlive/generated/new_douyin"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -18,7 +18,9 @@ import (
 )
 
 // HasGzipEncoding 判断消息头中是否包含gzip编码
-func HasGzipEncoding(headers []*douyin.HeadersList) bool {
+
+func HasGzipEncoding(headers []*new_douyin.Webcast_Im_PushHeader) bool {
+
 	for _, header := range headers {
 		if header.Key == "compress_type" && header.Value == "gzip" {
 			return true
@@ -61,7 +63,7 @@ func GenerateMsToken(length int) string {
 
 // MatchMethod 根据方法名匹配并返回对应的ProtoMessage
 func MatchMethod(method string) (protoreflect.ProtoMessage, error) {
-	if createMessage, ok := generated.NewMessagemap[method]; ok {
+	if createMessage, ok := generated.NewMessage[method]; ok {
 		return createMessage(), nil
 	}
 	return nil, errors.New("未知消息: " + method)

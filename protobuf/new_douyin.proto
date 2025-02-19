@@ -2,6 +2,7 @@ syntax = "proto3";
 option go_package = "generated/new_douyin/";
 package new_douyin;
 
+
 message Webcast {
 
   message Im {
@@ -1026,6 +1027,7 @@ message Webcast {
         string schema = 2;
         Data.Image icon = 3;
         Text icon_text = 4;
+        repeated UIItem ui_item_list = 5;
       }
 
       message UIItem {
@@ -1060,6 +1062,8 @@ message Webcast {
       SwitchLyricStatusContent switch_lyric_status_content = 7;
       SwitchFullSongStatusContent switch_full_song_status_content = 8;
       SwitchTuningEffectContent switch_tuning_effect_content = 9;
+      SwitchSongVolumeContent switch_song_volume_content = 10;
+      KtvEffectDegradeContent ktv_effect_degrade_content = 11;
     }
 
     message InitLinkmicContent {
@@ -1244,6 +1248,7 @@ message Webcast {
       uint64 close_user_id = 2;
       string close_toast = 3;
       int32 close_reason = 4;
+      string close_open_id = 5000;
     }
 
     message ChorusOrderedSongListChangeContent {
@@ -1383,6 +1388,9 @@ message Webcast {
       string sub_title = 5;
       string icon_url = 6;
       string bg_pic_url = 7;
+      int32  reward_amount = 8;
+      string  tip = 9;
+      string  finish_sound = 10;
     }
 
     message CommonPopupMessage {
@@ -1448,6 +1456,7 @@ message Webcast {
       uint64 lottery_id = 2;
       repeated uint64 user_ids = 3;
       string extra = 4;
+      repeated string user_open_ids = 5000;
     }
 
     message DataLifeLiveMessage {
@@ -1515,6 +1524,8 @@ message Webcast {
       uint64 display_time = 6;
       uint64 max_push_delay_time = 7;
       bool check_alive = 8;
+      string alive_scene = 5000;
+      string alive_ids = 5001;
     }
 
     message DolphinSettingUpdateMessage {
@@ -1649,6 +1660,8 @@ message Webcast {
         string nick_name = 2;
         string avatar = 3;
         string user_id_str = 4;
+        string user_open_id = 5000;
+        string user_open_id_str = 5001;
       }
     }
 
@@ -1764,6 +1777,7 @@ message Webcast {
       Data.User user = 4;
       UpgradePrivilege upgrade_privilege = 5;
       PublicAreaCommon public_area_common = 6;
+      uint64 left_diamond = 7;
 
       message UpgradePrivilege {
         string content = 1;
@@ -2068,6 +2082,7 @@ message Webcast {
       string config_extra = 9;
       uint64 play_kind = 10;
       uint64 switch_id = 11;
+      string anchor_openid = 5000;
     }
 
     message GameCPAnchorPromoteInfoMessage {
@@ -2095,6 +2110,8 @@ message Webcast {
       uint64 game_tag_id = 17;
       uint64 game_union_type = 18;
       bool support_introduce = 19;
+      string user_game_stats = 20;
+      int32 omni_cooperation_type = 21;
     }
 
     message GameCPBaseMessage {
@@ -2338,6 +2355,7 @@ message Webcast {
       repeated uint64 user_ids = 2;
       uint64 recommend_time = 3;
       uint64 not_flash_after = 4;
+      repeated string open_ids = 5000;
     }
 
     message GiftTouchMessage {
@@ -2369,6 +2387,7 @@ message Webcast {
       int32 update_type = 2;
       repeated uint64 update_gift_ids = 3;
       repeated uint64 update_asset_ids = 4;
+      Data.GiftSortStrategy gift_sort_strategy = 5;
     }
 
     message GiftVoteMessage {
@@ -2399,7 +2418,7 @@ message Webcast {
       Data.User user = 7;
       Data.User to_user = 8;
       int32 repeat_end = 9;
-      GiftMessage.TextEffect text_effect = 10;
+      TextEffect text_effect = 10;
       uint64 group_id = 11;
       uint64 income_taskgifts = 12;
       uint64 room_fan_ticket_count = 13;
@@ -2430,6 +2449,9 @@ message Webcast {
       string GiftPlayParam = 40;
       int32 multi_send_effect_level = 41;
       repeated Data.SeriesPlayGift series_gift_data = 42;
+      bool use_room_message = 43;
+      uint64 count = 44;
+      repeated string to_openids = 5000;
 
       message TextEffect {
         Detail portrait = 1;
@@ -2557,6 +2579,7 @@ message Webcast {
       int32 trigger = 13;
       uint64 operator_id = 14;
       string operator_nickname = 15;
+      string operator_open_id = 5000;
     }
 
     message HotChatMessage {
@@ -2675,6 +2698,7 @@ message Webcast {
       string sign = 4;
       uint64 game_id = 5;
       uint64 app_kind = 6;
+      bool magic_box_recycle = 7;
     }
 
     message InteractionInfoMessage {
@@ -2694,6 +2718,10 @@ message Webcast {
 
     message InteractionPlayRealNameAuthMessage {
       Common common = 1;
+      int32 scene = 2;
+      string client_key = 3;
+      TwoElementAgreement two_element_agreement = 4;
+      InteractionPlayAuthEventParam event_param = 5;
     }
 
     message IntercomInviteMessage {
@@ -2743,6 +2771,8 @@ message Webcast {
       uint64 song_id = 2;
       Data.KtvAtmosphereVideoInfo video_info = 3;
       Data.KTVMVInfo mv_info = 4;
+      uint64 k_song_uid = 5;
+      string open_id = 5000;
     }
 
     message KTVContestSupportMessage {
@@ -2752,6 +2782,8 @@ message Webcast {
       uint64 supportor_id = 4;
       uint64 song_id = 5;
       uint64 song_unique_id = 6;
+      string supportee_open_id = 5000;
+      string supportor_open_id = 50001;
     }
 
     message AddKTVDressContent {
@@ -2798,6 +2830,7 @@ message Webcast {
       uint64 hot = 2;
       uint64 rank = 3;
       uint64 singer = 4;
+      string singer_open_id = 5000;
     }
 
     message KtvChallengeConfigMessage {
@@ -2814,6 +2847,7 @@ message Webcast {
       uint64 singer_id = 3;
       string singer_nickname = 4;
       Data.Image singer_avatar_thumb = 5;
+      string singer_open_id = 5000;
 
       message ChallengeRankUser {
         uint64 user_id = 1;
@@ -2871,6 +2905,7 @@ message Webcast {
       WantToListenSongRemovedContent want_to_listen_song_removed = 13;
       AudienceMultiChorusSettingChangedContent audience_multi_chorus_setting_changed = 14;
       MultiChorusWaitingListChangedContent multi_chorus_waiting_list_changed = 15;
+      KTVStageHideLyricsSwitchChangedContent ktv_stage_hide_lyrics_switch_changed = 16;
     }
 
     message SetSettingOrderSongContent {
@@ -2892,11 +2927,14 @@ message Webcast {
       int32 action_type = 2;
       uint64 from_user_id = 3;
       uint64 singer_id = 4;
+      string from_open_id = 5000;
+      string singer_open_id = 5001;
     }
 
     message OpenKtvComponentContent {
       bool open_audience_add_song_switch = 1;
       bool open_audience_multi_chorus_switch = 2;
+      bool open_stage_hide_lyrics_switch = 3;
     }
 
     message CloseKtvComponentContent {
@@ -2955,6 +2993,7 @@ message Webcast {
       string diy_item_info = 11;
       uint64 banned_display_effects = 12;
       Data.GiftStruct gift_struct = 13;
+      string to_openid = 5000;
     }
 
     message GiftLiteTrayInfo {
@@ -2989,6 +3028,7 @@ message Webcast {
       uint64 applicant_user_id = 1;
       string applicant_sec_user_id = 2;
       Data.User applicant_user = 3;
+      string applicant_open_id = 5000;
     }
 
     message ChannelLinkerCreateContent {
@@ -2996,6 +3036,7 @@ message Webcast {
       uint64 room_id = 2;
       uint64 link_type = 3;
       string sec_owner_id = 4;
+      string owner_open_id = 5000;
     }
 
     message ChannelLinkerCloseContent {
@@ -3008,6 +3049,8 @@ message Webcast {
       string prompt = 3;
       string inviter_sec_user_id = 4;
       string invitee_sec_user_id = 5;
+      string inviter_open_id = 5000;
+      string invitee_open_id = 5001;
     }
 
     message ChannelLinkerReplyContent {
@@ -3017,6 +3060,8 @@ message Webcast {
       string prompt = 4;
       string inviter_sec_user_id = 5;
       string invitee_sec_user_id = 6;
+      string inviter_open_id = 5000;
+      string invitee_open_id = 5001;
     }
 
     message ChannelLinkerPermitContent {
@@ -3026,6 +3071,8 @@ message Webcast {
       string prompt = 4;
       string applicant_sec_user_id = 5;
       string approver_sec_user_id = 6;
+      string applicant_open_id = 5000;
+      string approver_open_id = 5001;
     }
 
     message ChannelLinkerEnterContent {
@@ -3143,11 +3190,18 @@ message Webcast {
       LinkerSwitchChannelInviteContent switch_channel_invite_content = 60;
       LinkerSwitchChannelReplyContent switch_channel_reply_content = 61;
       LinkerSwitchChannelCancelContent switch_channel_cancel_content = 62;
+      LinkerAudioAvatarNoticeContent audio_avatar_notice_content = 63;
+      LinkerRTCActionContent rtc_action_content = 64;
+      LinkerCrossLinkInfoUpdateContent cross_link_info_update = 65;
+      LinkerCrossLinkFinishContent cross_link_finish = 66;
+      LinkerInitChatRoomContent init_chat_room_content = 67;
+      LinkerAudienceWaitingListChangeContent audience_waiting_list_change = 68;
       LinkerSysKickOutContent sys_kick_out_content = 101;
       uint64 fallback_scene = 199;
       string extra = 200;
       Data.LinkerBaseInfo linker_base_info = 201;
       PublicAreaCommon public_area_common = 202;
+      uint64 version = 203;
     }
 
     message LinkerSwitchChannelInviteContent {
@@ -3184,6 +3238,7 @@ message Webcast {
       uint64 owner_user_id = 4;
       uint64 owner_room_id = 5;
       uint64 vendor = 6;
+      string owner_open_id = 5000;
     }
 
     message LinkerInviteContent {
@@ -3221,6 +3276,14 @@ message Webcast {
       string client_attached_info = 32;
       Data.UserVersionInfo inviter_version_info = 33;
       uint64 to_join_channel_id = 34;
+      Data.AnchorLayoutInfo layout_info = 35;
+      Data.BattleRivalTag region = 36;
+      string open_game_app_id = 37;
+      string battle_attached_info = 38;
+      int32 biz_type = 39;
+      string biz_extra = 200;
+      string from_open_id = 5000;
+      string to_open_id = 5001;
     }
 
     message LinkerPrepareInviteContent {
@@ -3279,12 +3342,21 @@ message Webcast {
       string client_attached_info = 22;
       Data.UserVersionInfo reply_version_info = 23;
       Data.AnchorLayoutInfo layout_info = 24;
+      Data.MultiRtcInfo multi_rtc_info = 25;
+      Data.MultiLiveCoreInfo multi_live_core_info = 26;
+      Data.PreRTCInfo pre_rtc_info = 27;
+      string battle_attached_info = 28;
+      int32 to_biz_type = 29;
+      int32 biz_type = 30;
+      string from_open_id = 5000;
+      string to_open_id = 5001;
     }
 
     message LinkerCreateContent {
       uint64 owner_id = 1;
       uint64 owner_room_id = 2;
       uint64 link_type = 3;
+      string owner_open_id = 5000;
     }
 
     message MatchEffect {
@@ -3354,12 +3426,17 @@ message Webcast {
       uint64 paid_count = 3;
       uint64 link_duration = 4;
       int32 kick_out_source = 5;
+      bool switch_to_silence = 6;
+      string from_open_id = 5000;
     }
 
     message LinkerSysKickOutContent {
       uint64 user_id = 1;
       string linkmic_id_str = 2;
       string toast_msg = 3;
+      int32 kick_out_source = 4;
+      string reason_toast = 5;
+      string open_id = 5000;
     }
 
     message LinkerWaitingListChangeContent {
@@ -3379,7 +3456,8 @@ message Webcast {
     }
 
     message LinkerBanContent {
-      Data.BanUser ban_users = 1;
+      repeated Data.BanUser ban_users = 1;
+      int32 linkmic_ban_type = 2;
     }
 
     message LinkerUpdateUserContent {
@@ -3412,6 +3490,7 @@ message Webcast {
       string music_author = 10;
       string music_url = 11;
       uint64 comment_count = 12;
+      string author_open_id = 5000;
     }
 
     message LinkerUpdateLinkTypeApplyContent {
@@ -3449,6 +3528,7 @@ message Webcast {
       uint64 anchor_user_id = 2;
       repeated Data.ListUser linked_users = 3;
       uint64 version = 4;
+      string anchor_open_user_id = 5000;
     }
 
     message LinkerClickScreenContent {
@@ -3515,6 +3595,8 @@ message Webcast {
       int32 invite_type = 3;
       Data.Image ui_image = 4;
       int32 target_enlarge_guest_type = 5;
+      string from_openid = 5000;
+      string to_openid = 5001;
     }
 
     message LinkerEnlargeGuestReplyContent {
@@ -3522,6 +3604,8 @@ message Webcast {
       uint64 to_user_id = 2;
       int32 reply_type = 3;
       string reply_prompts = 4;
+      string from_openid = 5000;
+      string to_openid = 5001;
     }
 
     message LinkerEnlargeGuestApplyContent {
@@ -3529,6 +3613,7 @@ message Webcast {
       string apply_prompts = 2;
       Data.Image ui_image = 3;
       int32 target_enlarge_guest_type = 4;
+      string from_openid = 5000;
     }
 
     message CrossRoomLinkInviteContent {
@@ -3538,6 +3623,7 @@ message Webcast {
       int32 inviter_room_join_status = 4;
       Data.RoomBattleMode room_battle_mode = 5;
       string introduction_content = 6;
+      int32 cross_room_kind = 7;
     }
 
     message CrossRoomLinkReplyContent {
@@ -3552,6 +3638,9 @@ message Webcast {
       string reply_toast = 9;
       int32 reply_operate = 10;
       Data.RoomBattleProcessInfo process_info = 11;
+      int32 cross_room_kind = 12;
+      string invitee_open_id = 5000;
+      string reply_open_id = 5001;
     }
 
     message CrossRoomLinkCancelInviteContent {
@@ -3592,6 +3681,7 @@ message Webcast {
       ApplyParam param = 1;
       uint64 apply_user = 2;
       uint64 room_id = 3;
+      string apply_open_user = 5000;
 
       message ApplyParam {
         int32 apply_type = 1;
@@ -3600,6 +3690,8 @@ message Webcast {
 
     message CrossRoomRTCInfoContent {
       Data.MultiChannelInfo multi_channel_info = 1;
+      Data.PreRTCInfo pre_rtc_info = 2;
+      Data.MultiChannelInfo other_multi_channel_info = 3;
     }
 
     message AnchorUpdateLinkmicConfigContent {
@@ -3613,6 +3705,10 @@ message Webcast {
       int32 anchor_ui_layout = 3;
       int32 anchor_layout_range = 4;
       uint64 operator_id = 5;
+      map<string, Data.AnchorLayoutDetail> layout_details = 6;
+      bool big_anchor_is_orientation = 7;
+      string update_open_user_id = 5000;
+      string operator_open_id = 5001;
     }
 
     message LinkerApplyRankChangeContent {
@@ -3752,6 +3848,8 @@ message Webcast {
       LinkmicFollowEffectContent linkmic_follow_effect_content = 28;
       PKLinkBubbleContent pk_link_bubble_content = 29;
       PlayModeGuideBubbleContent play_mode_guide_bubble_content = 30;
+      CrossLinkGuideBubbleContent cross_link_guide_bubble_content = 31;
+      CrossLinkGuideAudioBubbleAnimationContent cross_link_guide_audio_bubble_animation_content = 32;
 
       message AnchorInfo {
         repeated InfoItem infoList = 1;
@@ -3776,6 +3874,7 @@ message Webcast {
       message FollowInfo {
         uint64 target_user_id = 1;
         uint64 follow_status = 2;
+        string target_open_id = 5000;
       }
     }
 
@@ -3830,11 +3929,13 @@ message Webcast {
       Data.Text text = 4;
       string schema = 5;
       map<string, string> extra = 6;
+      int32 anchor_show_position = 7;
     }
 
     message LinkMicHostModifyMsg {
       Common common = 1;
       repeated uint64 host_uids = 2;
+      repeated string host_open_ids = 5000;
     }
 
     message LinkMicKtvBeatRankMessage {
@@ -3943,6 +4044,25 @@ message Webcast {
       Data.AudienceActionSource action_source = 89;
       Data.BattleBarConfig battle_bar_config = 90;
       Data.User from_user = 91;
+      map<int64, Data.AuxiliaryScoreInfo> auxiliary_score_infos = 92;
+      string linker_session_id = 93;
+      string remote_linker_session_id = 94;
+      Data.LinkGameInfo link_game_info = 95;
+      Data.Image invite_image = 96;
+      string invite_prompt = 97;
+      Data.LinkmicJoinChannelData join_channel_data = 98;
+      bool  switch_to_silence = 99;
+      bool  is_auto_join = 100;
+      uint64  game_barrage_linker_id = 101;
+      string  game_barrage_linker_finish_reason = 102;
+      Data.ChorusCDNInfo  chorus_cdn_info = 103;
+      uint64  battle_id = 104;
+      string  invite_subtitle = 105;
+      string  open_id = 5000;
+      string  invite_open_id = 5001;
+      string  to_open_id = 5002;
+      string  from_open_id = 5003;
+      string  rival_anchor_open_id = 5004;
 
       message UserScores {
         uint64 score = 1;
@@ -4021,6 +4141,11 @@ message Webcast {
       uint64 gift_id = 2;
       bool auto_enlarge = 3;
       repeated uint64 gift_ids = 4;
+      repeated uint64 audition_gift_ids = 5;
+      bool show_gift_info = 6;
+      bool ai_lyrics = 7;
+      int32 mode = 8;
+      bool autio_play_mv = 9;
     }
 
     message LinkmicOrderSingFinishContent {
@@ -4042,6 +4167,7 @@ message Webcast {
       uint64 timestamp = 4;
       Data.CurrentOrderSingItemV2 current_order_sing_item = 5;
       Data.Image order_sing_gift_icon = 6;
+      Data.Image audition_gift_icon = 7;
     }
 
     message LinkmicOrderSingMVActionContent {
@@ -4051,6 +4177,7 @@ message Webcast {
       string item_id = 4;
       uint64 singer_id = 5;
       string op_source = 6;
+      string singer_open_id = 5000;
     }
 
     message LinkmicOrderSingScoreMessage {
@@ -4073,6 +4200,9 @@ message Webcast {
       uint64 current_round_mic_count = 8;
       Data.User title_sponsor = 9;
       bool hit_toast = 10;
+      string golden_microphone_num_str = 11;
+      string golden_microphone_num_fuzzy = 12;
+      string open_id = 5000;
     }
 
     message LinkMicPositionMessage {
@@ -4173,6 +4303,8 @@ message Webcast {
       uint64 to_user_id = 1;
       uint64 invite_timeout_duration_s = 2;
       uint64 inviter_id = 3;
+      string to_open_id = 5000;
+      string inviter_open_id = 5001;
     }
 
     message LinkMicAdventureCardContent {
@@ -4202,12 +4334,14 @@ message Webcast {
       uint64 audience_join = 3;
       Data.AdventurePlayModeInfo play_mode_info = 4;
       uint64 operator_id = 5;
+      string operator_open_id = 5000;
     }
 
     message LinkMicAdventureCallCancelContent {
       uint64 invitee_user_id = 1;
       uint64 pair_id = 2;
       string pair_id_str = 4;
+      string invitee_open_id = 5000;
     }
 
     message LinkMicAudienceKtvMessage {
@@ -4225,6 +4359,8 @@ message Webcast {
         uint64 user_id = 2;
         uint64 song_type = 3;
         bool is_public = 4;
+        uint64 k_song_uid = 5;
+        string open_id = 5000;
       }
 
       message ListInfo {
@@ -4270,6 +4406,7 @@ message Webcast {
       int32 msg_type = 2;
       LiveMatrixEntranceChangeContent live_matrix_entrance_change_content = 3;
       LinkmicWebAntiCheatContent web_anti_cheat_content = 4;
+      XplayInitContent xplay_init_content = 5;
     }
 
     message LiveMatrixEntranceChangeContent {
@@ -4303,6 +4440,7 @@ message Webcast {
       uint64 enlarged_user_id = 1;
       int32 source = 2;
       Data.EnlargeGuestInfo info = 3;
+      string enlarged_openid = 5000;
     }
 
     message LinkmicEnlargeGuestTurnOffContent {
@@ -4312,11 +4450,13 @@ message Webcast {
     message LinkmicEnlargeGuestChangeUserContent {
       uint64 enlarged_user_id = 1;
       Data.EnlargeGuestInfo info = 2;
+      string enlarged_openid = 5000;
     }
 
     message LinkmicPlaymodeMessage {
       Common common = 1;
       Data.LinkmicSubtitleStatus linkmic_subtitle_status = 2;
+      LinkmicStarWishWrdsMessage linkmic_starwish_info = 3;
     }
 
     message LinkmicProfitEggMessage {
@@ -4383,6 +4523,7 @@ message Webcast {
       string anchor_toast = 2;
       string win_user_toast = 3;
       string other_bid_users_toast = 4;
+      string win_open_id = 5000;
     }
 
     message LinkmicProfitBidPaidLinkmicTerminateContent {
@@ -4412,6 +4553,7 @@ message Webcast {
       uint64 add_price_user_id = 1;
       uint64 add_price_value = 2;
       Data.Text text = 3;
+      string add_price_open_id = 5000;
     }
 
     message LinkmicProfitBidPaidLinkmicTurnOnContent {
@@ -4443,6 +4585,8 @@ message Webcast {
       uint64 reply_user_id = 6;
       string reply_toast = 7;
       int32 reply_operate = 8;
+      string invitee_open_id = 5000;
+      string reply_open_id = 5001;
     }
 
     message LinkmicProfitInteractiveScreenCastOpenContent {

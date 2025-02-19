@@ -2,7 +2,7 @@ package douyinlive
 
 import (
 	"compress/gzip"
-	"douyinlive/generated/douyin"
+	"douyinlive/generated/new_douyin"
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
 	"net/http"
@@ -26,7 +26,7 @@ const (
 	Default = "Default"
 )
 
-type EventHandler func(eventData *douyin.Message)
+type EventHandler func(eventData *new_douyin.Webcast_Im_Message)
 type DouyinLive struct {
 	ttwid         string
 	roomid        string

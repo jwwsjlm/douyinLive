@@ -2,7 +2,7 @@ package main
 
 import (
 	"douyinlive"
-	"douyinlive/generated/douyin"
+	"douyinlive/generated/new_douyin"
 	"douyinlive/utils"
 	"encoding/hex"
 	"fmt"
@@ -89,7 +89,7 @@ func checkPortAvailability(port int) bool {
 }
 
 // Subscribe 处理订阅的更新
-func Subscribe(eventData *douyin.Message) {
+func Subscribe(eventData *new_douyin.Webcast_Im_Message) {
 	msg, err := utils.MatchMethod(eventData.Method)
 	if err != nil {
 		if unknown {

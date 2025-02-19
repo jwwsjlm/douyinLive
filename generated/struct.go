@@ -83,7 +83,7 @@ var NewMessagemap = map[string]func() protoreflect.ProtoMessage{
 	"WebcastTempStateAreaReachMessage":   func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_TempStateAreaReachMessage_Resource{} },
 	"WebcastGrowthTaskMessage":           func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GrowthTaskMessage{} },
 	"WebcastGameCPBaseMessage":           func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GameCPBaseMessage{} },
-	//"WebcastSandwichBorderMessage":       func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_san{} },
+	//"WebcastSandwichBorderMessage":       func() protoreflect.ProtoMessage { return &new_douyin.webcast_im_bor{} },
 	"WebcastLiveEcomGeneralMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_LiveEcomGeneralMessage{}
 	},
@@ -91,6 +91,6 @@ var NewMessagemap = map[string]func() protoreflect.ProtoMessage{
 		return &new_douyin.Webcast_Im_LiveShoppingMessage{}
 	},
 	//"WebcastChatLikeMessage": func() protoreflect.ProtoMessage {
-	//	return &douyin.ChatLikeMessage{}
+	//	return &new_douyin.webcast_data_chat{}
 	//},
 }

@@ -24,5 +24,6 @@ jobs:
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
           goversion: "1.23.6" # 可以指定编译使用的 Golang 版本
-          binary_name: "main" # 可以指定二进制文件的名称
+          release_tag: ${{ github.ref_name }}
+#          binary_name: "main" # 可以指定二进制文件的名称
 #          extra_files: README.md # 需要包含的额外文件

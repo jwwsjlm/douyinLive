@@ -10,3 +10,4 @@
 /cmd/main/*.exe
 /*.exe
 /.vscode
+/.github/workflows/.go.yml

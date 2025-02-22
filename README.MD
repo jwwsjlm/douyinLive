@@ -4,9 +4,9 @@
 
 
 
-项目核心来自 https://github.com/saermart/DouyinLiveWebFetcher 
-
-改写成golang测试
+项目灵感来自:https://github.com/saermart/DouyinLiveWebFetcher 
+项目proto来自:https://github.com/Remember-the-past/douyin_proto
+感谢上面两位的无视贡献,
 
 新增ws链接
 测试在main/main.go中

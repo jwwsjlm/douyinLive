@@ -7,6 +7,7 @@ import (
 	"douyinlive/generated/new_douyin"
 	"douyinlive/jsScript"
 	"douyinlive/utils"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -26,6 +27,7 @@ import (
 var (
 	roomIDRegexp = regexp.MustCompile(`roomId\\":\\"(\d+)\\"`)
 	pushIDRegexp = regexp.MustCompile(`user_unique_id\\":\\"(\d+)\\"`)
+	isLiveRegexp = regexp.MustCompile(`id_str\\":\\"(\d+)\\",\\"status\\":(\d+),\\"status_str\\":\\"(\d+)\\",\\"title\\":\\"(.*?)\\",\\"user_count_str\\":\\"(.*?)\\"`)
 )
 
 // DouyinLive 结构体表示一个抖音直播连接
@@ -55,8 +57,10 @@ func NewDouyinLive(liveid string) (*DouyinLive, error) {
 	}
 
 	// 获取 roomid
-	d.roomid = d.fetchRoomID()
-
+	d.roomid, err = d.fetchRoomID()
+	if err != nil {
+		return nil, fmt.Errorf("获取 roomid 失败: %w", err)
+	}
 	// 加载 JavaScript 脚本
 	err = jsScript.LoadGoja(d.userAgent)
 	if err != nil {
@@ -84,14 +88,12 @@ func (d *DouyinLive) fetchTTWID() (string, error) {
 	}
 	return "", fmt.Errorf("未找到 ttwid cookie")
 }
-
-// fetchRoomID 获取 roomID
-func (d *DouyinLive) fetchRoomID() string {
-	if d.roomid != "" {
-		return d.roomid
-	}
-
+func (d *DouyinLive) getUrl(u string) (string, error) {
+	//if d.roomid != "" {
+	//	return d.roomid, nil
+	//}
 	t, _ := d.fetchTTWID()
+
 	ttwid := &http.Cookie{
 		Name:  "ttwid",
 		Value: "ttwid=" + t + "&msToken=" + utils.GenerateMsToken(107),
@@ -100,22 +102,49 @@ func (d *DouyinLive) fetchRoomID() string {
 		Name:  "__ac_nonce",
 		Value: "0123407cc00a9e438deb4",
 	}
-	res, err := d.c.R().SetCookies(ttwid, acNonce).Get(d.liveurl + d.liveid)
+	res, err := d.c.R().SetCookies(ttwid, acNonce).Get(u)
 	if err != nil {
 		log.Printf("获取房间 ID 失败: %v", err)
-		return ""
+		return "", fmt.Errorf("获取房间 ID 失败: %w", err)
 	}
+	return res.String(), nil
+}
 
-	d.roomid = extractMatch(roomIDRegexp, res.String())
-	d.pushid = extractMatch(pushIDRegexp, res.String())
-	return d.roomid
+// IsLive 是否直播
+func (d *DouyinLive) IsLive() bool {
+	result, err := d.getUrl(d.liveurl + d.liveid)
+	if err != nil {
+		d.isLiveClosed = false
+		return false
+	}
+	str := extractMatch(isLiveRegexp, result, 2)
+	log.Printf("直播状态: %v\n", str)
+	d.isLiveClosed = str == "2"
+	return str == "2"
+}
+
+// fetchRoomID 获取 roomID
+func (d *DouyinLive) fetchRoomID() (string, error) {
+	result, err := d.getUrl(d.liveurl + d.liveid)
+	if err != nil {
+		return result, fmt.Errorf("请求直播间信息失败: %w", err)
+	}
+	d.roomid = extractMatch(roomIDRegexp, result, 1)
+	if d.roomid == "" {
+		return "", errors.New("fetchRoomID: 未找到 roomID")
+	}
+	d.pushid = extractMatch(pushIDRegexp, result, 1)
+	if d.pushid == "" {
+		return "", errors.New("fetchRoomID: 未找到 pushid")
+	}
+	return d.roomid, nil
 }
 
 // extractMatch 从字符串中提取正则表达式匹配的内容
-func extractMatch(re *regexp.Regexp, s string) string {
+func extractMatch(re *regexp.Regexp, s string, i int) string {
 	match := re.FindStringSubmatch(s)
 	if len(match) > 1 {
-		return match[1]
+		return match[i]
 	}
 	return ""
 }
@@ -137,7 +166,10 @@ func (d *DouyinLive) GzipUnzipReset(compressedData []byte) ([]byte, error) {
 	if d.gzip != nil {
 		err = d.gzip.Reset(buffer)
 		if err != nil {
-			d.gzip.Close()
+			err := d.gzip.Close()
+			if err != nil {
+				return nil, err
+			}
 			d.gzip = nil
 			return nil, err
 		}
@@ -147,8 +179,15 @@ func (d *DouyinLive) GzipUnzipReset(compressedData []byte) ([]byte, error) {
 			return nil, err
 		}
 	}
-	defer d.gzip.Close()
 
+	defer func() {
+		if d.gzip != nil {
+			err := d.gzip.Close()
+			if err != nil {
+				return
+			}
+		}
+	}()
 	uncompressedBuffer := &bytes.Buffer{}
 	_, err = io.Copy(uncompressedBuffer, d.gzip)
 	if err != nil {
@@ -165,13 +204,18 @@ func (d *DouyinLive) Start() {
 	d.headers.Add("user-agent", d.userAgent)
 	d.headers.Add("cookie", fmt.Sprintf("ttwid=%s", d.ttwid))
 	var response *http.Response
+	if !d.IsLive() {
+		log.Println("未开播,或者链接失败")
+		return
+	}
+
 	d.Conn, response, err = websocket.DefaultDialer.Dial(d.wssurl, d.headers)
 	if err != nil {
 		log.Printf("链接失败: err:%v\nroomid:%v\n ttwid:%v\nwssurl:----%v\nresponse:%v\n", err, d.roomid, d.ttwid, d.wssurl, response)
 		return
 	}
 	log.Println("链接成功")
-	d.isLiveClosed = true
+
 	defer func() {
 		if d.gzip != nil {
 			err := d.gzip.Close()
@@ -248,6 +292,13 @@ func (d *DouyinLive) Start() {
 
 // reconnect 尝试重新连接
 func (d *DouyinLive) reconnect(i int) bool {
+	if d.Conn != nil {
+		err := d.Conn.Close()
+		if err != nil {
+			return false
+		}
+		d.Conn = nil
+	}
 	var err error
 	log.Println("尝试重新连接...")
 	for attempt := 0; attempt < i; attempt++ {
@@ -261,7 +312,7 @@ func (d *DouyinLive) reconnect(i int) bool {
 		if err != nil {
 			log.Printf("重连失败: %v", err)
 			log.Printf("正在尝试第 %d 次重连...", attempt+1)
-			time.Sleep(5 * time.Second)
+			time.Sleep(time.Duration(attempt) * time.Second)
 		} else {
 			log.Println("重连成功")
 			return true

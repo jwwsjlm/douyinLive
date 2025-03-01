@@ -143,4 +143,22 @@ var NewMessage = map[string]func() protoreflect.ProtoMessage{
 	"WebcastExhibitionChatMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_ExhibitionChatMessage{}
 	},
+	"WebcastShelfTradeDataMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_ShelfTradeDataMessage{}
+	},
+	"WebcastVisibilityRangeChangeMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_VisibilityRangeChangeMessage{}
+	},
+	"WebcastFeedbackCardMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_FeedbackCardMessage{}
+	},
+	"WebcastStampMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_StampMessage{}
+	},
+	"WebcastCustomizedCardMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_CustomizedCardMessage{}
+	},
+	"WebcastAudienceEntranceMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_AudienceEntranceMessage{}
+	},
 }

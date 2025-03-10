@@ -3,10 +3,6 @@ package douyinlive
 import (
 	"bytes"
 	"compress/gzip"
-	"douyinlive/generated/douyin"
-	"douyinlive/generated/new_douyin"
-	"douyinlive/jsScript"
-	"douyinlive/utils"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +12,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jwwsjlm/douyinlive/generated/douyin"
+	"github.com/jwwsjlm/douyinlive/generated/new_douyin"
+	"github.com/jwwsjlm/douyinlive/jsScript"
+	"github.com/jwwsjlm/douyinlive/utils"
 
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"

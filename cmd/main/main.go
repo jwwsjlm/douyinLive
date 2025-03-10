@@ -1,9 +1,6 @@
 package main
 
 import (
-	"douyinlive"
-	"douyinlive/generated/new_douyin"
-	"douyinlive/utils"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -11,6 +8,10 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+
+	"github.com/jwwsjlm/douyinlive"
+	"github.com/jwwsjlm/douyinlive/generated/new_douyin"
+	"github.com/jwwsjlm/douyinlive/utils"
 
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cast"

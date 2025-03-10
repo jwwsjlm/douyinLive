@@ -1,22 +1,48 @@
-package douyinlive
+package douyinlive_test
 
 import (
-	"douyinlive/generated/douyin"
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
-	"log"
 	"testing"
+
+	"github.com/jwwsjlm/douyinlive"
+	"github.com/jwwsjlm/douyinlive/generated/new_douyin"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestNewDouyinLive(t *testing.T) {
-	d, _ := NewDouyinLive("644826113301")
-	d.Subscribe(func(eventData *douyin.Message) {
-		if eventData.Method == WebcastChatMessage {
-			msg := &douyin.ChatMessage{}
+	d, _ := douyinlive.NewDouyinLive("740934774657")
+	d.Subscribe(func(eventData *new_douyin.Webcast_Im_Message) {
+		// t.Logf("msg received ,type:%s", eventData.Method)
+		switch eventData.Method {
+		case douyinlive.WebcastChatMessage:
+			msg := &new_douyin.Webcast_Im_ChatMessage{}
 			proto.Unmarshal(eventData.Payload, msg)
-			marshal, _ := protojson.Marshal(msg)
-			log.Println("聊天msg", msg.User.Id, msg.User.NickName, msg.Content, string(marshal))
+			t.Logf("聊天消息:user=%d %s %s", msg.User.Id, msg.User.Nickname, msg.Content)
+		case douyinlive.WebcastGiftMessage:
+			msg := &new_douyin.Webcast_Im_GiftMessage{}
+			proto.Unmarshal(eventData.Payload, msg)
+			t.Logf("礼物消息:user=%d %s %s", msg.User.Id, msg.User.Nickname, msg.Gift.Name)
+		case douyinlive.WebcastLikeMessage:
+			msg := &new_douyin.Webcast_Im_LikeMessage{}
+			proto.Unmarshal(eventData.Payload, msg)
+			t.Logf("点赞消息:user=%d %s", msg.User.Id, msg.User.Nickname)
+		case douyinlive.WebcastMemberMessage:
+			msg := &new_douyin.Webcast_Im_MemberMessage{}
+			proto.Unmarshal(eventData.Payload, msg)
+			t.Logf("成员消息:user=%d %s", msg.User.Id, msg.User.Nickname)
+		case douyinlive.WebcastSocialMessage:
+			msg := &new_douyin.Webcast_Im_SocialMessage{}
+			proto.Unmarshal(eventData.Payload, msg)
+			t.Logf("社交消息:user=%d %s", msg.User.Id, msg.User.Nickname)
+		default:
+			t.Logf("其他消息:type:%s", eventData.Method)
 		}
+
+		// if eventData.Method == douyinlive.WebcastChatMessage {
+		// 	msg := &douyin.ChatMessage{}
+		// 	proto.Unmarshal(eventData.Payload, msg)
+		// 	marshal, _ := protojson.Marshal(msg)
+		// 	log.Println("聊天msg", msg.User.Id, msg.User.NickName, msg.Content, string(marshal))
+		// }
 	})
 
 	d.Start()

@@ -2,11 +2,12 @@ package douyinlive
 
 import (
 	"compress/gzip"
-	"douyinlive/generated/new_douyin"
-	"github.com/gorilla/websocket"
-	"github.com/imroc/req/v3"
 	"net/http"
 	"sync"
+
+	"github.com/gorilla/websocket"
+	"github.com/imroc/req/v3"
+	"github.com/jwwsjlm/douyinlive/generated/new_douyin"
 )
 
 const (

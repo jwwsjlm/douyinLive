@@ -4,17 +4,18 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/md5"
-	"douyinlive/generated"
-	"douyinlive/generated/new_douyin"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/elliotchance/orderedmap"
-	"google.golang.org/protobuf/reflect/protoreflect"
 	"math/rand"
 	"strconv"
 	"strings"
+
+	"github.com/elliotchance/orderedmap"
+	"github.com/jwwsjlm/douyinlive/generated"
+	"github.com/jwwsjlm/douyinlive/generated/new_douyin"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // HasGzipEncoding 判断消息头中是否包含gzip编码

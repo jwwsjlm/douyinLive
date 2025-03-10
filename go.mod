@@ -1,4 +1,4 @@
-module douyinlive
+module github.com/jwwsjlm/douyinlive
 
 go 1.23.6
 

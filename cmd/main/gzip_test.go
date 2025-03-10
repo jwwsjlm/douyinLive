@@ -1,10 +1,11 @@
 package main
 
 import (
-	douyinlive "DouyinLive"
 	"bytes"
 	"compress/gzip"
 	"io"
+
+	"github.com/jwwsjlm/douyinlive"
 
 	"testing"
 )

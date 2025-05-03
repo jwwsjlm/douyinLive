@@ -1,4 +1,4 @@
-package douyinlive
+package douyinLive
 
 import (
 	"compress/gzip"
@@ -7,7 +7,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
-	"github.com/jwwsjlm/douyinlive/generated/new_douyin"
+	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
 )
 
 const (

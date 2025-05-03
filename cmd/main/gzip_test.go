@@ -5,7 +5,7 @@ import (
 	"compress/gzip"
 	"io"
 
-	"github.com/jwwsjlm/douyinlive"
+	"github.com/jwwsjlm/douyinLive"
 
 	"testing"
 )
@@ -14,7 +14,7 @@ var compressedData = []byte{31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 236, 87, 93, 104,
 
 func BenchmarkGzipUnzipReset(b *testing.B) {
 	//https://v.douyin.com/iMDdJd9s/
-	d, _ := douyinlive.NewDouyinLive("23020419981")
+	d, _ := douyinLive.NewDouyinLive("23020419981")
 	b.ResetTimer() // 如果有耗时的初始化，使用这个来重置计时器
 	for i := 0; i < b.N; i++ {
 		// 调用你的函数

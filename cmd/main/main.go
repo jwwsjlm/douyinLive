@@ -3,15 +3,15 @@ package main
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/jwwsjlm/douyinLive"
 	"log"
 	"net"
 	"net/http"
 	"strconv"
 	"sync"
 
-	"github.com/jwwsjlm/douyinlive"
-	"github.com/jwwsjlm/douyinlive/generated/new_douyin"
-	"github.com/jwwsjlm/douyinlive/utils"
+	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
+	"github.com/jwwsjlm/douyinLive/utils"
 
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cast"
@@ -50,7 +50,7 @@ func main() {
 	log.Printf("WebSocket 服务启动成功，地址为: ws://127.0.0.1:%s/\n直播房间: %s\n", p, room)
 
 	// 创建 DouyinLive 实例
-	d, err := douyinlive.NewDouyinLive(room)
+	d, err := douyinLive.NewDouyinLive(room)
 	if err != nil {
 		log.Fatalf("抖音链接失败: %v", err)
 	}

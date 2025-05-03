@@ -1,4 +1,4 @@
-package douyinlive
+package douyinLive
 
 import (
 	"bytes"
@@ -13,10 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jwwsjlm/douyinlive/generated/douyin"
-	"github.com/jwwsjlm/douyinlive/generated/new_douyin"
-	"github.com/jwwsjlm/douyinlive/jsScript"
-	"github.com/jwwsjlm/douyinlive/utils"
+	"github.com/jwwsjlm/douyinLive/generated/douyin"
+	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
+	"github.com/jwwsjlm/douyinLive/jsScript"
+	"github.com/jwwsjlm/douyinLive/utils"
 
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"

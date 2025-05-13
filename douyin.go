@@ -5,23 +5,19 @@ import (
 	"compress/gzip"
 	"errors"
 	"fmt"
+	"github.com/gorilla/websocket"
+	"github.com/imroc/req/v3"
+	"github.com/jwwsjlm/Tikhub"
+	"github.com/jwwsjlm/douyinLive/generated/douyin"
+	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
+	"github.com/jwwsjlm/douyinLive/utils"
+	"google.golang.org/protobuf/proto"
 	"io"
 	"log"
 	"net/http"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
-
-	"github.com/jwwsjlm/douyinLive/generated/douyin"
-	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
-	"github.com/jwwsjlm/douyinLive/jsScript"
-	"github.com/jwwsjlm/douyinLive/utils"
-
-	"github.com/gorilla/websocket"
-	"github.com/imroc/req/v3"
-	"github.com/spf13/cast"
-	"google.golang.org/protobuf/proto"
 )
 
 // 正则表达式用于提取 roomID 和 pushID
@@ -34,10 +30,16 @@ var (
 // DouyinLive 结构体表示一个抖音直播连接
 
 // NewDouyinLive 创建一个新的 DouyinLive 实例
-func NewDouyinLive(liveid string) (*DouyinLive, error) {
-	ua := utils.RandomUserAgent()
+func NewDouyinLive(liveid string, key string) (*DouyinLive, error) {
+	//ua := utils.RandomUserAgent()
+	ua := Tikhub.RandUserAgent()
+	//ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+	//tk := Tikhub.NewGithubClient("mOETeHpb/lALkC0n6XedlmUL9RQwjYD+k5NV9h3btV0Sym0ucMBC6jmWJg==", ua)
 	c := req.C().SetUserAgent(ua)
 	d := &DouyinLive{
+
+		key: key,
+		//Tk:            tk,
 		liveid:        liveid,
 		liveurl:       "https://live.douyin.com/",
 		userAgent:     ua,
@@ -51,22 +53,25 @@ func NewDouyinLive(liveid string) (*DouyinLive, error) {
 	}
 
 	// 获取 ttwid
-	var err error
-	d.ttwid, err = d.fetchTTWID()
-	if err != nil {
-		return nil, fmt.Errorf("获取 TTWID 失败: %w", err)
-	}
-
-	// 获取 roomid
-	d.roomid, err = d.fetchRoomID()
-	if err != nil {
-		return nil, fmt.Errorf("获取 roomid 失败: %w", err)
-	}
-	// 加载 JavaScript 脚本
-	err = jsScript.LoadGoja(d.userAgent)
-	if err != nil {
-		return nil, fmt.Errorf("加载 Goja 脚本失败: %w", err)
-	}
+	//var err error
+	//d.ttwid, err = tk.Generate_ttwid()
+	//if err != nil {
+	//return nil, fmt.Errorf("获取 TTWID 失败: %w", err)
+	//}
+	//err = tk.Fetch_live_im_fetch()
+	//if err != nil {
+	//return nil, fmt.Errorf("获取直播间信息失败: %w", err)
+	//}//
+	//// 获取 roomid
+	//d.roomid, err = d.fetchRoomID()
+	//if err != nil {
+	//	return nil, fmt.Errorf("获取 roomid 失败: %w", err)
+	//}
+	//// 加载 JavaScript 脚本
+	//err = jsScript.LoadGoja(d.userAgent)
+	//if err != nil {
+	//	return nil, fmt.Errorf("加载 Goja 脚本失败: %w", err)
+	//}
 	return d, nil
 }
 
@@ -126,6 +131,7 @@ func (d *DouyinLive) IsLive() bool {
 
 // fetchRoomID 获取 roomID
 func (d *DouyinLive) fetchRoomID() (string, error) {
+
 	result, err := d.getUrl(d.liveurl + d.liveid)
 	if err != nil {
 		return result, fmt.Errorf("请求直播间信息失败: %w", err)
@@ -201,22 +207,41 @@ func (d *DouyinLive) GzipUnzipReset(compressedData []byte) ([]byte, error) {
 // Start 开始连接和处理消息
 func (d *DouyinLive) Start() {
 	var err error
-	d.wssurl = d.StitchUrl()
-	d.headers.Add("user-agent", d.userAgent)
-	d.headers.Add("cookie", fmt.Sprintf("ttwid=%s", d.ttwid))
-	var response *http.Response
-	if !d.IsLive() {
-		log.Println("未开播,或者链接失败")
+	//d.wssurl = d.StitchUrl()
+	//wslink := &Tikhub.WsLink{}
+	wslink, err := Tikhub.GenerateWsLink(d.key, d.userAgent, d.liveid)
+	//url, err := d.Tk.GenerateWsLink(d.userAgent, d.roomid, d.pushid, signature)
+	if err != nil {
+		log.Println("生成链接失败:", err)
 		return
+
 	}
 
-	d.Conn, response, err = websocket.DefaultDialer.Dial(d.wssurl, d.headers)
+	d.wssurl = wslink.Url
+	//d.headers.Add("origin", "https://live.douyin.com")
+	d.headers.Add("User-Agent", d.userAgent)
+	//d.headers.Add("Upgrade", "websocket")
+
+	//d.headers.Add("Connection", "Upgrade")
+	d.headers.Add("cookie", fmt.Sprintf("ttwid=%s", wslink.Ttwid))
+	//var response *http.Response
+	//if !d.IsLive() {
+	//	log.Println("未开播,或者链接失败")
+	//	return
+	//}
+	//dialer := websocket.DefaultDialer
+	//dialer.TLSClientConfig = &tls.Config{
+	//	InsecureSkipVerify: true, // 忽略证书验证
+	//}
+	d.Conn, _, err = websocket.DefaultDialer.Dial(d.wssurl, d.headers)
+
+	//d.Conn, _, err = websocket.DefaultDialer.Dial(d.wssurl, d.headers)
 	if err != nil {
-		log.Printf("链接失败: err:%v\nroomid:%v\n ttwid:%v\nwssurl:----%v\nresponse:%v\n", err, d.roomid, d.ttwid, d.wssurl, response)
+		log.Printf("链接失败: err:%v\nroomid:%v\n ttwid:%v\nwssurl:----%v\n userAgent:%s\n", err, d.roomid, d.ttwid, d.wssurl, d.headers)
 		return
 	}
 	log.Println("链接成功")
-
+	d.isLiveClosed = true
 	defer func() {
 		if d.gzip != nil {
 			err := d.gzip.Close()
@@ -240,8 +265,10 @@ func (d *DouyinLive) Start() {
 	var pbAck = &new_douyin.Webcast_Im_PushFrame{}
 	for d.isLiveClosed {
 		messageType, message, err := d.Conn.ReadMessage()
-		if err != nil {
-			log.Println("读取消息失败-", err, message, messageType)
+
+		if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure) {
+			// 排除正常关闭（1000）和终端离开（1001），剩下的视为意外错误（触发重连）
+			log.Printf("需要重连的意外错误,读取消息失败- 错误代码%v message:%s messageType%d", err, message, messageType)
 			if d.reconnect(5) {
 				continue
 			} else {
@@ -288,6 +315,7 @@ func (d *DouyinLive) Start() {
 				}
 			}
 		}
+
 	}
 }
 
@@ -325,21 +353,30 @@ func (d *DouyinLive) reconnect(i int) bool {
 
 // StitchUrl 构建 WebSocket 连接的 URL
 func (d *DouyinLive) StitchUrl() string {
-	smap := utils.NewOrderedMap(d.roomid, d.pushid)
-	signaturemd5 := utils.GetxMSStub(smap)
-	signature := jsScript.ExecuteJS(signaturemd5)
-	browserInfo := strings.Split(d.userAgent, "Mozilla")[1]
-	parsedURL := strings.Replace(browserInfo[1:], " ", "%20", -1)
-	fetchTime := time.Now().UnixNano() / int64(time.Millisecond)
-	return "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/?app_name=douyin_web&version_code=180800&" +
-		"webcast_sdk_version=1.0.14-beta.0&update_version_code=1.0.14-beta.0&compress=gzip&device_platform" +
-		"=web&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&" +
-		"browser_name=Mozilla&browser_version=" + parsedURL + "&browser_online=true" +
-		"&tz_name=Asia/Shanghai&cursor=d-1_u-1_fh-7383731312643626035_t-1719159695790_r-1&internal_ext" +
-		"=internal_src:dim|wss_push_room_id:" + d.roomid + "|wss_push_did:" + d.pushid + "|first_req_ms:" + cast.ToString(fetchTime) + "|fetch_time:" + cast.ToString(fetchTime) + "|seq:1|wss_info:0-" + cast.ToString(fetchTime) + "-0-0|" +
-		"wrds_v:7382620942951772256&host=https://live.douyin.com&aid=6383&live_id=1&did_rule=3" +
-		"&endpoint=live_pc&support_wrds=1&user_unique_id=" + d.pushid + "&im_path=/webcast/im/fetch/" +
-		"&identity=audience&need_persist_msg_count=15&insert_task_id=&live_reason=&room_id=" + d.roomid + "&heartbeatDuration=0&signature=" + signature
+	//smap := utils.NewOrderedMap(d.roomid, d.pushid)
+	//signaturemd5 := utils.GetxMSStub(smap)
+	//signature, _ := d.Tk.SprintUrl()
+	WsLink, err := Tikhub.GenerateWsLink(d.key, d.userAgent, d.liveid)
+	//url, err := d.Tk.GenerateWsLink(d.userAgent, d.roomid, d.pushid, signature)
+	if err != nil {
+		log.Println("生成链接失败:", err)
+		return ""
+
+	}
+	return WsLink.Url
+	//browserInfo := strings.Split(d.userAgent, "Mozilla")[1]
+	//parsedURL := strings.Replace(browserInfo[1:], " ", "%20", -1)
+	//fetchTime := time.Now().UnixNano() / int64(time.Millisecond)
+	//
+	//return "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/?app_name=douyin_web&version_code=180800&" +
+	//	"webcast_sdk_version=1.0.14-beta.0&update_version_code=1.0.14-beta.0&compress=gzip&device_platform" +
+	//	"=web&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&" +
+	//	"browser_name=Mozilla&browser_version=" + parsedURL + "&browser_online=true" +
+	//	"&tz_name=Asia/Shanghai&cursor=d-1_u-1_fh-7383731312643626035_t-1719159695790_r-1&internal_ext" +
+	//	"=internal_src:dim|wss_push_room_id:" + d.roomid + "|wss_push_did:" + d.pushid + "|first_req_ms:" + cast.ToString(fetchTime) + "|fetch_time:" + cast.ToString(fetchTime) + "|seq:1|wss_info:0-" + cast.ToString(fetchTime) + "-0-0|" +
+	//	"wrds_v:7382620942951772256&host=https://live.douyin.com&aid=6383&live_id=1&did_rule=3" +
+	//	"&endpoint=live_pc&support_wrds=1&user_unique_id=" + d.pushid + "&im_path=/webcast/im/fetch/" +
+	//	"&identity=audience&need_persist_msg_count=15&insert_task_id=&live_reason=&room_id=" + d.roomid + "&heartbeatDuration=0&signature=" + signature
 }
 
 // emit 触发事件处理器

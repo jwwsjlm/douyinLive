@@ -29,6 +29,7 @@ const (
 
 type EventHandler func(eventData *new_douyin.Webcast_Im_Message)
 type DouyinLive struct {
+	key           string
 	ttwid         string
 	roomid        string
 	liveid        string

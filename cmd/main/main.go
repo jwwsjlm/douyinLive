@@ -28,9 +28,11 @@ var (
 func main() {
 	var port string
 	var room string
+	var key string
 	pflag.StringVar(&port, "port", "18080", "WebSocket 服务端口")
 	pflag.StringVar(&room, "room", "****", "抖音直播房间号")
 	pflag.BoolVar(&unknown, "unknown", false, "是否输出未知源的pb消息")
+	pflag.StringVar(&key, "key", "", "tikhub key")
 	pflag.Parse()
 
 	// 创建 WebSocket 升级器
@@ -50,7 +52,7 @@ func main() {
 	log.Printf("WebSocket 服务启动成功，地址为: ws://127.0.0.1:%s/\n直播房间: %s\n", p, room)
 
 	// 创建 DouyinLive 实例
-	d, err := douyinLive.NewDouyinLive(room)
+	d, err := douyinLive.NewDouyinLive(room, key)
 	if err != nil {
 		log.Fatalf("抖音链接失败: %v", err)
 	}

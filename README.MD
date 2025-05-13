@@ -1,8 +1,10 @@
-### wss链接抖音抓取弹幕礼物数据
+### wss链接抖音抓取弹幕礼物数据 tikhub版
 
 ---
 
+需要注册[tikhub](https://user.tikhub.io/users/signup?referral_code=VDkt4urU) 
 
+即可实现xb参数和ttwid
 
 项目灵感来自:https://github.com/saermart/DouyinLiveWebFetcher 
 
@@ -11,16 +13,17 @@
 感谢上面两位的无私贡献,
 
 新增ws链接
-测试在main/main.go中
+测试在cmd/main/main.go中
     
-    go run main/main.go --room ****抖音直播间号**** --port ****端口号****(默认为18080) --unknown false(默认为false)
+
+    go run cmd/main/main.go --room ****抖音直播间号**** --port ****端口号****(默认为18080) --unknown false(默认为false)
     unknown为是否输出未知数据.因为现在源pb还不是很全.有部分消息无法解析
     最终拼接为
-    go run main/main.go --room 933572413882 --port 18080
+    go run cmd/main/main.go --room 直播间 --unknown 1 --key tikhub的key
     也可以go build main/main.go编译成二进制文件运行
     最终运行命令为
-    `main.exe --room 933572413882`
-    
+    `main.exe --room 直播间 --unknown 1 --key tikhub的key`
+
 ![20240528200625.png](image%2FREADME%2F20240528200625.png)
 软件通过json格式输出数据.请自行解析
 链接地址为`ws://127.0.0.1:18080/ws` 

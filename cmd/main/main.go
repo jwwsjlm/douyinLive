@@ -4,20 +4,19 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/jwwsjlm/douyinLive"
-	"log"
-	"net"
-	"net/http"
-	"strconv"
-	"sync"
-
 	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
 	"github.com/jwwsjlm/douyinLive/utils"
-
-	"github.com/gorilla/websocket"
+	"github.com/lxzan/gws"
 	"github.com/spf13/cast"
 	"github.com/spf13/pflag"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"strconv"
+	"sync"
 )
 
 var (
@@ -29,22 +28,30 @@ func main() {
 	var port string
 	var room string
 	var key string
-	pflag.StringVar(&port, "port", "18080", "WebSocket 服务端口")
+	pflag.StringVar(&port, "port", "1088", "WebSocket 服务端口")
 	pflag.StringVar(&room, "room", "****", "抖音直播房间号")
 	pflag.BoolVar(&unknown, "unknown", false, "是否输出未知源的pb消息")
 	pflag.StringVar(&key, "key", "", "tikhub key")
 	pflag.Parse()
+	log.SetOutput(os.Stdout)
 
-	// 创建 WebSocket 升级器
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool {
-			return true // 允许所有 CORS 请求，实际应用中应根据需要设置
+	// 创建 gws 的 Upgrader
+	upgrader := gws.NewUpgrader(&WsHandler{}, &gws.ServerOption{
+		PermessageDeflate: gws.PermessageDeflate{
+			Enabled:               true,
+			ServerContextTakeover: true,
+			ClientContextTakeover: true,
 		},
-	}
+	})
 
 	// 设置 WebSocket 路由
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		serveWs(upgrader, w, r)
+		socket, err := upgrader.Upgrade(w, r)
+		if err != nil {
+			log.Printf("升级 WebSocket 失败: %v\n", err)
+			return
+		}
+		go socket.ReadLoop()
 	})
 
 	// 启动 WebSocket 服务器
@@ -113,8 +120,8 @@ func Subscribe(eventData *new_douyin.Webcast_Im_Message) {
 			return
 		}
 
-		RangeConnections(func(agentID string, conn *websocket.Conn) {
-			if err := conn.WriteMessage(websocket.TextMessage, marshal); err != nil {
+		RangeConnections(func(agentID string, conn *gws.Conn) {
+			if err := conn.WriteString(string(marshal)); err != nil {
 				log.Printf("发送消息到客户端 %s 失败: %v\n", agentID, err)
 			}
 		})
@@ -122,17 +129,17 @@ func Subscribe(eventData *new_douyin.Webcast_Im_Message) {
 }
 
 // StoreConnection 储存 WebSocket 客户端连接
-func StoreConnection(agentID string, conn *websocket.Conn) {
+func StoreConnection(agentID string, conn *gws.Conn) {
 	agentlist.Store(agentID, conn)
 }
 
 // GetConnection 获取 WebSocket 客户端连接
-func GetConnection(agentID string) (*websocket.Conn, bool) {
+func GetConnection(agentID string) (*gws.Conn, bool) {
 	value, ok := agentlist.Load(agentID)
 	if !ok {
 		return nil, false
 	}
-	conn, ok := value.(*websocket.Conn)
+	conn, ok := value.(*gws.Conn)
 	return conn, ok
 }
 
@@ -142,13 +149,13 @@ func DeleteConnection(agentID string) {
 }
 
 // RangeConnections 遍历 WebSocket 客户端连接
-func RangeConnections(f func(agentID string, conn *websocket.Conn)) {
+func RangeConnections(f func(agentID string, conn *gws.Conn)) {
 	agentlist.Range(func(key, value interface{}) bool {
 		agentID, ok := key.(string)
 		if !ok {
 			return true // 跳过错误的键类型
 		}
-		conn, ok := value.(*websocket.Conn)
+		conn, ok := value.(*gws.Conn)
 		if !ok {
 			return true // 跳过错误的值类型
 		}
@@ -167,37 +174,32 @@ func GetConnectionCount() int {
 	return count
 }
 
-// serveWs 处理 WebSocket 请求
-func serveWs(upgrader websocket.Upgrader, w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("升级 WebSocket 失败: %v\n", err)
-		return
-	}
-	defer conn.Close()
+// WsHandler 实现 gws 的 Event 接口
+type WsHandler struct {
+	gws.BuiltinEventHandler
+}
 
-	sec := r.Header.Get("Sec-WebSocket-Key")
-	StoreConnection(sec, conn)
+func (c *WsHandler) OnOpen(socket *gws.Conn) {
+	client := socket.RemoteAddr().String()
+	StoreConnection(client, socket)
 	log.Printf("当前连接数: %d\n", GetConnectionCount())
+}
 
-	defer func() {
-		log.Printf("客户端 %s 断开连接\n", sec)
-		DeleteConnection(sec)
-	}()
+func (c *WsHandler) OnClose(socket *gws.Conn, err error) {
 
-	// 处理 WebSocket 消息
-	for {
-		mt, message, err := conn.ReadMessage()
-		if err != nil {
-			log.Printf("读取消息失败: %v\n", err)
-			break
-		}
-		log.Printf("收到消息: %s\n", message)
-		if string(message) == "ping" {
-			if err := conn.WriteMessage(mt, []byte("pong")); err != nil {
-				log.Printf("写入消息失败: %v\n", err)
-				break
-			}
+	client := socket.RemoteAddr().String()
+	log.Printf("客户端 %s 断开连接\n", client)
+	DeleteConnection(client)
+}
+
+func (c *WsHandler) OnMessage(socket *gws.Conn, message *gws.Message) {
+	defer message.Close()
+	//sec := socket.Request().Header.Get("Sec-WebSocket-Key")
+	msgStr := string(message.Bytes())
+	log.Printf("收到消息: %s\n", msgStr)
+	if msgStr == "ping" {
+		if err := socket.WriteString("pong"); err != nil {
+			log.Printf("写入消息失败: %v\n", err)
 		}
 	}
 }

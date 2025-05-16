@@ -161,4 +161,5 @@ var NewMessage = map[string]func() protoreflect.ProtoMessage{
 	"WebcastAudienceEntranceMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_AudienceEntranceMessage{}
 	},
+	"WebcastRoomIntroMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_RoomIntroMessage{} },
 }

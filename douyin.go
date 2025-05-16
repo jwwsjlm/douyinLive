@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"errors"
 	"fmt"
+	"github.com/avast/retry-go"
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
 	"github.com/jwwsjlm/Tikhub"
@@ -206,22 +207,35 @@ func (d *DouyinLive) GzipUnzipReset(compressedData []byte) ([]byte, error) {
 
 // Start 开始连接和处理消息
 func (d *DouyinLive) Start() {
-	var err error
-	//d.wssurl = d.StitchUrl()
-	//wslink := &Tikhub.WsLink{}
-	wslink, err := Tikhub.GenerateWsLink(d.key, d.userAgent, d.liveid)
-	//url, err := d.Tk.GenerateWsLink(d.userAgent, d.roomid, d.pushid, signature)
-	if err != nil {
-		log.Println("生成链接失败:", err)
-		return
+	var wslink Tikhub.WsLink
+	err := retry.Do(
+		func() error {
+			var err error
+			wslink, err = Tikhub.GenerateWsLink(d.key, d.userAgent, d.liveid)
+			if err != nil {
+				log.Printf("生成链接失败 (尝试中): %v", err)
+				return err
+			}
+			return nil
+		},
+		retry.Attempts(3),                   // 重试3次
+		retry.DelayType(retry.BackOffDelay), // 指数退避策略
+		retry.Delay(1000),                   // 初始延迟1秒
+		retry.MaxDelay(5000),                // 最大延迟5秒
+		retry.OnRetry(func(n uint, err error) {
+			log.Printf("第 %d 次重试: %v", n, err)
+		}),
+	)
 
+	if err != nil {
+		log.Fatalf("生成链接失败 (已达到最大重试次数): %v", err)
+		return
 	}
 
 	d.wssurl = wslink.Url
 	//d.headers.Add("origin", "https://live.douyin.com")
 	d.headers.Add("User-Agent", d.userAgent)
 	//d.headers.Add("Upgrade", "websocket")
-
 	//d.headers.Add("Connection", "Upgrade")
 	d.headers.Add("cookie", fmt.Sprintf("ttwid=%s", wslink.Ttwid))
 	//var response *http.Response
@@ -328,7 +342,7 @@ func (d *DouyinLive) reconnect(i int) bool {
 		}
 		d.Conn = nil
 	}
-	var err error
+
 	log.Println("尝试重新连接...")
 	for attempt := 0; attempt < i; attempt++ {
 		if d.Conn != nil {
@@ -337,6 +351,17 @@ func (d *DouyinLive) reconnect(i int) bool {
 				log.Printf("关闭连接失败: %v", err)
 			}
 		}
+		wslink, err := Tikhub.GenerateWsLink(d.key, d.userAgent, d.liveid)
+		//url, err := d.Tk.GenerateWsLink(d.userAgent, d.roomid, d.pushid, signature)
+		if err != nil {
+			log.Println("生成链接失败:", err)
+			return false
+
+		}
+		d.wssurl = wslink.Url
+		d.headers.Add("User-Agent", d.userAgent)
+		d.headers.Add("cookie", fmt.Sprintf("ttwid=%s", wslink.Ttwid))
+		log.Printf("第 %d 次重连,链接地址:%s\n", attempt+1, d.wssurl)
 		d.Conn, _, err = websocket.DefaultDialer.Dial(d.wssurl, d.headers)
 		if err != nil {
 			log.Printf("重连失败: %v", err)

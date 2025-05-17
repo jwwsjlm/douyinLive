@@ -1,7 +1,6 @@
 package douyinLive
 
 import (
-	"compress/gzip"
 	"net/http"
 	"sync"
 
@@ -29,18 +28,17 @@ const (
 
 type EventHandler func(eventData *new_douyin.Webcast_Im_Message)
 type DouyinLive struct {
-	ttwid         string
-	roomid        string
-	liveid        string
-	liveurl       string
+	mu            sync.RWMutex
+	liveID        string
+	roomID        string
+	pushID        string
+	wssURL        string
 	userAgent     string
-	c             *req.Client
+	ttwid         string
+	client        *req.Client
+	conn          *websocket.Conn
 	eventHandlers []EventHandler
 	headers       http.Header
-	buffers       *sync.Pool
-	gzip          *gzip.Reader
-	Conn          *websocket.Conn
-	wssurl        string
-	pushid        string
+	bufferPool    *sync.Pool
 	isLiveClosed  bool
 }

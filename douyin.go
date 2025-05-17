@@ -13,362 +13,458 @@ import (
 	"sync"
 	"time"
 
+	"github.com/avast/retry-go"
+	"github.com/gorilla/websocket"
+	"github.com/imroc/req/v3"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/jwwsjlm/douyinLive/generated/douyin"
 	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
 	"github.com/jwwsjlm/douyinLive/jsScript"
 	"github.com/jwwsjlm/douyinLive/utils"
-
-	"github.com/gorilla/websocket"
-	"github.com/imroc/req/v3"
-	"github.com/spf13/cast"
-	"google.golang.org/protobuf/proto"
 )
 
-// 正则表达式用于提取 roomID 和 pushID
+const (
+	defaultMaxRetries       = 5
+	websocketConnectTimeout = 10 * time.Second
+	gzipBufferSize          = 1024 * 4
+	wssURLTemplate          = "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/" +
+		"?app_name=douyin_web&version_code=180800&webcast_sdk_version=1.0.14-beta.0" +
+		"&update_version_code=1.0.14-beta.0&compress=gzip&device_platform=web" +
+		"&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN" +
+		"&browser_platform=Win32&browser_name=Mozilla&browser_version=%s&browser_online=true" +
+		"&tz_name=Asia/Shanghai&cursor=d-1_u-1_fh-7383731312643626035_t-1719159695790_r-1" +
+		"&internal_ext=internal_src:dim|wss_push_room_id:%s|wss_push_did:%s|first_req_ms:%d" +
+		"|fetch_time:%d|seq:1|wss_info:0-%d-0-0|wrds_v:7382620942951772256&host=https://live.douyin.com" +
+		"&aid=6383&live_id=1&did_rule=3&endpoint=live_pc&support_wrds=1&user_unique_id=%s" +
+		"&im_path=/webcast/im/fetch/&identity=audience&need_persist_msg_count=15" +
+		"&insert_task_id=&live_reason=&room_id=%s&heartbeatDuration=0&signature=%s"
+)
+
 var (
-	roomIDRegexp = regexp.MustCompile(`roomId\\":\\"(\d+)\\"`)
-	pushIDRegexp = regexp.MustCompile(`user_unique_id\\":\\"(\d+)\\"`)
-	isLiveRegexp = regexp.MustCompile(`id_str\\":\\"(\d+)\\",\\"status\\":(\d+),\\"status_str\\":\\"(\d+)\\",\\"title\\":\\"(.*?)\\",\\"user_count_str\\":\\"(.*?)\\"`)
+	roomIDRegex  = regexp.MustCompile(`roomId\\":\\"(\d+)\\"`)
+	pushIDRegex  = regexp.MustCompile(`user_unique_id\\":\\"(\d+)\\"`)
+	isLiveRegex  = regexp.MustCompile(`id_str\\":\\"(\d+)\\",\\"status\\":(\d+),\\"status_str\\":\\"(\d+)\\",\\"title\\":\\"(.*?)\\",\\"user_count_str\\":\\"(.*?)\\"`)
+	emptyStrings = [][]string{{"", "", "", "", ""}}
 )
-
-// DouyinLive 结构体表示一个抖音直播连接
 
 // NewDouyinLive 创建一个新的 DouyinLive 实例
-func NewDouyinLive(liveid string) (*DouyinLive, error) {
-	ua := utils.RandomUserAgent()
-	c := req.C().SetUserAgent(ua)
-	d := &DouyinLive{
-		liveid:        liveid,
-		liveurl:       "https://live.douyin.com/",
-		userAgent:     ua,
-		c:             c,
-		eventHandlers: make([]EventHandler, 0),
-		headers:       http.Header{},
-		buffers: &sync.Pool{
-			New: func() interface{} {
-				return &bytes.Buffer{}
-			}},
+func NewDouyinLive(liveID string) (*DouyinLive, error) {
+	dl := &DouyinLive{
+		liveID:     liveID,
+		userAgent:  utils.RandomUserAgent(),
+		client:     req.C().SetUserAgent(utils.RandomUserAgent()),
+		bufferPool: &sync.Pool{New: func() interface{} { return bytes.NewBuffer(make([]byte, 0, gzipBufferSize)) }},
+		headers:    make(http.Header),
 	}
 
-	// 获取 ttwid
-	var err error
-	d.ttwid, err = d.fetchTTWID()
-	if err != nil {
-		return nil, fmt.Errorf("获取 TTWID 失败: %w", err)
+	if err := dl.initialize(); err != nil {
+		return nil, fmt.Errorf("初始化失败: %w", err)
 	}
-
-	// 获取 roomid
-	d.roomid, err = d.fetchRoomID()
-	if err != nil {
-		return nil, fmt.Errorf("获取 roomid 失败: %w", err)
-	}
-	// 加载 JavaScript 脚本
-	err = jsScript.LoadGoja(d.userAgent)
-	if err != nil {
-		return nil, fmt.Errorf("加载 Goja 脚本失败: %w", err)
-	}
-	return d, nil
+	return dl, nil
 }
 
-// fetchTTWID 获取 ttwid
-func (d *DouyinLive) fetchTTWID() (string, error) {
-	if d.ttwid != "" {
-		return d.ttwid, nil
+// initialize 初始化 DouyinLive 实例
+func (dl *DouyinLive) initialize() error {
+	if err := dl.fetchTTWID(); err != nil {
+		return err
 	}
 
-	res, err := d.c.R().Get(d.liveurl)
+	if err := dl.fetchRoomInfo(); err != nil {
+		return err
+	}
+
+	if err := jsScript.LoadGoja(dl.userAgent); err != nil {
+		return fmt.Errorf("加载JavaScript脚本失败: %w", err)
+	}
+
+	dl.headers.Set("User-Agent", dl.userAgent)
+	dl.headers.Set("Cookie", fmt.Sprintf("ttwid=%s", dl.ttwid))
+	return nil
+}
+
+// fetchTTWID 获取 TTWID
+func (dl *DouyinLive) fetchTTWID() error {
+	resp, err := dl.client.R().Get("https://live.douyin.com/")
 	if err != nil {
-		return "", fmt.Errorf("获取直播 URL 失败: %w", err)
+		return fmt.Errorf("请求TTWID失败: %w", err)
 	}
 
-	for _, cookie := range res.Cookies() {
-		if cookie.Name == "ttwid" {
-			d.ttwid = cookie.Value
-			return cookie.Value, nil
+	for _, c := range resp.Cookies() {
+		if c.Name == "ttwid" {
+			dl.ttwid = c.Value
+			return nil
 		}
 	}
-	return "", fmt.Errorf("未找到 ttwid cookie")
-}
-func (d *DouyinLive) getUrl(u string) (string, error) {
-	//if d.roomid != "" {
-	//	return d.roomid, nil
-	//}
-	t, _ := d.fetchTTWID()
-
-	ttwid := &http.Cookie{
-		Name:  "ttwid",
-		Value: "ttwid=" + t + "&msToken=" + utils.GenerateMsToken(107),
-	}
-	acNonce := &http.Cookie{
-		Name:  "__ac_nonce",
-		Value: "0123407cc00a9e438deb4",
-	}
-	res, err := d.c.R().SetCookies(ttwid, acNonce).Get(u)
-	if err != nil {
-		log.Printf("获取房间 ID 失败: %v", err)
-		return "", fmt.Errorf("获取房间 ID 失败: %w", err)
-	}
-	return res.String(), nil
+	return errors.New("未找到TTWID cookie")
 }
 
-// IsLive 是否直播
-func (d *DouyinLive) IsLive() bool {
-	result, err := d.getUrl(d.liveurl + d.liveid)
+// fetchRoomInfo 获取房间信息
+func (dl *DouyinLive) fetchRoomInfo() error {
+	body, err := dl.getPageContent()
 	if err != nil {
-		d.isLiveClosed = false
+		return err
+	}
+
+	dl.roomID = extractString(roomIDRegex, body, 1)
+	dl.pushID = extractString(pushIDRegex, body, 1)
+
+	if dl.roomID == "" || dl.pushID == "" {
+		return errors.New("无法提取房间信息")
+	}
+	return nil
+}
+
+// getPageContent 获取直播间页面内容
+func (dl *DouyinLive) getPageContent() (string, error) {
+	cookies := []*http.Cookie{
+		{Name: "ttwid", Value: "ttwid=" + dl.ttwid},
+		{Name: "__ac_nonce", Value: "0123407cc00a9e438deb4"},
+	}
+
+	resp, err := dl.client.R().
+		SetCookies(cookies...).
+		Get(fmt.Sprintf("https://live.douyin.com/%s", dl.liveID))
+
+	if err != nil {
+		return "", fmt.Errorf("请求直播间页面失败: %w", err)
+	}
+	return resp.String(), nil
+}
+
+// IsLive 检查直播间是否开播
+func (dl *DouyinLive) IsLive() bool {
+	content, err := dl.getPageContent()
+	if err != nil {
+		dl.setLiveStatus(false)
 		return false
 	}
-	str := extractMatch(isLiveRegexp, result, 2)
-	log.Printf("直播状态: %v\n", str)
-	d.isLiveClosed = str == "2"
-	return str == "2"
+
+	matches := isLiveRegex.FindStringSubmatch(content)
+	if len(matches) < 3 {
+		return false
+	}
+
+	status := matches[2]
+	dl.setLiveStatus(status == "2")
+	return dl.isLiveClosed
 }
 
-// fetchRoomID 获取 roomID
-func (d *DouyinLive) fetchRoomID() (string, error) {
-	result, err := d.getUrl(d.liveurl + d.liveid)
-	if err != nil {
-		return result, fmt.Errorf("请求直播间信息失败: %w", err)
-	}
-	d.roomid = extractMatch(roomIDRegexp, result, 1)
-	if d.roomid == "" {
-		return "", errors.New("fetchRoomID: 未找到 roomID")
-	}
-	d.pushid = extractMatch(pushIDRegexp, result, 1)
-	if d.pushid == "" {
-		return "", errors.New("fetchRoomID: 未找到 pushid")
-	}
-	return d.roomid, nil
+// setLiveStatus 设置直播间状态
+func (dl *DouyinLive) setLiveStatus(status bool) {
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+	dl.isLiveClosed = status
 }
 
-// extractMatch 从字符串中提取正则表达式匹配的内容
-func extractMatch(re *regexp.Regexp, s string, i int) string {
-	match := re.FindStringSubmatch(s)
-	if len(match) > 1 {
-		return match[i]
-	}
-	return ""
-}
+// Start 启动直播间连接
+func (dl *DouyinLive) Start() {
+	defer dl.cleanup()
 
-// GzipUnzipReset 使用 Reset 方法解压 gzip 数据
-func (d *DouyinLive) GzipUnzipReset(compressedData []byte) ([]byte, error) {
-	var err error
-	buffer := d.buffers.Get().(*bytes.Buffer)
-	defer func() {
-		buffer.Reset()
-		d.buffers.Put(buffer)
-	}()
-
-	_, err = buffer.Write(compressedData)
-	if err != nil {
-		return nil, err
-	}
-
-	if d.gzip != nil {
-		err = d.gzip.Reset(buffer)
-		if err != nil {
-			err := d.gzip.Close()
-			if err != nil {
-				return nil, err
-			}
-			d.gzip = nil
-			return nil, err
-		}
-	} else {
-		d.gzip, err = gzip.NewReader(buffer)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	defer func() {
-		if d.gzip != nil {
-			err := d.gzip.Close()
-			if err != nil {
-				return
-			}
-		}
-	}()
-	uncompressedBuffer := &bytes.Buffer{}
-	_, err = io.Copy(uncompressedBuffer, d.gzip)
-	if err != nil {
-		return nil, err
-	}
-
-	return uncompressedBuffer.Bytes(), nil
-}
-
-// Start 开始连接和处理消息
-func (d *DouyinLive) Start() {
-	var err error
-	d.wssurl = d.StitchUrl()
-	d.headers.Add("user-agent", d.userAgent)
-	d.headers.Add("cookie", fmt.Sprintf("ttwid=%s", d.ttwid))
-	var response *http.Response
-	if !d.IsLive() {
-		log.Println("未开播,或者链接失败")
+	if !dl.IsLive() {
+		log.Println("直播间未开播或连接失败")
 		return
 	}
 
-	d.Conn, response, err = websocket.DefaultDialer.Dial(d.wssurl, d.headers)
-	if err != nil {
-		log.Printf("链接失败: err:%v\nroomid:%v\n ttwid:%v\nwssurl:----%v\nresponse:%v\n", err, d.roomid, d.ttwid, d.wssurl, response)
+	if err := dl.connectWebSocket(); err != nil {
+		log.Printf("WebSocket连接失败: %v", err)
 		return
 	}
-	log.Println("链接成功")
 
-	defer func() {
-		if d.gzip != nil {
-			err := d.gzip.Close()
-			if err != nil {
-				log.Println("gzip关闭失败:", err)
-			} else {
-				log.Println("gzip关闭")
-			}
-		}
-		if d.Conn != nil {
-			err = d.Conn.Close()
-			if err != nil {
-				log.Println("关闭ws链接失败", err)
-			} else {
-				log.Println("抖音ws链接关闭")
-			}
-		}
-	}()
-	var pbPac = &new_douyin.Webcast_Im_PushFrame{}
-	var pbResp = &new_douyin.Webcast_Im_Response{}
-	var pbAck = &new_douyin.Webcast_Im_PushFrame{}
-	for d.isLiveClosed {
-		messageType, message, err := d.Conn.ReadMessage()
+	dl.processMessages()
+}
+
+// connectWebSocket 连接 WebSocket
+func (dl *DouyinLive) connectWebSocket() error {
+	dialer := websocket.DefaultDialer
+	dialer.HandshakeTimeout = websocketConnectTimeout
+
+	conn, resp, err := dialer.Dial(dl.constructWSSURL(), dl.headers)
+	if err != nil {
+		return fmt.Errorf("连接失败 (状态码: %d): %w", resp.StatusCode, err)
+	}
+	log.Println("直播间连接成功")
+	dl.mu.Lock()
+	dl.conn = conn
+	dl.mu.Unlock()
+	return nil
+}
+
+// constructWSSURL 构建 WebSocket URL
+func (dl *DouyinLive) constructWSSURL() string {
+	fetchTime := time.Now().UnixNano() / int64(time.Millisecond)
+	browserInfo := strings.SplitN(dl.userAgent, "Mozilla", 2)[1]
+	parsedBrowser := strings.ReplaceAll(browserInfo, " ", "%20")
+
+	signature := jsScript.ExecuteJS(utils.GetxMSStub(
+		utils.NewOrderedMap(dl.roomID, dl.pushID),
+	))
+
+	return fmt.Sprintf(wssURLTemplate,
+		parsedBrowser,
+		dl.roomID,
+		dl.pushID,
+		fetchTime,
+		fetchTime,
+		fetchTime,
+		dl.pushID,
+		dl.roomID,
+		signature,
+	)
+}
+
+// processMessages 处理消息
+func (dl *DouyinLive) processMessages() {
+	var (
+		pushFrame = &new_douyin.Webcast_Im_PushFrame{}
+		response  = &new_douyin.Webcast_Im_Response{}
+
+		controlMsg = &douyin.ControlMessage{}
+	)
+
+	for dl.isLiveClosed {
+		messageType, data, err := dl.readMessage()
 		if err != nil {
-			log.Println("读取消息失败-", err, message, messageType)
-			if d.reconnect(5) {
-				continue
-			} else {
+			if !dl.handleReadError(err) {
 				break
 			}
-		} else {
-			if message != nil {
-				err := proto.Unmarshal(message, pbPac)
-				if err != nil {
-					log.Println("解析消息失败：", err)
-					continue
-				}
-				n := utils.HasGzipEncoding(pbPac.Headers)
-				if n && pbPac.PayloadType == "msg" {
-					uncompressedData, err := d.GzipUnzipReset(pbPac.Payload)
-					if err != nil {
-						log.Println("Gzip解压失败:", err)
-						continue
-					}
+			continue
+		}
 
-					err = proto.Unmarshal(uncompressedData, pbResp)
-					if err != nil {
-						log.Println("解析消息失败：", err)
-						continue
-					}
-					if pbResp.NeedAck {
-						pbAck.Reset()
-						pbAck.LogID = pbPac.LogID
-						pbAck.PayloadType = "ack"
-						pbAck.Payload = []byte(pbResp.InternalExt)
+		if messageType != websocket.BinaryMessage || len(data) == 0 {
+			continue
+		}
 
-						serializedAck, err := proto.Marshal(pbAck)
-						if err != nil {
-							log.Println("proto心跳包序列化失败:", err)
-							continue
-						}
-						err = d.Conn.WriteMessage(websocket.BinaryMessage, serializedAck)
-						if err != nil {
-							log.Println("心跳包发送失败：", err)
-							continue
-						}
-					}
-					d.ProcessingMessage(pbResp)
-				}
-			}
+		if err := proto.Unmarshal(data, pushFrame); err != nil {
+			log.Printf("解析PushFrame失败: %v", err)
+			continue
+		}
+
+		if pushFrame.PayloadType == "msg" && utils.HasGzipEncoding(pushFrame.Headers) {
+			dl.handleGzipMessage(pushFrame, response, controlMsg)
 		}
 	}
 }
 
-// reconnect 尝试重新连接
-func (d *DouyinLive) reconnect(i int) bool {
-	if d.Conn != nil {
-		err := d.Conn.Close()
+// readMessage 读取消息
+func (dl *DouyinLive) readMessage() (int, []byte, error) {
+	dl.mu.RLock()
+	defer dl.mu.RUnlock()
+	if dl.conn == nil {
+		return 0, nil, errors.New("连接已关闭")
+	}
+	return dl.conn.ReadMessage()
+}
+
+// handleGzipMessage 处理 GZIP 消息
+func (dl *DouyinLive) handleGzipMessage(pushFrame *new_douyin.Webcast_Im_PushFrame, response *new_douyin.Webcast_Im_Response, controlMsg *douyin.ControlMessage) {
+
+	uncompressed, err := dl.decompressGzip(pushFrame.Payload)
+	if err != nil {
+		log.Printf("GZIP解压失败: %v", err)
+		return
+	}
+
+	if err := proto.Unmarshal(uncompressed, response); err != nil {
+		log.Printf("解析Response失败: %v", err)
+		return
+	}
+
+	if response.NeedAck {
+		dl.sendAck(pushFrame.LogID, response.InternalExt)
+	}
+
+	for _, msg := range response.Messages {
+		dl.handleSingleMessage(msg, controlMsg)
+	}
+}
+
+// decompressGzip 解压 GZIP 数据
+func (dl *DouyinLive) decompressGzip(data []byte) ([]byte, error) {
+	buf := dl.bufferPool.Get().(*bytes.Buffer)
+	defer func() {
+		buf.Reset()
+		dl.bufferPool.Put(buf)
+	}()
+
+	buf.Write(data)
+	gz, err := gzip.NewReader(buf)
+	if err != nil {
+		return nil, err
+	}
+	defer gz.Close()
+
+	result := bytes.NewBuffer(make([]byte, 0, len(data)*2))
+	if _, err = io.Copy(result, gz); err != nil {
+		return nil, err
+	}
+	return result.Bytes(), nil
+}
+
+// sendAck 发送 ACK 消息
+func (dl *DouyinLive) sendAck(logID uint64, internalExt string) {
+	ackFrame := &new_douyin.Webcast_Im_PushFrame{
+		LogID:       logID,
+		PayloadType: "ack",
+		Payload:     []byte(internalExt),
+	}
+
+	data, err := proto.Marshal(ackFrame)
+	if err != nil {
+		log.Printf("心跳包序列化失败: %v", err)
+		return
+	}
+
+	dl.mu.RLock()
+	defer dl.mu.RUnlock()
+	if dl.conn != nil {
+		err := dl.conn.WriteMessage(websocket.BinaryMessage, data)
 		if err != nil {
-			return false
+			log.Printf("发送心跳包失败: %v", err)
 		}
-		d.Conn = nil
 	}
-	var err error
-	log.Println("尝试重新连接...")
-	for attempt := 0; attempt < i; attempt++ {
-		if d.Conn != nil {
-			err := d.Conn.Close()
-			if err != nil {
-				log.Printf("关闭连接失败: %v", err)
-			}
+}
+
+// handleSingleMessage 处理单条消息
+func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
+	controlMsg *douyin.ControlMessage) {
+	dl.emitEvent(msg)
+
+	if msg.Method == "WebcastControlMessage" {
+		if err := proto.Unmarshal(msg.Payload, controlMsg); err != nil {
+			log.Printf("解析控制消息失败: %v", err)
+			return
 		}
-		d.Conn, _, err = websocket.DefaultDialer.Dial(d.wssurl, d.headers)
+		if controlMsg.Status == 3 {
+			dl.setLiveStatus(false)
+		}
+	}
+}
+
+// 修改 handleReadError 方法，使用库自带方法判断错误
+func (dl *DouyinLive) handleReadError(err error) bool {
+	// 使用 websocket.IsCloseError 判断特定关闭码
+	if websocket.IsCloseError(err,
+		websocket.CloseNormalClosure,    // 1000 正常关闭
+		websocket.CloseGoingAway,        // 1001 端点离开
+		websocket.CloseNoStatusReceived, // 1005 无状态码
+	) {
+		log.Printf("正常关闭: %v", err)
+		return false // 不需要重连
+	}
+
+	// 处理非正常关闭错误
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) {
+		log.Printf("WebSocket关闭错误: code=%d, reason=%s", closeErr.Code, closeErr.Text)
+
+		// 针对特定错误码处理
+		switch closeErr.Code {
+		case websocket.CloseAbnormalClosure: // 1006 异常关闭
+			log.Println("检测到异常关闭，尝试重连...")
+			return dl.reconnect(defaultMaxRetries)
+		case websocket.CloseTryAgainLater: // 1013 临时不可用
+			log.Println("服务端要求稍后重试...")
+			time.Sleep(5 * time.Second)
+			return dl.reconnect(defaultMaxRetries)
+		}
+	}
+
+	// 处理其他网络错误
+	log.Printf("网络错误: %v", err)
+	return dl.reconnect(defaultMaxRetries)
+}
+
+// 优化后的 reconnect 方法
+func (dl *DouyinLive) reconnect(attempts int) bool {
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+
+	if dl.conn != nil {
+		// 使用标准方法发送关闭帧
+		msg := websocket.FormatCloseMessage(websocket.CloseGoingAway, "reconnecting")
+		_ = dl.conn.WriteControl(websocket.CloseMessage, msg, time.Now().Add(3*time.Second))
+		dl.conn.Close()
+		dl.conn = nil
+	}
+
+	retryable := func() error {
+		conn, _, err := websocket.DefaultDialer.Dial(dl.constructWSSURL(), dl.headers)
 		if err != nil {
-			log.Printf("重连失败: %v", err)
-			log.Printf("正在尝试第 %d 次重连...", attempt+1)
-			time.Sleep(time.Duration(attempt) * time.Second)
-		} else {
-			log.Println("重连成功")
-			return true
-		}
-	}
-	log.Println("重连失败，退出程序")
-	return false
-}
-
-// StitchUrl 构建 WebSocket 连接的 URL
-func (d *DouyinLive) StitchUrl() string {
-	smap := utils.NewOrderedMap(d.roomid, d.pushid)
-	signaturemd5 := utils.GetxMSStub(smap)
-	signature := jsScript.ExecuteJS(signaturemd5)
-	browserInfo := strings.Split(d.userAgent, "Mozilla")[1]
-	parsedURL := strings.Replace(browserInfo[1:], " ", "%20", -1)
-	fetchTime := time.Now().UnixNano() / int64(time.Millisecond)
-	return "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/?app_name=douyin_web&version_code=180800&" +
-		"webcast_sdk_version=1.0.14-beta.0&update_version_code=1.0.14-beta.0&compress=gzip&device_platform" +
-		"=web&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&" +
-		"browser_name=Mozilla&browser_version=" + parsedURL + "&browser_online=true" +
-		"&tz_name=Asia/Shanghai&cursor=d-1_u-1_fh-7383731312643626035_t-1719159695790_r-1&internal_ext" +
-		"=internal_src:dim|wss_push_room_id:" + d.roomid + "|wss_push_did:" + d.pushid + "|first_req_ms:" + cast.ToString(fetchTime) + "|fetch_time:" + cast.ToString(fetchTime) + "|seq:1|wss_info:0-" + cast.ToString(fetchTime) + "-0-0|" +
-		"wrds_v:7382620942951772256&host=https://live.douyin.com&aid=6383&live_id=1&did_rule=3" +
-		"&endpoint=live_pc&support_wrds=1&user_unique_id=" + d.pushid + "&im_path=/webcast/im/fetch/" +
-		"&identity=audience&need_persist_msg_count=15&insert_task_id=&live_reason=&room_id=" + d.roomid + "&heartbeatDuration=0&signature=" + signature
-}
-
-// emit 触发事件处理器
-func (d *DouyinLive) emit(eventData *new_douyin.Webcast_Im_Message) {
-	for _, handler := range d.eventHandlers {
-		handler(eventData)
-	}
-}
-
-// ProcessingMessage 处理接收到的消息
-func (d *DouyinLive) ProcessingMessage(response *new_douyin.Webcast_Im_Response) {
-	for _, data := range response.Messages {
-		d.emit(data)
-		if data.Method == "WebcastControlMessage" {
-			msg := &douyin.ControlMessage{}
-			err := proto.Unmarshal(data.Payload, msg)
-			if err != nil {
-				log.Println("解析protobuf失败", err)
-				return
+			// 处理不可恢复错误
+			if websocket.IsCloseError(err,
+				websocket.CloseAbnormalClosure,         // 1006 异常关闭
+				websocket.CloseTryAgainLater,           // 1013 临时不可用
+				websocket.CloseServiceRestart,          // 1012 服务重启
+				websocket.CloseGoingAway,               // 1001 端点离开
+				websocket.CloseNoStatusReceived,        // 1005 无状态码
+				websocket.ClosePolicyViolation,         // 1008 策略违规
+				websocket.CloseInvalidFramePayloadData, // 1007 无效数据
+			) {
+				return retry.Unrecoverable(err)
 			}
-			if msg.Status == 3 {
-				d.isLiveClosed = false
-				log.Println("关闭ws链接成功")
-			}
+			return err
 		}
+		dl.conn = conn
+		return nil
+	}
+
+	err := retry.Do(
+		retryable,
+		retry.Attempts(uint(attempts)),
+		retry.DelayType(retry.BackOffDelay),
+		retry.RetryIf(func(err error) bool {
+			// 过滤不可重试的错误
+			return !websocket.IsCloseError(err,
+				websocket.ClosePolicyViolation,
+				websocket.CloseInvalidFramePayloadData,
+			)
+		}),
+		retry.OnRetry(func(n uint, err error) {
+			log.Printf("第%d次重试连接: %v", n+1, err)
+		}),
+	)
+
+	return err == nil
+}
+
+// 使用库方法判断意外关闭
+func isUnexpectedClose(err error) bool {
+	return websocket.IsUnexpectedCloseError(err,
+		websocket.CloseNormalClosure,
+		websocket.CloseGoingAway,
+		websocket.CloseNoStatusReceived,
+	)
+}
+
+// cleanup 清理资源
+func (dl *DouyinLive) cleanup() {
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+
+	if dl.conn != nil {
+		dl.conn.Close()
 	}
 }
 
-// Subscribe 订阅事件处理器
-func (d *DouyinLive) Subscribe(handler EventHandler) {
-	d.eventHandlers = append(d.eventHandlers, handler)
+// emitEvent 触发事件
+func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message) {
+	for _, handler := range dl.eventHandlers {
+		handler(msg)
+	}
+}
+
+// Subscribe 订阅事件
+func (dl *DouyinLive) Subscribe(handler EventHandler) {
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+	dl.eventHandlers = append(dl.eventHandlers, handler)
+}
+
+// Unsubscribe 取消订阅事件
+func extractString(re *regexp.Regexp, s string, index int) string {
+	if matches := re.FindStringSubmatch(s); len(matches) > index {
+		return matches[index]
+	}
+	return ""
 }

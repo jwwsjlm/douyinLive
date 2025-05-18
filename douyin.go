@@ -225,6 +225,7 @@ func (dl *DouyinLive) processMessages() {
 	for dl.isLiveClosed {
 		messageType, data, err := dl.readMessage()
 		if err != nil {
+			log.Println("读取消息失败:", err)
 			if !dl.handleReadError(err) {
 				break
 			}
@@ -344,15 +345,11 @@ func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 // 修改 handleReadError 方法，使用库自带方法判断错误
 func (dl *DouyinLive) handleReadError(err error) bool {
 	// 使用 websocket.IsCloseError 判断特定关闭码
-	if websocket.IsCloseError(err,
-		websocket.CloseNormalClosure,    // 1000 正常关闭
-		websocket.CloseGoingAway,        // 1001 端点离开
-		websocket.CloseNoStatusReceived, // 1005 无状态码
-	) {
+	if !websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure) {
 		log.Printf("正常关闭: %v", err)
 		return false // 不需要重连
 	}
-
+	log.Printf("检测到非正常关闭，尝试重连...错误代码:%v\n", err)
 	// 处理非正常关闭错误
 	var closeErr *websocket.CloseError
 	if errors.As(err, &closeErr) {

@@ -5,12 +5,21 @@ CMD_PATH := cmd/main/main.go
 GO_BUILD := go build
 GO_CLEAN := go clean
 GO_TIDY := go mod tidy
-LDFLAGS := -ldflags="-s -w"
-
+LDFLAGS := -s -w
+# OS-specific settings
+GOOS_WINDOWS := windows
+GOARCH_WINDOWS := amd64
+GOOS_LINUX := linux
+GOARCH_LINUX := amd64
+#TAGS := jsoniter
 # Build binary for Windows
 build-windows:
 	@echo "Building application for Windows..."
-	$(GO_BUILD) $(LDFLAGS) -o $(BINARY_NAME)-windows.exe $(CMD_PATH)
+	$(GO_BUILD) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-windows.exe $(CMD_PATH)
+# Build binary for Linux
+build-linux:
+	@echo Building application for Linux...
+	set GOOS=$(GOOS_LINUX)& set GOARCH=$(GOARCH_LINUX)& $(GO_BUILD) -tags=$(TAGS) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-linux $(CMD_PATH)
 
 # Install dependencies
 install:

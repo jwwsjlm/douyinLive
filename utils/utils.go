@@ -8,14 +8,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/rand"
-	"strconv"
-	"strings"
-
 	"github.com/elliotchance/orderedmap"
+	"github.com/google/uuid"
 	"github.com/jwwsjlm/douyinLive/generated"
 	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"math/rand"
+	"strconv"
+	"strings"
 )
 
 // HasGzipEncoding 判断消息头中是否包含gzip编码
@@ -123,4 +123,9 @@ func RandomUserAgent() string {
 	chromeVersion := chromeVersionList[rand.Intn(len(chromeVersionList))]
 
 	return fmt.Sprintf("Mozilla/5.0 %s AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", os, chromeVersion)
+}
+
+// GenerateUniqueID 生成唯一标识符
+func GenerateUniqueID() string {
+	return uuid.New().String()
 }

@@ -26,7 +26,6 @@ const (
 	Default = "Default"
 )
 
-type EventHandler func(eventData *new_douyin.Webcast_Im_Message)
 type DouyinLive struct {
 	mu            sync.RWMutex
 	liveID        string
@@ -41,4 +40,10 @@ type DouyinLive struct {
 	headers       http.Header
 	bufferPool    *sync.Pool
 	isLiveClosed  bool
+}
+
+// 修改 EventHandler 类型，添加唯一ID
+type EventHandler struct {
+	ID      string
+	Handler func(*new_douyin.Webcast_Im_Message)
 }

@@ -62,6 +62,7 @@ func main() {
 	d, err := douyinLive.NewDouyinLive(room)
 	if err != nil {
 		log.Fatalf("抖音链接失败: %v", err)
+
 	}
 
 	// 订阅事件
@@ -84,7 +85,7 @@ func startServer(port int) string {
 		port++ // 如果端口被占用，增加端口号
 	}
 
-	log.Printf("服务器成功启动在端口 %d\n", port)
+	//log.Printf("服务器成功启动在端口 %d\n", port)
 	return strconv.Itoa(port)
 }
 

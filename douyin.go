@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -50,6 +51,7 @@ var (
 
 // NewDouyinLive 创建一个新的 DouyinLive 实例
 func NewDouyinLive(liveID string) (*DouyinLive, error) {
+	log.SetOutput(os.Stdout)
 	dl := &DouyinLive{
 		liveID:     liveID,
 		userAgent:  utils.RandomUserAgent(),
@@ -152,8 +154,6 @@ func (dl *DouyinLive) IsLive() bool {
 
 // setLiveStatus 设置直播间状态
 func (dl *DouyinLive) setLiveStatus(status bool) {
-	dl.mu.Lock()
-	defer dl.mu.Unlock()
 	dl.isLiveClosed = status
 }
 
@@ -167,7 +167,7 @@ func (dl *DouyinLive) Start() {
 	}
 
 	if err := dl.connectWebSocket(); err != nil {
-		log.Printf("WebSocket连接失败: %v", err)
+		log.Printf("WebSocket连接失败: %v\n", err)
 		return
 	}
 
@@ -183,10 +183,8 @@ func (dl *DouyinLive) connectWebSocket() error {
 	if err != nil {
 		return fmt.Errorf("连接失败 (状态码: %d): %w", resp.StatusCode, err)
 	}
-	log.Println("直播间连接成功")
-	dl.mu.Lock()
+	log.Printf("直播间连接成功%d\n", resp.StatusCode)
 	dl.conn = conn
-	dl.mu.Unlock()
 	return nil
 }
 
@@ -223,9 +221,10 @@ func (dl *DouyinLive) processMessages() {
 	)
 
 	for dl.isLiveClosed {
-		messageType, data, err := dl.readMessage()
+		messageType, data, err := dl.conn.ReadMessage()
+		//log.Printf("读取消息类型: %d, 数据长度: %d, err:%v\n", messageType, len(data), err)
 		if err != nil {
-			log.Println("读取消息失败:", err)
+			log.Printf("读取消息失败:%v\n", err)
 			if !dl.handleReadError(err) {
 				break
 			}
@@ -237,7 +236,7 @@ func (dl *DouyinLive) processMessages() {
 		}
 
 		if err := proto.Unmarshal(data, pushFrame); err != nil {
-			log.Printf("解析PushFrame失败: %v", err)
+			log.Printf("解析PushFrame失败: %v\n", err)
 			continue
 		}
 
@@ -249,8 +248,6 @@ func (dl *DouyinLive) processMessages() {
 
 // readMessage 读取消息
 func (dl *DouyinLive) readMessage() (int, []byte, error) {
-	dl.mu.RLock()
-	defer dl.mu.RUnlock()
 	if dl.conn == nil {
 		return 0, nil, errors.New("连接已关闭")
 	}
@@ -262,12 +259,12 @@ func (dl *DouyinLive) handleGzipMessage(pushFrame *new_douyin.Webcast_Im_PushFra
 
 	uncompressed, err := dl.decompressGzip(pushFrame.Payload)
 	if err != nil {
-		log.Printf("GZIP解压失败: %v", err)
+		log.Printf("GZIP解压失败: %v\n", err)
 		return
 	}
 
 	if err := proto.Unmarshal(uncompressed, response); err != nil {
-		log.Printf("解析Response失败: %v", err)
+		log.Printf("解析Response失败: %v\n", err)
 		return
 	}
 
@@ -312,16 +309,14 @@ func (dl *DouyinLive) sendAck(logID uint64, internalExt string) {
 
 	data, err := proto.Marshal(ackFrame)
 	if err != nil {
-		log.Printf("心跳包序列化失败: %v", err)
+		log.Printf("心跳包序列化失败: %v\n", err)
 		return
 	}
 
-	dl.mu.RLock()
-	defer dl.mu.RUnlock()
 	if dl.conn != nil {
 		err := dl.conn.WriteMessage(websocket.BinaryMessage, data)
 		if err != nil {
-			log.Printf("发送心跳包失败: %v", err)
+			log.Printf("发送心跳包失败: %v\n", err)
 		}
 	}
 }
@@ -333,7 +328,7 @@ func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 
 	if msg.Method == "WebcastControlMessage" {
 		if err := proto.Unmarshal(msg.Payload, controlMsg); err != nil {
-			log.Printf("解析控制消息失败: %v", err)
+			log.Printf("解析控制消息失败: %v\n", err)
 			return
 		}
 		if controlMsg.Status == 3 {
@@ -344,16 +339,16 @@ func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 
 // 修改 handleReadError 方法，使用库自带方法判断错误
 func (dl *DouyinLive) handleReadError(err error) bool {
-	// 使用 websocket.IsCloseError 判断特定关闭码
+	// 使用 websocket.IsUnexpectedCloseError 判断特定关闭码
 	if !websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure) {
-		log.Printf("正常关闭: %v", err)
+		log.Printf("正常关闭: %v\n", err)
 		return false // 不需要重连
 	}
 	log.Printf("检测到非正常关闭，尝试重连...错误代码:%v\n", err)
 	// 处理非正常关闭错误
 	var closeErr *websocket.CloseError
 	if errors.As(err, &closeErr) {
-		log.Printf("WebSocket关闭错误: code=%d, reason=%s", closeErr.Code, closeErr.Text)
+		log.Printf("WebSocket关闭错误: code=%d, reason=%s\n", closeErr.Code, closeErr.Text)
 
 		// 针对特定错误码处理
 		switch closeErr.Code {
@@ -368,15 +363,12 @@ func (dl *DouyinLive) handleReadError(err error) bool {
 	}
 
 	// 处理其他网络错误
-	log.Printf("网络错误: %v", err)
+	log.Printf("网络错误: %v\n", err)
 	return dl.reconnect(defaultMaxRetries)
 }
 
 // 优化后的 reconnect 方法
 func (dl *DouyinLive) reconnect(attempts int) bool {
-	dl.mu.Lock()
-	defer dl.mu.Unlock()
-
 	if dl.conn != nil {
 		// 使用标准方法发送关闭帧
 		msg := websocket.FormatCloseMessage(websocket.CloseGoingAway, "reconnecting")
@@ -418,7 +410,7 @@ func (dl *DouyinLive) reconnect(attempts int) bool {
 			)
 		}),
 		retry.OnRetry(func(n uint, err error) {
-			log.Printf("第%d次重试连接: %v", n+1, err)
+			log.Printf("第%d次重试连接: %v\n", n+1, err)
 		}),
 	)
 
@@ -436,29 +428,39 @@ func isUnexpectedClose(err error) bool {
 
 // cleanup 清理资源
 func (dl *DouyinLive) cleanup() {
-	dl.mu.Lock()
-	defer dl.mu.Unlock()
-
 	if dl.conn != nil {
 		dl.conn.Close()
 	}
 }
 
-// emitEvent 触发事件
+// emitEvent 触发事件，遍历处理所有有效处理器
 func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message) {
 	for _, handler := range dl.eventHandlers {
-		handler(msg)
+		handler.Handler(msg)
 	}
 }
 
-// Subscribe 订阅事件
-func (dl *DouyinLive) Subscribe(handler EventHandler) {
-	dl.mu.Lock()
-	defer dl.mu.Unlock()
-	dl.eventHandlers = append(dl.eventHandlers, handler)
+// Subscribe 订阅事件，生成唯一ID
+func (dl *DouyinLive) Subscribe(handler func(*new_douyin.Webcast_Im_Message)) string {
+	id := utils.GenerateUniqueID() // 假设这是一个生成唯一ID的函数
+	dl.eventHandlers = append(dl.eventHandlers, EventHandler{
+		ID:      id,
+		Handler: handler,
+	})
+	return id
 }
 
-// Unsubscribe 取消订阅事件
+// Unsubscribe 取消订阅事件，通过ID查找并移除
+func (dl *DouyinLive) Unsubscribe(id string) {
+	for i, h := range dl.eventHandlers {
+		if h.ID == id {
+			dl.eventHandlers = append(dl.eventHandlers[:i], dl.eventHandlers[i+1:]...)
+			break
+		}
+	}
+}
+
+// extractString 辅助函数，从正则匹配中提取字符串
 func extractString(re *regexp.Regexp, s string, index int) string {
 	if matches := re.FindStringSubmatch(s); len(matches) > index {
 		return matches[index]

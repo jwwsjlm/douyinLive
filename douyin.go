@@ -332,6 +332,7 @@ func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 			return
 		}
 		if controlMsg.Status == 3 {
+			log.Println("直播间已关闭")
 			dl.setLiveStatus(false)
 		}
 	}

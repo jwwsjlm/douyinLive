@@ -404,4 +404,22 @@ var NewMessage = map[string]func() protoreflect.ProtoMessage{
 	"WebcastLightGiftMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_LightGiftMessage{}
 	},
+	// 连麦军团操作消息（连麦场景下军团相关操作，如军团对抗、协作等）
+	"WebcastLinkMicArmiesMethod": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkMicArmies{}
+	},
+	// 连麦军团状态消息（连麦场景下军团状态更新，如军团成员变动、军团任务进度等）
+	"WebcastBattleSeasonPKResultMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_BattleSeasonPKResultMessage{}
+	},
+	// 连麦军团状态消息（连麦场景下军团状态更新，如军团成员变动、军团任务进度等）
+	"WebcastBattlePowerContainerMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_BattlePowerContainerMessage{}
+	},
+	"WebcastBattleEndPunishMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_BattleEndPunishMessage{}
+	},
+	"WebcastBattleEffectContainerMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_BattleEffectContainerMessage{}
+	},
 }

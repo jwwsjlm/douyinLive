@@ -384,4 +384,24 @@ var NewMessage = map[string]func() protoreflect.ProtoMessage{
 	"WebcastDecorationUpdateMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_DecorationUpdateMessage{}
 	},
+	// 直播收益游戏状态消息（收益互动游戏状态更新，如答题、竞猜等）
+	"WebcastProfitGameStatusMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_ProfitGameStatusMessage{}
+	},
+	// 连麦对战操作消息（连麦PK挑战、接受、开始等操作）
+	// Linked microphone battle operation message (operations such as challenging, accepting, and starting a linked microphone PK)
+	"WebcastLinkMicBattleMethod": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkMicBattle{}
+	},
+
+	// 对战团队任务消息（连麦PK团队任务进度和奖励通知）
+	// Battle team task message (notification of progress and rewards for linked microphone PK team tasks)
+	"WebcastBattleTeamTaskMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_BattleTeamTaskMessage{}
+	},
+	// 轻量级礼物消息（简易动画礼物通知，如点赞动画礼物）
+	// Lightweight gift message (notification for simple animated gifts, such as like animation gifts)
+	"WebcastLightGiftMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LightGiftMessage{}
+	},
 }

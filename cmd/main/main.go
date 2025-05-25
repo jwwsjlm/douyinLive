@@ -9,6 +9,7 @@ import (
 	"github.com/lxzan/gws"
 	"github.com/spf13/cast"
 	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"log"
@@ -16,25 +17,85 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
 var (
 	agentlist sync.Map
 	unknown   bool
+	port      string
+	room      string
+	key       string
 )
 
-func main() {
-	var port string
-	var room string
-	var key string
-	pflag.StringVar(&port, "port", "1088", "WebSocket 服务端口")
-	pflag.StringVar(&room, "room", "****", "抖音直播房间号")
-	pflag.BoolVar(&unknown, "unknown", false, "是否输出未知源的pb消息")
-	pflag.StringVar(&key, "key", "", "tikhub key")
-	pflag.Parse()
-	log.SetOutput(os.Stdout)
+func initConfig() {
+	// 设置配置文件名称和路径
+	viper.SetConfigName("config")     // 配置文件名称（不带扩展名）
+	viper.SetConfigType("yaml")       // 配置文件类型
+	viper.AddConfigPath(".")          // 当前目录
+	viper.AddConfigPath("$HOME/.app") // 家目录下的.app目录
+	viper.AddConfigPath("/etc/app/")  // 系统配置目录
 
+	// 环境变量支持
+	viper.SetEnvPrefix("APP")                              // 环境变量前缀
+	viper.AutomaticEnv()                                   // 自动绑定环境变量
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_")) // 替换环境变量中的点为下划线
+
+	// 设置默认值
+	viper.SetDefault("port", "1088")
+	viper.SetDefault("room", "****")
+	viper.SetDefault("unknown", false)
+	viper.SetDefault("key", "")
+
+	// 读取配置文件
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			// 配置文件不存在，使用默认值或命令行参数
+			log.Println("配置文件未找到，使用默认值或命令行参数")
+		} else {
+			// 配置文件存在但格式错误
+			log.Fatalf("配置文件解析错误: %v", err)
+		}
+	} else {
+		log.Printf("使用配置文件: %s", viper.ConfigFileUsed())
+	}
+}
+
+func main() {
+	// 设置日志输出到标准输出
+	log.SetOutput(os.Stdout)
+	// 初始化配置
+	initConfig()
+
+	// 定义命令行参数
+	pflag.String("port", viper.GetString("port"), "WebSocket 服务端口")
+	pflag.String("room", viper.GetString("room"), "抖音直播房间号")
+	pflag.Bool("unknown", viper.GetBool("unknown"), "是否输出未知源的pb消息")
+	pflag.String("key", viper.GetString("key"), "tikhub key")
+	configFile := *pflag.String("config", "", "指定配置文件路径")
+	// 解析命令行参数
+	pflag.Parse()
+
+	// 如果指定了配置文件，则使用该配置文件
+	if configFile != "" {
+		viper.SetConfigFile(configFile)
+		if err := viper.ReadInConfig(); err != nil {
+			log.Fatalf("无法读取指定的配置文件: %v", err)
+		}
+		log.Printf("使用指定配置文件: %s", configFile)
+	}
+
+	// 将命令行参数绑定到viper
+	err := viper.BindPFlags(pflag.CommandLine)
+	if err != nil {
+		log.Fatalf("绑定命令行参数失败: %v", err)
+	}
+	// 获取最终配置值（命令行参数优先）
+	port = viper.GetString("port")
+	room = viper.GetString("room")
+	unknown = viper.GetBool("unknown")
+	key = viper.GetString("key")
 	// 创建 gws 的 Upgrader
 	upgrader := gws.NewUpgrader(&WsHandler{}, &gws.ServerOption{
 		ParallelEnabled: true,         // 开启并行消息处理
@@ -47,11 +108,14 @@ func main() {
 	// 设置 WebSocket 路由
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		socket, err := upgrader.Upgrade(w, r)
+
 		if err != nil {
-			log.Printf("升级 WebSocket 失败: %v\n", err)
+			log.Printf("升级 WebSocket 失败: %v \n 请求头:%v \n 客户端ip:%v\n", err, r.Header, r.RemoteAddr)
 			return
 		}
-		go socket.ReadLoop()
+		go func() {
+			socket.ReadLoop()
+		}()
 	})
 
 	// 启动 WebSocket 服务器
@@ -194,9 +258,11 @@ func (c *WsHandler) OnClose(socket *gws.Conn, err error) {
 	DeleteConnection(client)
 }
 
+// OnMessage 收到消息
 func (c *WsHandler) OnMessage(socket *gws.Conn, message *gws.Message) {
 	defer message.Close()
 	//sec := socket.Request().Header.Get("Sec-WebSocket-Key")
+	//log.Printf("收到消息: %s\n", sec)
 	msgStr := string(message.Bytes())
 	log.Printf("收到消息: %s\n", msgStr)
 	if msgStr == "ping" {

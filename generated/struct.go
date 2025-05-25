@@ -53,6 +53,8 @@ var MessageMap = map[string]func() protoreflect.ProtoMessage{
 
 // NewMessage 匹配抖音直播消息
 var NewMessage = map[string]func() protoreflect.ProtoMessage{
+	//来源:https://github.com/qiaoruntao/douyin_contract/blob/master/mapping.json
+	//https://github.com/Remember-the-past/douyin_proto/blob/main/method%E5%AF%B9%E5%BA%94proto%E5%85%B3%E7%B3%BB.md
 	// 直播文字聊天消息（普通文本弹幕）
 	// Live text chat message (ordinary text danmaku)
 	"WebcastChatMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_ChatMessage{} },
@@ -171,7 +173,7 @@ var NewMessage = map[string]func() protoreflect.ProtoMessage{
 
 	// 临时状态区域触发消息（如福袋领取区域进入通知）
 	// Temporary state area trigger message (such as notification of entering the lucky bag collection area)
-	"WebcastTempStateAreaReachMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_TempStateAreaReachMessage_Resource{} },
+	"WebcastTempStateAreaReachMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_TempStateAreaReachMessage{} },
 
 	// 成长任务消息（观看时长、互动次数奖励通知）
 	// Growth task message (notification of rewards for watch time and interaction次数)

@@ -424,4 +424,10 @@ var NewMessage = map[string]func() protoreflect.ProtoMessage{
 	"WebcastBattleEffectContainerMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_BattleEffectContainerMessage{}
 	},
+	"WebcastTopEffectMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_TopEffectMessage{}
+	},
+	"WebcastLinkSettingNotifyMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LinkSettingNotifyMessage{}
+	},
 }

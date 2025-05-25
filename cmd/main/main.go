@@ -2,10 +2,11 @@ package main
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"github.com/jwwsjlm/douyinLive"
+	"github.com/jwwsjlm/douyinLive/generated"
 	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
-	"github.com/jwwsjlm/douyinLive/utils"
 	"github.com/lxzan/gws"
 	"github.com/spf13/cast"
 	"github.com/spf13/pflag"
@@ -50,12 +51,10 @@ func initConfig() {
 
 	// 读取配置文件
 	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+		var configFileNotFoundError viper.ConfigFileNotFoundError
+		if errors.As(err, &configFileNotFoundError) {
 			// 配置文件不存在，使用默认值或命令行参数
 			log.Println("配置文件未找到，使用默认值或命令行参数")
-		} else {
-			// 配置文件存在但格式错误
-			log.Fatalf("配置文件解析错误: %v", err)
 		}
 	} else {
 		log.Printf("使用配置文件: %s", viper.ConfigFileUsed())
@@ -94,6 +93,9 @@ func main() {
 	// 获取最终配置值（命令行参数优先）
 	port = viper.GetString("port")
 	room = viper.GetString("room")
+	if room == "****" {
+		log.Fatal("请提供抖音直播房间号")
+	}
 	unknown = viper.GetBool("unknown")
 	key = viper.GetString("key")
 	// 创建 gws 的 Upgrader
@@ -166,7 +168,7 @@ func checkPortAvailability(port int) bool {
 
 // Subscribe 处理订阅的更新
 func Subscribe(eventData *new_douyin.Webcast_Im_Message) {
-	msg, err := utils.MatchMethod(eventData.Method)
+	msg, err := generated.GetMessageInstance(eventData.Method)
 	if err != nil {
 		if unknown {
 			log.Printf("未知消息，无法处理: %v, %s\n", err, hex.EncodeToString(eventData.Payload))

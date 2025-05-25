@@ -6,13 +6,10 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"github.com/elliotchance/orderedmap"
 	"github.com/google/uuid"
-	"github.com/jwwsjlm/douyinLive/generated"
 	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
-	"google.golang.org/protobuf/reflect/protoreflect"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -60,14 +57,6 @@ func GenerateMsToken(length int) string {
 		b[i] = charset[rand.Intn(len(charset))]
 	}
 	return string(b) + "=_"
-}
-
-// MatchMethod 根据方法名匹配并返回对应的ProtoMessage
-func MatchMethod(method string) (protoreflect.ProtoMessage, error) {
-	if createMessage, ok := generated.NewMessage[method]; ok {
-		return createMessage(), nil
-	}
-	return nil, errors.New("未知消息: " + method)
 }
 
 // GzipCompressAndBase64Encode 将数据进行gzip压缩并进行Base64编码

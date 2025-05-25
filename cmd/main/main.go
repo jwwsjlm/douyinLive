@@ -56,7 +56,7 @@ func main() {
 
 	// 启动 WebSocket 服务器
 	p := startServer(cast.ToInt(port))
-	log.Printf("WebSocket 服务启动成功，地址为: ws://127.0.0.1:%s/\n直播房间: %s\n", p, room)
+	log.Printf("WebSocket 服务启动成功，地址为: ws://127.0.0.1:%s", p)
 
 	// 创建 DouyinLive 实例
 	d, err := douyinLive.NewDouyinLive(room)
@@ -67,6 +67,7 @@ func main() {
 
 	// 订阅事件
 	d.Subscribe(Subscribe)
+
 	// 开始处理
 	d.Start()
 }

@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"errors"
 	"fmt"
+	"github.com/tidwall/gjson"
 	"io"
 	"log"
 	"net/http"
@@ -104,13 +105,18 @@ func (dl *DouyinLive) fetchTTWID() error {
 // fetchRoomInfo 获取房间信息
 func (dl *DouyinLive) fetchRoomInfo() error {
 	body, err := dl.getPageContent()
+	//log.Println("获取直播间页面内容:", string(body))
 	if err != nil {
 		return err
 	}
 
 	dl.roomID = extractString(roomIDRegex, body, 1)
 	dl.pushID = extractString(pushIDRegex, body, 1)
-
+	name := extractString(regexp.MustCompile(`data-anchor-info="([\s\S]*?)" data-room-info="`), body, 1)
+	cleanJSON := strings.ReplaceAll(name, `&quot;`, `"`)
+	result := gjson.Get(cleanJSON, "nickname")
+	dl.LiveName = result.String()
+	//log.Println("直播间信息:", dl.roomID, dl.pushID, result.String())
 	if dl.roomID == "" || dl.pushID == "" {
 		return errors.New("无法提取房间信息")
 	}
@@ -183,7 +189,7 @@ func (dl *DouyinLive) connectWebSocket() error {
 	if err != nil {
 		return fmt.Errorf("连接失败 (状态码: %d): %w", resp.StatusCode, err)
 	}
-	log.Printf("直播间连接成功%d\n", resp.StatusCode)
+	log.Printf("直播间连接成功(状态码):[%d] 直播间名称:[%s]\n", resp.StatusCode, dl.LiveName)
 	dl.conn = conn
 	return nil
 }

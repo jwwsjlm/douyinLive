@@ -40,9 +40,10 @@ type DouyinLive struct {
 	headers       http.Header
 	bufferPool    *sync.Pool
 	isLiveClosed  bool
+	LiveName      string
 }
 
-// 修改 EventHandler 类型，添加唯一ID
+// EventHandler 修改 EventHandler 类型，添加唯一ID
 type EventHandler struct {
 	ID      string
 	Handler func(*new_douyin.Webcast_Im_Message)

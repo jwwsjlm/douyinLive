@@ -226,7 +226,7 @@ func (dl *DouyinLive) processMessages() {
 		controlMsg = &douyin.ControlMessage{}
 	)
 
-	for dl.isLiveClosed {
+	for {
 		messageType, data, err := dl.conn.ReadMessage()
 		//log.Printf("读取消息类型: %d, 数据长度: %d, err:%v\n", messageType, len(data), err)
 		if err != nil {

@@ -21,7 +21,7 @@ func init() {
 			log.SetOutput(os.Stdout)
 			//来源:https://github.com/qiaoruntao/douyin_contract/blob/master/mapping.json
 			//https://github.com/Remember-the-past/douyin_proto/blob/main/method%E5%AF%B9%E5%BA%94proto%E5%85%B3%E7%B3%BB.md
-			c := countSyncMap(NewMessage)
+			c := countSyncMap(newMessage)
 			log.Printf("注册消息类型到消息池，共注册%d种消息类型\n", c)
 
 		})
@@ -36,12 +36,7 @@ func countSyncMap(m map[string]func() protoreflect.ProtoMessage) int {
 		count++
 	}
 	return count
-	//m.Range(func(key, value interface{}) bool {
-	//
-	//	count++
-	//	return true
-	//})
-	//return count
+
 }
 
 // registerMessage 注册消息类型到消息池

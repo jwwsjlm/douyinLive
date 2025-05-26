@@ -6,7 +6,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-var MessageMap = map[string]func() protoreflect.ProtoMessage{
+var messageMap = map[string]func() protoreflect.ProtoMessage{
 	"WebcastChatMessage":                 func() protoreflect.ProtoMessage { return &douyin.ChatMessage{} },
 	"WebcastGiftMessage":                 func() protoreflect.ProtoMessage { return &douyin.GiftMessage{} },
 	"WebcastLikeMessage":                 func() protoreflect.ProtoMessage { return &douyin.LikeMessage{} },
@@ -52,7 +52,7 @@ var MessageMap = map[string]func() protoreflect.ProtoMessage{
 }
 
 // NewMessage 匹配抖音直播消息
-var NewMessage = map[string]func() protoreflect.ProtoMessage{
+var newMessage = map[string]func() protoreflect.ProtoMessage{
 	//来源:https://github.com/qiaoruntao/douyin_contract/blob/master/mapping.json
 	//https://github.com/Remember-the-past/douyin_proto/blob/main/method%E5%AF%B9%E5%BA%94proto%E5%85%B3%E7%B3%BB.md
 	// 直播文字聊天消息（普通文本弹幕）
@@ -418,16 +418,174 @@ var NewMessage = map[string]func() protoreflect.ProtoMessage{
 	"WebcastBattlePowerContainerMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_BattlePowerContainerMessage{}
 	},
+	// 对战结束惩罚消息（连麦PK结束后惩罚结果通知）
+	// Battle end punishment message (notification of punishment result after linked streaming PK)
 	"WebcastBattleEndPunishMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_BattleEndPunishMessage{}
 	},
+
+	// 对战特效容器消息（连麦PK特效集合状态更新）
+	// Battle effect container message (status update of linked streaming PK effect collection)
 	"WebcastBattleEffectContainerMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_BattleEffectContainerMessage{}
 	},
+
+	// 置顶特效消息（直播间顶部特效展示通知）
+	// Top effect message (notification of top visual effects display in live room)
 	"WebcastTopEffectMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_TopEffectMessage{}
 	},
+
+	// 连麦设置通知消息（连麦功能参数调整通知）
+	// Link setting notification message (linked streaming configuration changes notification)
 	"WebcastLinkSettingNotifyMessage": func() protoreflect.ProtoMessage {
 		return &new_douyin.Webcast_Im_LinkSettingNotifyMessage{}
 	},
+	// 多人匹配对战消息（多人游戏匹配状态通知）
+	// Multi-player match battle message (multiplayer game matching status notification)
+	"WebcastBattleMultiMatchMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_BattleMultiMatchMessage{} },
+
+	// KTV播放模式开始消息（KTV模式启动通知）
+	// KTV play mode start message (notification of KTV mode activation)
+	"WebcastKTVPlayModeStartMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_KTVPlayModeStartMessage{} },
+
+	// KTV用户演唱热度消息（用户演唱实时热度值）
+	// KTV user singing heat message (real-time singing heat value of users)
+	"WebcastKTVUserSingingHotMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_KTVUserSingingHotMessage{} },
+
+	// KTV歌手热度排名消息（歌手实时排名位置）
+	// KTV singer heat ranking message (real-time singer ranking position)
+	"WebcastKTVSingerHotRankPosMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_KTVSingerHotRankPosMessage{} },
+
+	// 房间权限消息（直播间权限变更通知）
+	// Room authority message (live room permission change notification)
+	"WebcastRoomAuthMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_RoomAuthMessage{} },
+
+	// 传送门消息（特殊效果传送门触发通知）
+	// Portal message (special effect portal trigger notification)
+	"WebcastPortalMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_PortalMessage{} },
+
+	// 消息删除通知（聊天消息删除操作通知）
+	// Message deletion notification (chat message delete operation notification)
+	"WebcastImDeleteMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_ImDeleteMessage{} },
+
+	// 用户特权变更消息（用户权限等级变化通知）
+	// User privilege change message (user privilege level change notification)
+	"WebcastUserPrivilegeChangeMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_UserPrivilegeChangeMessage{} },
+
+	// 房间验证消息（直播间安全验证通知）
+	// Room verification message (live room security verification notification)
+	"WebcastRoomVerifyMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_RoomVerifyMessage{} },
+
+	// 资产变动消息（用户虚拟资产变动通知）
+	// Asset change message (user virtual asset change notification)
+	"WebcastAssetMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_AssetMessage{} },
+
+	// 流同步消息（多平台直播流状态同步）
+	// Stream synchronization message (multi-platform live stream status synchronization)
+	"WebcastSyncStreamMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_SyncStreamMessage{} },
+
+	// 游戏CP主播推广消息（游戏合作主播推广信息）
+	// Game CP anchor promotion message (game collaboration anchor promotion information)
+	"WebcastGameCPAnchorPromoteInfoMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GameCPAnchorPromoteInfoMessage{} },
+
+	// 弹窗通知消息（系统级弹窗提示信息）
+	// Toast notification message (system-level popup notification)
+	"WebcastToastMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_ToastMessage{} },
+
+	// 礼物投票消息（礼物投票活动通知）
+	// Gift vote message (gift voting activity notification)
+	"WebcastGiftVoteMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GiftVoteMessage{} },
+
+	// 连麦团队战消息（多人连麦对战状态通知）
+	// Linkmic team battle message (multi-user linked streaming battle status notification)
+	"WebcastLinkmicTeamfightMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_LinkmicTeamfightMessage{} },
+
+	// 商品变更消息（直播带货商品状态变更）
+	// Product change message (live commerce product status change)
+	"WebcastProductChangeMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_ProductChangeMessage{} },
+
+	// 双赞榜首消息（双赞活动榜首用户通知）
+	// Double-like top user message (top user notification for double-like activity)
+	"WebcastDoubleLikeTopUserMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_DoubleLikeTopUserMessage{} },
+
+	// 阳光日榜消息（地区阳光日榜排名通知）
+	// Sun daily rank message (regional sun daily ranking notification)
+	"WebcastSunDailyRankMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_SunDailyRankMessage{} },
+
+	// 经纪人通知消息（直播经纪人系统通知）
+	// Broker notification message (live streaming broker system notification)
+	"WebcastBrokerNotifyMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_BrokerNotifyMessage{} },
+
+	// 电商消息（直播电商相关操作通知）
+	// Commerce message (live e-commerce related operation notification)
+	"WebcastCommerceMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_CommerceMessage{} },
+
+	// 角落达成消息（特定区域互动目标达成）
+	// Corner reach message (specific area interaction goal achievement)
+	"WebcastCornerReachMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_CornerReachMessage{} },
+
+	// 游戏观众入口消息（游戏观战模式入口通知）
+	// Game audience entrance message (game spectator mode entrance notification)
+	"WebcastGameAncAudEntranceMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GameAncAudEntranceMessage{} },
+
+	// 游戏CP用户下载消息（游戏合作用户下载通知）
+	// Game CP user download message (game collaboration user download notification)
+	"WebcastGameCPUserDownloadMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GameCPUserDownloadMessage{} },
+
+	// 游戏状态消息（直播间游戏状态更新）
+	// Game status message (live room game status update)
+	"WebcastGameStatusMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_GameStatusMessage{} },
+
+	// 高亮评论消息（精选评论突出显示通知）
+	// Highlight comment message (featured comment highlighting notification)
+	"WebcastHighlightComment": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_HighlightComment{} },
+
+	// 横幅刷新消息（直播间横幅内容刷新）
+	// Banner refresh message (live room banner content refresh)
+	"WebcastInRoomBannerRefreshMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_InRoomBannerRefreshMessage{} },
+
+	// 互动应用状态消息（第三方互动应用状态通知）
+	// Interactive app status message (third-party interactive app status notification)
+	"WebcastInteractOpenAppStatusMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_InteractOpenAppStatusMessage{} },
+
+	// 直播电商消息（电商相关功能通知）
+	// Live e-commerce message (e-commerce related feature notification)
+	"WebcastLiveEcomMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_LiveEcomMessage{} },
+
+	// 抽奖结果消息（抽奖活动中奖结果通知）
+	// Lottery result message (lottery activity result notification)
+	"WebcastLotteryDrawResultEventMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_LotteryDrawResultEventMessage{} },
+
+	// 幸运盒结束消息（幸运盒活动结束通知）
+	// Lucky box end message (lucky box activity end notification)
+	"WebcastLuckyBoxEndMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_LuckyBoxEndMessage{} },
+
+	// 系统通知消息（平台级系统通知）
+	// System notice message (platform-level system notification)
+	"WebcastNoticeMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_NoticeMessage{} },
+
+	// 奖品通知消息（用户获奖通知）
+	// Prize notice message (user prize notification)
+	"WebcastPrizeNoticeMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_PrizeNoticeMessage{} },
+
+	// 拉流更新消息（视频流参数更新通知）
+	// Pull stream update message (video stream parameters update notification)
+	"WebcastPullStreamUpdateMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_PullStreamUpdateMessage{} },
+
+	// 房间简介消息（直播间简介信息更新）
+	// Room introduction message (live room introduction update)
+	"WebcastRoomIntroMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_RoomIntroMessage{} },
+
+	// 音频背景图消息（语音直播背景图更新）
+	// Audio background image message (audio live background image update)
+	"WebcastAudioBGImgMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_AudioBGImgMessage{} },
+
+	// 连麦引导消息（连麦功能使用引导提示）
+	// Linkmic guide message (linked streaming feature tutorial)
+	"WebcastLinkMicGuideMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_LinkMicGuideMessage{} },
+
+	// 阳光日榜地区排名消息（地区阳光日榜排名）
+	// Sun daily region rank message (regional sun daily ranking)
+	"WebcastSunDailyRegionRankMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_SunDailyRankMessage{} },
 }

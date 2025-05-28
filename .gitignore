@@ -12,3 +12,4 @@
 /.vscode
 /.github/workflows/.go.yml
 /douyinlive-linux
+/build/douyinlive-linux

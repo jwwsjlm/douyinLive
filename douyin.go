@@ -51,7 +51,7 @@ var (
 )
 
 // NewDouyinLive 创建一个新的 DouyinLive 实例
-func NewDouyinLive(liveID string) (*DouyinLive, error) {
+func NewDouyinLive(liveID string, logger logger) (*DouyinLive, error) {
 	log.SetOutput(os.Stdout)
 	dl := &DouyinLive{
 		liveID:     liveID,
@@ -59,11 +59,9 @@ func NewDouyinLive(liveID string) (*DouyinLive, error) {
 		client:     req.C().SetUserAgent(utils.RandomUserAgent()),
 		bufferPool: &sync.Pool{New: func() interface{} { return bytes.NewBuffer(make([]byte, 0, gzipBufferSize)) }},
 		headers:    make(http.Header),
+		logger:     logger,
 	}
 
-	if err := dl.initialize(); err != nil {
-		return nil, fmt.Errorf("初始化失败: %w", err)
-	}
 	return dl, nil
 }
 
@@ -168,12 +166,12 @@ func (dl *DouyinLive) Start() {
 	defer dl.cleanup()
 
 	if !dl.IsLive() {
-		log.Println("直播间未开播或连接失败")
+		dl.logger.Println("直播间未开播或连接失败")
 		return
 	}
 
-	if err := dl.connectWebSocket(); err != nil {
-		log.Printf("WebSocket连接失败: %v\n", err)
+	if err := dl.startWebSocket(); err != nil {
+		dl.logger.Printf("WebSocket连接失败: %v\n", err)
 		return
 	}
 
@@ -181,21 +179,27 @@ func (dl *DouyinLive) Start() {
 }
 
 // connectWebSocket 连接 WebSocket
-func (dl *DouyinLive) connectWebSocket() error {
+func (dl *DouyinLive) startWebSocket() error {
 	dialer := websocket.DefaultDialer
 	dialer.HandshakeTimeout = websocketConnectTimeout
-
-	conn, resp, err := dialer.Dial(dl.constructWSSURL(), dl.headers)
+	url, err := dl.makeURL()
+	if err != nil {
+		return fmt.Errorf("构建WebSocket URL失败: %w", err)
+	}
+	conn, resp, err := dialer.Dial(url, dl.headers)
 	if err != nil {
 		return fmt.Errorf("连接失败 (状态码: %d): %w", resp.StatusCode, err)
 	}
-	log.Printf("直播间连接成功(状态码):[%d] 直播间名称:[%s]\n", resp.StatusCode, dl.LiveName)
+	dl.logger.Printf("直播间连接成功(状态码):[%d] 直播间名称:[%s]\n", resp.StatusCode, dl.LiveName)
 	dl.conn = conn
 	return nil
 }
 
-// constructWSSURL 构建 WebSocket URL
-func (dl *DouyinLive) constructWSSURL() string {
+// makeURL 构建 WebSocket URL
+func (dl *DouyinLive) makeURL() (string, error) {
+	if err := dl.initialize(); err != nil {
+		return "", fmt.Errorf("初始化失败: %w", err)
+	}
 	fetchTime := time.Now().UnixNano() / int64(time.Millisecond)
 	browserInfo := strings.SplitN(dl.userAgent, "Mozilla", 2)[1]
 	parsedBrowser := strings.ReplaceAll(browserInfo, " ", "%20")
@@ -214,7 +218,7 @@ func (dl *DouyinLive) constructWSSURL() string {
 		dl.pushID,
 		dl.roomID,
 		signature,
-	)
+	), nil
 }
 
 // processMessages 处理消息
@@ -226,11 +230,11 @@ func (dl *DouyinLive) processMessages() {
 		controlMsg = &douyin.ControlMessage{}
 	)
 
-	for {
+	for dl.isLiveClosed {
 		messageType, data, err := dl.conn.ReadMessage()
 		//log.Printf("读取消息类型: %d, 数据长度: %d, err:%v\n", messageType, len(data), err)
 		if err != nil {
-			log.Printf("读取消息失败:%v\n", err)
+			dl.logger.Printf("读取消息失败:%v\n", err)
 			if !dl.handleReadError(err) {
 				break
 			}
@@ -242,7 +246,7 @@ func (dl *DouyinLive) processMessages() {
 		}
 
 		if err := proto.Unmarshal(data, pushFrame); err != nil {
-			log.Printf("解析PushFrame失败: %v\n", err)
+			dl.logger.Printf("解析PushFrame失败: %v\n", err)
 			continue
 		}
 
@@ -265,12 +269,12 @@ func (dl *DouyinLive) handleGzipMessage(pushFrame *new_douyin.Webcast_Im_PushFra
 
 	uncompressed, err := dl.decompressGzip(pushFrame.Payload)
 	if err != nil {
-		log.Printf("GZIP解压失败: %v\n", err)
+		dl.logger.Printf("GZIP解压失败: %v\n", err)
 		return
 	}
 
 	if err := proto.Unmarshal(uncompressed, response); err != nil {
-		log.Printf("解析Response失败: %v\n", err)
+		dl.logger.Printf("解析Response失败: %v\n", err)
 		return
 	}
 
@@ -315,14 +319,14 @@ func (dl *DouyinLive) sendAck(logID uint64, internalExt string) {
 
 	data, err := proto.Marshal(ackFrame)
 	if err != nil {
-		log.Printf("心跳包序列化失败: %v\n", err)
+		dl.logger.Printf("心跳包序列化失败: %v\n", err)
 		return
 	}
 
 	if dl.conn != nil {
 		err := dl.conn.WriteMessage(websocket.BinaryMessage, data)
 		if err != nil {
-			log.Printf("发送心跳包失败: %v\n", err)
+			dl.logger.Printf("发送心跳包失败: %v\n", err)
 		}
 	}
 }
@@ -334,11 +338,11 @@ func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 
 	if msg.Method == "WebcastControlMessage" {
 		if err := proto.Unmarshal(msg.Payload, controlMsg); err != nil {
-			log.Printf("解析控制消息失败: %v\n", err)
+			dl.logger.Printf("解析控制消息失败: %v\n", err)
 			return
 		}
 		if controlMsg.Status == 3 {
-			log.Println("直播间已关闭")
+			dl.logger.Printf("[%s]直播间已关闭", dl.LiveName)
 			dl.setLiveStatus(false)
 		}
 	}
@@ -348,29 +352,29 @@ func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 func (dl *DouyinLive) handleReadError(err error) bool {
 	// 使用 websocket.IsUnexpectedCloseError 判断特定关闭码
 	if !websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure) {
-		log.Printf("正常关闭: %v\n", err)
+		dl.logger.Printf("正常关闭: %v\n", err)
 		return false // 不需要重连
 	}
-	log.Printf("检测到非正常关闭，尝试重连...错误代码:%v\n", err)
+	dl.logger.Printf("检测到非正常关闭，尝试重连...错误代码:%v\n", err)
 	// 处理非正常关闭错误
 	var closeErr *websocket.CloseError
 	if errors.As(err, &closeErr) {
-		log.Printf("WebSocket关闭错误: code=%d, reason=%s\n", closeErr.Code, closeErr.Text)
+		dl.logger.Printf("WebSocket关闭错误: code=%d, reason=%s\n", closeErr.Code, closeErr.Text)
 
 		// 针对特定错误码处理
 		switch closeErr.Code {
 		case websocket.CloseAbnormalClosure: // 1006 异常关闭
-			log.Println("检测到异常关闭，尝试重连...")
+			dl.logger.Println("检测到异常关闭，尝试重连...")
 			return dl.reconnect(defaultMaxRetries)
 		case websocket.CloseTryAgainLater: // 1013 临时不可用
-			log.Println("服务端要求稍后重试...")
+			dl.logger.Println("服务端要求稍后重试...")
 			time.Sleep(5 * time.Second)
 			return dl.reconnect(defaultMaxRetries)
 		}
 	}
 
 	// 处理其他网络错误
-	log.Printf("网络错误: %v\n", err)
+	dl.logger.Printf("网络错误: %v\n", err)
 	return dl.reconnect(defaultMaxRetries)
 }
 
@@ -385,7 +389,11 @@ func (dl *DouyinLive) reconnect(attempts int) bool {
 	}
 
 	retryable := func() error {
-		conn, _, err := websocket.DefaultDialer.Dial(dl.constructWSSURL(), dl.headers)
+		url, err := dl.makeURL()
+		if err != nil {
+			return fmt.Errorf("构建WebSocket URL失败: %w", err)
+		}
+		conn, _, err := websocket.DefaultDialer.Dial(url, dl.headers)
 		if err != nil {
 			// 处理不可恢复错误
 			if websocket.IsCloseError(err,
@@ -410,6 +418,7 @@ func (dl *DouyinLive) reconnect(attempts int) bool {
 		retry.Attempts(uint(attempts)),
 		retry.DelayType(retry.BackOffDelay),
 		retry.RetryIf(func(err error) bool {
+			//return true
 			// 过滤不可重试的错误
 			return !websocket.IsCloseError(err,
 				websocket.ClosePolicyViolation,
@@ -417,10 +426,14 @@ func (dl *DouyinLive) reconnect(attempts int) bool {
 			)
 		}),
 		retry.OnRetry(func(n uint, err error) {
-			log.Printf("第%d次重试连接: %v\n", n+1, err)
+			dl.logger.Printf("第%d次重试连接: %v\n", n+1, err)
 		}),
 	)
-
+	if err != nil {
+		dl.logger.Printf("连接最终失败: %v", err)
+	} else {
+		dl.logger.Println("连接成功，未触发重试")
+	}
 	return err == nil
 }
 

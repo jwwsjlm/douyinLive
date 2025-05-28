@@ -1,4 +1,4 @@
-BINARY_NAME := douyinlive
+BINARY_NAME := build/douyinlive
 CMD_PATH := cmd/main/main.go
 
 # Go commands

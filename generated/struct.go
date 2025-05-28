@@ -588,4 +588,16 @@ var newMessage = map[string]func() protoreflect.ProtoMessage{
 	// 阳光日榜地区排名消息（地区阳光日榜排名）
 	// Sun daily region rank message (regional sun daily ranking)
 	"WebcastSunDailyRegionRankMessage": func() protoreflect.ProtoMessage { return &new_douyin.Webcast_Im_SunDailyRankMessage{} },
+	"WebcastLuckyBoxRewardMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_LuckyBoxRewardMessage{}
+	},
+	"WebcastAssetEffectUtilMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_AssetEffectUtilMessage{}
+	},
+	"WebcastInteractEffectMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_InteractEffectMessage{}
+	},
+	"WebcastRankListAwardMessage": func() protoreflect.ProtoMessage {
+		return &new_douyin.Webcast_Im_RankListAwardMessage{}
+	},
 }

@@ -62,8 +62,10 @@ func initConfig() {
 }
 
 func main() {
+	logger := log.Default() // 或者使用其他日志库的实例
+	//logger := log.New(os.Stdout, "", log.LstdFlags|log.Lshortfile) // 设置日志格式
 	// 设置日志输出到标准输出
-	log.SetOutput(os.Stdout)
+	logger.SetOutput(os.Stdout)
 	// 初始化配置
 	initConfig()
 
@@ -108,7 +110,7 @@ func main() {
 	})
 
 	// 设置 WebSocket 路由
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		socket, err := upgrader.Upgrade(w, r)
 
 		if err != nil {
@@ -125,7 +127,7 @@ func main() {
 	log.Printf("WebSocket 服务启动成功，地址为: ws://127.0.0.1:%s", p)
 
 	// 创建 DouyinLive 实例
-	d, err := douyinLive.NewDouyinLive(room)
+	d, err := douyinLive.NewDouyinLive(room, logger)
 	if err != nil {
 		log.Fatalf("抖音链接失败: %v", err)
 

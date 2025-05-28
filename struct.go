@@ -41,6 +41,13 @@ type DouyinLive struct {
 	bufferPool    *sync.Pool
 	isLiveClosed  bool
 	LiveName      string
+	logger        logger // 添加日志接口字段
+}
+type logger interface {
+	Printf(format string, v ...interface{})
+	Print(v ...interface{})
+	Println(v ...interface{})
+	// 可根据需求添加更多方法，例如Println、Fatal等
 }
 
 // EventHandler 修改 EventHandler 类型，添加唯一ID

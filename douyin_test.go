@@ -1,7 +1,7 @@
-package douyinLive_test
+package douyinLive
 
 import (
-	"github.com/jwwsjlm/douyinLive"
+	"log"
 	"testing"
 
 	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
@@ -9,27 +9,27 @@ import (
 )
 
 func TestNewDouyinLive(t *testing.T) {
-	d, _ := douyinLive.NewDouyinLive("740934774657")
+	d, _ := NewDouyinLive("740934774657", log.Default())
 	d.Subscribe(func(eventData *new_douyin.Webcast_Im_Message) {
 		// t.Logf("msg received ,type:%s", eventData.Method)
 		switch eventData.Method {
-		case douyinLive.WebcastChatMessage:
+		case WebcastChatMessage:
 			msg := &new_douyin.Webcast_Im_ChatMessage{}
 			proto.Unmarshal(eventData.Payload, msg)
 			t.Logf("聊天消息:user=%d %s %s", msg.User.Id, msg.User.Nickname, msg.Content)
-		case douyinLive.WebcastGiftMessage:
+		case WebcastGiftMessage:
 			msg := &new_douyin.Webcast_Im_GiftMessage{}
 			proto.Unmarshal(eventData.Payload, msg)
 			t.Logf("礼物消息:user=%d %s %s", msg.User.Id, msg.User.Nickname, msg.Gift.Name)
-		case douyinLive.WebcastLikeMessage:
+		case WebcastLikeMessage:
 			msg := &new_douyin.Webcast_Im_LikeMessage{}
 			proto.Unmarshal(eventData.Payload, msg)
 			t.Logf("点赞消息:user=%d %s", msg.User.Id, msg.User.Nickname)
-		case douyinLive.WebcastMemberMessage:
+		case WebcastMemberMessage:
 			msg := &new_douyin.Webcast_Im_MemberMessage{}
 			proto.Unmarshal(eventData.Payload, msg)
 			t.Logf("成员消息:user=%d %s", msg.User.Id, msg.User.Nickname)
-		case douyinLive.WebcastSocialMessage:
+		case WebcastSocialMessage:
 			msg := &new_douyin.Webcast_Im_SocialMessage{}
 			proto.Unmarshal(eventData.Payload, msg)
 			t.Logf("社交消息:user=%d %s", msg.User.Id, msg.User.Nickname)
@@ -47,4 +47,16 @@ func TestNewDouyinLive(t *testing.T) {
 
 	d.Start()
 
+}
+
+func TestConstructWSSURL(t *testing.T) {
+	d, err := NewDouyinLive("483379663830", log.Default())
+	if err != nil {
+		t.Fatalf("创建 DouyinLive 实例失败: %v", err)
+	}
+	wssURL, err := d.makeURL()
+	if err != nil {
+		t.Fatalf("构建 WSS URL 失败: %v", err)
+	}
+	t.Logf("构建的 WSS URL: %s", wssURL)
 }

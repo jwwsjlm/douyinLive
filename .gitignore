@@ -13,3 +13,4 @@
 /.github/workflows/.go.yml
 /douyinlive-linux
 /build/douyinlive-linux
+/build/douyinlive-windows.exe

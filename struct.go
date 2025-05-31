@@ -42,6 +42,7 @@ type DouyinLive struct {
 	isLiveClosed  bool
 	LiveName      string
 	logger        logger // 添加日志接口字段
+	manualClose   bool   // 新增字段：标记是否手动关闭
 }
 type logger interface {
 	Printf(format string, v ...interface{})

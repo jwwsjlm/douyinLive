@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"github.com/tidwall/gjson"
 	"io"
-	"log"
 	"net/http"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -52,7 +50,7 @@ var (
 
 // NewDouyinLive 创建一个新的 DouyinLive 实例
 func NewDouyinLive(liveID string, logger logger) (*DouyinLive, error) {
-	log.SetOutput(os.Stdout)
+	//log.SetOutput(os.Stdout)
 	dl := &DouyinLive{
 		liveID:     liveID,
 		userAgent:  utils.RandomUserAgent(),
@@ -61,8 +59,62 @@ func NewDouyinLive(liveID string, logger logger) (*DouyinLive, error) {
 		headers:    make(http.Header),
 		logger:     logger,
 	}
-
+	if dl.IsLive() == false {
+		return nil, fmt.Errorf("直播间 %s 未开播", liveID)
+	}
 	return dl, nil
+}
+
+// Close 关闭抖音直播连接，确保资源正确释放
+func (dl *DouyinLive) Close() {
+	// 原子性地设置直播状态为关闭
+	dl.setLiveStatus(false)
+	dl.manualClose = true
+	// 获取锁，防止并发操作
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+
+	// 检查连接是否已经关闭
+	if dl.conn == nil {
+		dl.logger.Println("连接已关闭或未初始化")
+		return
+	}
+
+	// 标记连接为关闭状态，防止新的消息处理
+	conn := dl.conn
+	dl.conn = nil
+
+	// 创建一个带超时的通道，用于等待关闭操作完成
+	done := make(chan struct{})
+
+	// 异步执行关闭操作
+	go func() {
+		defer close(done)
+
+		// 发送关闭帧
+		msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "closing connection")
+
+		// 先尝试正常关闭
+		if err := conn.WriteControl(websocket.CloseMessage, msg, time.Now().Add(2*time.Second)); err != nil {
+			dl.logger.Printf("发送关闭消息失败: %v\n", err)
+		}
+
+		// 等待一段时间，让对方有机会响应
+		time.Sleep(500 * time.Millisecond)
+
+		// 确保连接最终关闭
+		if err := conn.Close(); err != nil {
+			dl.logger.Printf("关闭连接失败: %v\n", err)
+		}
+	}()
+
+	// 等待关闭操作完成或超时
+	select {
+	case <-done:
+		dl.logger.Println("连接已成功关闭")
+	case <-time.After(3 * time.Second):
+		dl.logger.Println("关闭连接超时")
+	}
 }
 
 // initialize 初始化 DouyinLive 实例
@@ -350,6 +402,11 @@ func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 
 // 修改 handleReadError 方法，使用库自带方法判断错误
 func (dl *DouyinLive) handleReadError(err error) bool {
+	// 如果是手动关闭，不进行重连
+	if dl.manualClose {
+		dl.logger.Println("连接被手动关闭，不进行重连")
+		return false
+	}
 	// 使用 websocket.IsUnexpectedCloseError 判断特定关闭码
 	if !websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure) {
 		dl.logger.Printf("正常关闭: %v\n", err)
@@ -380,6 +437,11 @@ func (dl *DouyinLive) handleReadError(err error) bool {
 
 // 优化后的 reconnect 方法
 func (dl *DouyinLive) reconnect(attempts int) bool {
+	// 如果是手动关闭，不进行重连
+	if dl.manualClose {
+		dl.logger.Println("连接被手动关闭，不进行重连")
+		return false
+	}
 	if dl.conn != nil {
 		// 使用标准方法发送关闭帧
 		msg := websocket.FormatCloseMessage(websocket.CloseGoingAway, "reconnecting")

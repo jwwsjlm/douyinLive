@@ -1,5 +1,5 @@
 BINARY_NAME := build/douyinlive
-CMD_PATH := cmd/main/main.go
+CMD_PATH := ./cmd/main
 
 # Go commands
 GO_BUILD := go build

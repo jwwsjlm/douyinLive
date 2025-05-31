@@ -2,9 +2,7 @@ package main
 
 import (
 	"encoding/hex"
-	"errors"
-	"fmt"
-	"github.com/jwwsjlm/douyinLive"
+	"encoding/json"
 	"github.com/jwwsjlm/douyinLive/generated"
 	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
 	"github.com/lxzan/gws"
@@ -14,61 +12,27 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"log"
-	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
-	"strings"
 	"sync"
+	"syscall"
 )
 
 var (
-	agentlist sync.Map
-	unknown   bool
-	port      string
-	room      string
-	key       string
+	agentlist  sync.Map // 存储所有连接，键为客户端ID，值为连接对象
+	unknown    bool
+	port       string
+	room       string // 抖音直播房间号
+	key        string
+	logger     *log.Logger
+	wsHandler  WsHandler // 创建 WebSocket 处理器实例
+	roomGroups sync.Map
+	//groupRooms *gws.ConcurrentMap[string, *gws.Conn]
 )
 
-func initConfig() {
-	// 设置配置文件名称和路径
-	viper.SetConfigName("config")     // 配置文件名称（不带扩展名）
-	viper.SetConfigType("yaml")       // 配置文件类型
-	viper.AddConfigPath(".")          // 当前目录
-	viper.AddConfigPath("$HOME/.app") // 家目录下的.app目录
-	viper.AddConfigPath("/etc/app/")  // 系统配置目录
-
-	// 环境变量支持
-	viper.SetEnvPrefix("APP")                              // 环境变量前缀
-	viper.AutomaticEnv()                                   // 自动绑定环境变量
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_")) // 替换环境变量中的点为下划线
-
-	// 设置默认值
-	viper.SetDefault("port", "1088")
-	viper.SetDefault("room", "****")
-	viper.SetDefault("unknown", false)
-	viper.SetDefault("key", "")
-
-	// 读取配置文件
-	if err := viper.ReadInConfig(); err != nil {
-		var configFileNotFoundError viper.ConfigFileNotFoundError
-		if errors.As(err, &configFileNotFoundError) {
-			// 配置文件不存在，使用默认值或命令行参数
-			log.Println("配置文件未找到，使用默认值或命令行参数")
-		}
-	} else {
-		log.Printf("使用配置文件: %s", viper.ConfigFileUsed())
-	}
-}
-
-func main() {
-	logger := log.Default() // 或者使用其他日志库的实例
-	//logger := log.New(os.Stdout, "", log.LstdFlags|log.Lshortfile) // 设置日志格式
-	// 设置日志输出到标准输出
-	logger.SetOutput(os.Stdout)
-	// 初始化配置
-	initConfig()
-
+func cmdArgs() {
 	// 定义命令行参数
 	pflag.String("port", viper.GetString("port"), "WebSocket 服务端口")
 	pflag.String("room", viper.GetString("room"), "抖音直播房间号")
@@ -82,62 +46,75 @@ func main() {
 	if configFile != "" {
 		viper.SetConfigFile(configFile)
 		if err := viper.ReadInConfig(); err != nil {
-			log.Fatalf("无法读取指定的配置文件: %v", err)
+			logger.Fatalf("无法读取指定的配置文件: %v", err)
 		}
-		log.Printf("使用指定配置文件: %s", configFile)
+		logger.Printf("使用指定配置文件: %s", configFile)
 	}
 
 	// 将命令行参数绑定到viper
 	err := viper.BindPFlags(pflag.CommandLine)
 	if err != nil {
-		log.Fatalf("绑定命令行参数失败: %v", err)
+		logger.Fatalf("绑定命令行参数失败: %v", err)
 	}
 	// 获取最终配置值（命令行参数优先）
 	port = viper.GetString("port")
 	room = viper.GetString("room")
 	if room == "****" {
-		log.Fatal("请提供抖音直播房间号")
+		logger.Fatal("请提供抖音直播房间号")
 	}
 	unknown = viper.GetBool("unknown")
 	key = viper.GetString("key")
-	// 创建 gws 的 Upgrader
-	upgrader := gws.NewUpgrader(&WsHandler{}, &gws.ServerOption{
-		ParallelEnabled: true,         // 开启并行消息处理
-		Recovery:        gws.Recovery, // 开启异常恢复
-		PermessageDeflate: gws.PermessageDeflate{
-			Enabled: true,
-		}, //开启压缩
-	})
+}
+func main() {
+	logger = log.Default()
+	logger.SetOutput(os.Stdout)
+	initConfig()
+	cmdArgs()
 
-	// 设置 WebSocket 路由
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		socket, err := upgrader.Upgrade(w, r)
-
-		if err != nil {
-			log.Printf("升级 WebSocket 失败: %v \n 请求头:%v \n 客户端ip:%v\n", err, r.Header, r.RemoteAddr)
-			return
-		}
-		go func() {
-			socket.ReadLoop()
-		}()
-	})
+	// 设置动态WebSocket路由，匹配 /ws/ 开头的所有路径
+	http.HandleFunc("/ws/", routing)
 
 	// 启动 WebSocket 服务器
 	p := startServer(cast.ToInt(port))
-	log.Printf("WebSocket 服务启动成功，地址为: ws://127.0.0.1:%s", p)
+	logger.Printf("WebSocket 服务启动成功，地址为: ws://127.0.0.1:%s", p)
+	// 阻塞直到接收到终止信号
+	// 等待终止信号
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	<-sigs
+	logger.Println("接收到终止信号，开始优雅关闭...")
 
-	// 创建 DouyinLive 实例
-	d, err := douyinLive.NewDouyinLive(room, logger)
-	if err != nil {
-		log.Fatalf("抖音链接失败: %v", err)
+}
 
+// routing 处理 WebSocket 连接请求
+func routing(w http.ResponseWriter, r *http.Request) {
+	roomID := r.URL.Path[4:] // 截取 /ws/ 之后的部分作为房间ID
+	if roomID == "" {
+		http.Error(w, "无效的房间ID", http.StatusBadRequest)
+		return
 	}
 
-	// 订阅事件
-	d.Subscribe(Subscribe)
+	logger.Printf("接收到WebSocket连接请求，房间ID: %s，客户端: %s", roomID, r.RemoteAddr)
 
-	// 开始处理
-	d.Start()
+	// 创建带有房间ID信息的处理器
+
+	handler := &WsHandler{RoomID: roomID}
+	upgrader := gws.NewUpgrader(handler, &gws.ServerOption{
+		ParallelEnabled: true,
+		Recovery:        gws.Recovery,
+		PermessageDeflate: gws.PermessageDeflate{
+			Enabled: true,
+		},
+	})
+
+	socket, err := upgrader.Upgrade(w, r)
+	if err != nil {
+		logger.Printf("升级失败: %v", err)
+		return
+	}
+
+	// 启动读取循环
+	go socket.ReadLoop()
 }
 
 // startServer 启动 WebSocket 服务端
@@ -146,7 +123,7 @@ func startServer(port int) string {
 		if checkPortAvailability(port) {
 			go func() {
 				if err := http.ListenAndServe(":"+strconv.Itoa(port), nil); err != nil {
-					log.Fatalf("服务器启动失败: %v", err)
+					logger.Fatalf("服务器启动失败: %v", err)
 				}
 			}()
 			break
@@ -158,120 +135,76 @@ func startServer(port int) string {
 	return strconv.Itoa(port)
 }
 
-// checkPortAvailability 检查本地端口是否可用
-func checkPortAvailability(port int) bool {
-	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		return true // 如果连接失败，认为端口可用
-	}
-	conn.Close()
-	return false // 如果连接成功，认为端口不可用
-}
-
-// Subscribe 处理订阅的更新
-func Subscribe(eventData *new_douyin.Webcast_Im_Message) {
+// routeEventToRoomClients 将抖音直播事件路由到特定房间的所有客户端
+func routeEventToRoomClients(roomID string, eventData *new_douyin.Webcast_Im_Message, n string) {
 	msg, err := generated.GetMessageInstance(eventData.Method)
 	if err != nil {
 		if unknown {
-			log.Printf("未知消息，无法处理: %v, %s\n", err, hex.EncodeToString(eventData.Payload))
+			logger.Printf("未知消息，无法处理: %v, %s\n", err, hex.EncodeToString(eventData.Payload))
 		}
 		return
 	}
 
 	if msg != nil {
 		if err := proto.Unmarshal(eventData.Payload, msg); err != nil {
-			log.Printf("反序列化失败: %v, 方法: %s\n", err, eventData.Method)
+			logger.Printf("反序列化失败: %v, 方法: %s\n", err, eventData.Method)
 			return
 		}
 
 		marshal, err := protojson.Marshal(msg)
 		if err != nil {
-			log.Printf("JSON 序列化失败: %v\n", err)
+			logger.Printf("JSON 序列化失败: %v\n", err)
+			return
+		}
+		// 解析JSON到动态map
+		var msgMap map[string]interface{}
+		if err := json.Unmarshal(marshal, &msgMap); err != nil {
+			logger.Printf("解析JSON失败: %v\n", err)
 			return
 		}
 
-		RangeConnections(func(agentID string, conn *gws.Conn) {
-			if err := conn.WriteString(string(marshal)); err != nil {
-				log.Printf("发送消息到客户端 %s 失败: %v\n", agentID, err)
+		msgMap["livename"] = n // 添加直播名称到消息中
+		// 重新序列化
+		finalJSON, err := json.Marshal(msgMap)
+		if err != nil {
+			logger.Printf("包装消息序列化失败: %v\n", err)
+			return
+		}
+		// 获取房间组
+		if group, ok := roomGroups.Load(roomID); ok {
+			roomGroup := group.(*RoomGroup)
+
+			//将消息广播到房间内所有客户端
+			broadcastMessage(roomGroup.connections, roomID, finalJSON)
+
+		}
+	}
+}
+
+// broadcastMessage 将消息广播到房间内所有客户端
+func broadcastMessage(roomGroup *gws.ConcurrentMap[string, *gws.Conn], roomID string, message []byte) {
+	roomGroup.Range(func(clientID string, conn *gws.Conn) bool {
+		if conn != nil {
+			if err := conn.WriteMessage(gws.OpcodeText, message); err != nil {
+				logger.Printf("发送消息到客户端 %s (房间: %s) 失败: %v\n", clientID, roomID, err)
+			} else {
+				//logger.Printf("向客户端 %s (房间: %s) 发送消息成功\n", clientID, roomID)
 			}
-		})
-	}
-}
-
-// StoreConnection 储存 WebSocket 客户端连接
-func StoreConnection(agentID string, conn *gws.Conn) {
-	agentlist.Store(agentID, conn)
-}
-
-// GetConnection 获取 WebSocket 客户端连接
-func GetConnection(agentID string) (*gws.Conn, bool) {
-	value, ok := agentlist.Load(agentID)
-	if !ok {
-		return nil, false
-	}
-	conn, ok := value.(*gws.Conn)
-	return conn, ok
-}
-
-// DeleteConnection 删除 WebSocket 客户端连接
-func DeleteConnection(agentID string) {
-	agentlist.Delete(agentID)
-}
-
-// RangeConnections 遍历 WebSocket 客户端连接
-func RangeConnections(f func(agentID string, conn *gws.Conn)) {
-	agentlist.Range(func(key, value interface{}) bool {
-		agentID, ok := key.(string)
-		if !ok {
-			return true // 跳过错误的键类型
+		} else {
+			logger.Printf("客户端 %s (房间: %s) 已断开连接，无法发送消息\n", clientID, roomID)
 		}
-		conn, ok := value.(*gws.Conn)
-		if !ok {
-			return true // 跳过错误的值类型
-		}
-		f(agentID, conn)
-		return true
+		return true // 继续遍历
+
 	})
 }
-
-// GetConnectionCount 获取当前连接数
-func GetConnectionCount() int {
-	count := 0
-	agentlist.Range(func(key, value interface{}) bool {
-		count++
-		return true
-	})
-	return count
-}
-
-// WsHandler 实现 gws 的 Event 接口
-type WsHandler struct {
-	gws.BuiltinEventHandler
-}
-
-func (c *WsHandler) OnOpen(socket *gws.Conn) {
-	client := socket.RemoteAddr().String()
-	StoreConnection(client, socket)
-	log.Printf("当前连接数: %d\n", GetConnectionCount())
-}
-
-func (c *WsHandler) OnClose(socket *gws.Conn, err error) {
-
-	client := socket.RemoteAddr().String()
-	log.Printf("客户端 %s 断开连接\n", client)
-	DeleteConnection(client)
-}
-
-// OnMessage 收到消息
-func (c *WsHandler) OnMessage(socket *gws.Conn, message *gws.Message) {
-	defer message.Close()
-	//sec := socket.Request().Header.Get("Sec-WebSocket-Key")
-	//log.Printf("收到消息: %s\n", sec)
-	msgStr := string(message.Bytes())
-	log.Printf("收到消息: %s\n", msgStr)
-	if msgStr == "ping" {
-		if err := socket.WriteString("pong"); err != nil {
-			log.Printf("写入消息失败: %v\n", err)
-		}
+func NewWebSocket() *WsHandler {
+	return &WsHandler{
+		sessions: gws.NewConcurrentMap[string, *gws.Conn](16, 128),
 	}
+}
+func MustLoad[T any](session gws.SessionStorage, key string) (v T) {
+	if value, exist := session.Load(key); exist {
+		v, _ = value.(T)
+	}
+	return
 }

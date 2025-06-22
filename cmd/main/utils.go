@@ -5,12 +5,15 @@ import (
 	"net"
 )
 
-// checkPortAvailability 检查本地端口是否可用
-func checkPortAvailability(port int) bool {
-	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+// isPortAvailable 检查指定 TCP 端口是否可用
+func isPortAvailable(port int) bool {
+	// 尝试监听该端口
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		return true // 如果连接失败，认为端口可用
+		// 如果监听失败，说明端口被占用
+		return false
 	}
-	conn.Close()
-	return false // 如果连接成功，认为端口不可用
+	// 成功监听后立即关闭，释放端口
+	_ = listener.Close()
+	return true
 }

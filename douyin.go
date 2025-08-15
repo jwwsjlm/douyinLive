@@ -3,15 +3,17 @@ package douyinLive
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
-	"github.com/tidwall/gjson"
 	"io"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tidwall/gjson"
 
 	"github.com/avast/retry-go"
 	"github.com/gorilla/websocket"
@@ -52,12 +54,16 @@ var (
 func NewDouyinLive(liveID string, logger logger) (*DouyinLive, error) {
 	//log.SetOutput(os.Stdout)
 	dl := &DouyinLive{
-		liveID:     liveID,
-		userAgent:  utils.RandomUserAgent(),
-		client:     req.C().SetUserAgent(utils.RandomUserAgent()),
-		bufferPool: &sync.Pool{New: func() interface{} { return bytes.NewBuffer(make([]byte, 0, gzipBufferSize)) }},
-		headers:    make(http.Header),
-		logger:     logger,
+		liveID:    liveID,
+		userAgent: utils.RandomUserAgent(),
+		client:    req.C().SetUserAgent(utils.RandomUserAgent()),
+		bufferPool: &sync.Pool{
+			New: func() interface{} {
+				return bytes.NewBuffer(make([]byte, 0, gzipBufferSize))
+			},
+		},
+		headers: make(http.Header),
+		logger:  logger,
 	}
 	if dl.IsLive() == false {
 		return nil, fmt.Errorf("直播间 %s 未开播", liveID)
@@ -226,6 +232,10 @@ func (dl *DouyinLive) Start() {
 		dl.logger.Printf("WebSocket连接失败: %v\n", err)
 		return
 	}
+
+	// 使用 context 来控制 goroutine 生命周期
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	dl.processMessages()
 }

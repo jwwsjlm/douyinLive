@@ -18,9 +18,11 @@ type Config struct {
 func NewConfig() (*Config, error) {
 	// 绑定命令行参数
 	pflag.String("port", "1088", "WebSocket 服务端口")
+
 	pflag.Bool("unknown", false, "是否输出未知源的pb消息")
 	pflag.String("key", "", "tikhub key")
 	configFile := pflag.String("config", "", "指定配置文件路径")
+
 	pflag.Parse()
 
 	// 绑定到 viper

@@ -2,6 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"strings"
@@ -11,18 +15,16 @@ import (
 type Config struct {
 	Port    string
 	Unknown bool
-	Key     string
+	Room    string
 }
 
 // NewConfig 创建并加载应用配置
 func NewConfig() (*Config, error) {
 	// 绑定命令行参数
 	pflag.String("port", "1088", "WebSocket 服务端口")
-
-	pflag.Bool("unknown", false, "是否输出未知源的pb消息")
-	pflag.String("key", "", "tikhub key")
+	pflag.Bool("unknown", false, "是否输出未知源的 pb 消息")
+	pflag.String("room", "", "抖音直播间号")
 	configFile := pflag.String("config", "", "指定配置文件路径")
-
 	pflag.Parse()
 
 	// 绑定到 viper
@@ -36,6 +38,14 @@ func NewConfig() (*Config, error) {
 	} else {
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
+
+		// ✅ 获取 exe 所在目录（解决双击闪退问题）
+		exePath, err := os.Executable()
+		if err == nil {
+			exeDir := filepath.Dir(exePath)
+			viper.AddConfigPath(exeDir)
+		}
+
 		viper.AddConfigPath(".")
 		viper.AddConfigPath("$HOME/.app")
 		viper.AddConfigPath("/etc/app/")
@@ -46,20 +56,33 @@ func NewConfig() (*Config, error) {
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	// 设置默认值
+	viper.SetDefault("port", "1088")
+	viper.SetDefault("unknown", false)
+
 	// 读取配置
 	if err := viper.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
 		if !errors.As(err, &configFileNotFoundError) {
-			// 仅当错误不是“文件未找到”时返回错误
-			return nil, err
+			return nil, fmt.Errorf("读取配置文件失败：%w", err)
 		}
+		// 配置文件不存在时给出提示
+		fmt.Println("⚠️  配置文件未找到，使用默认值或命令行参数")
+		fmt.Println("💡 建议在同目录下创建 config.yaml 文件")
+	} else {
+		fmt.Printf("✅ 使用配置文件：%s\n", viper.ConfigFileUsed())
 	}
 
 	// 填充 Config 结构体
 	cfg := &Config{
 		Port:    viper.GetString("port"),
 		Unknown: viper.GetBool("unknown"),
-		Key:     viper.GetString("key"),
+		Room:    viper.GetString("room"),
+	}
+
+	// ✅ 验证必要配置
+	if cfg.Room == "" {
+		return nil, errors.New("直播间号不能为空，请在 config.yaml 中配置或通过 --room 参数指定")
 	}
 
 	return cfg, nil

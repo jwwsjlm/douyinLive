@@ -22,9 +22,9 @@ func initConfig() {
 
 	// 设置默认值
 	viper.SetDefault("port", "1088")
-	viper.SetDefault("room", "****")
+	viper.SetDefault("room", "")
 	viper.SetDefault("unknown", false)
-	viper.SetDefault("key", "")
+	//viper.SetDefault("key", "")
 
 	// 读取配置文件
 	if err := viper.ReadInConfig(); err != nil {

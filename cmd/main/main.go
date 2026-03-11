@@ -26,6 +26,7 @@ func main() {
 		logger.Println("\n2. 或使用命令行参数:")
 		logger.Println("   douyinLive.exe --room 933572413882 --port 1088")
 		logger.Println("\n按回车键退出...")
+		fmt.Printf("错误信息%v\n", err)
 		fmt.Scanln() // 防止窗口立即关闭
 		os.Exit(1)
 	}
@@ -42,8 +43,8 @@ func main() {
 			logger.Fatalf("服务运行失败：%v", err)
 		}
 	}()
-
-	logger.Printf("WebSocket 服务启动成功，地址为：ws://127.0.0.1:%s", app.runningPort)
+	<-app.ready
+	logger.Printf("WebSocket 服务启动成功，地址为：ws://127.0.0.1:%v", app.runningPort)
 
 	// 等待终止信号，实现优雅关闭
 	quit := make(chan os.Signal, 1)

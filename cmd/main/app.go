@@ -19,16 +19,19 @@ type App struct {
 	roomManager *RoomManager
 	httpServer  *http.Server
 	runningPort string
+	ready       chan struct{}
 }
 
 // NewApp 创建并返回一个新的 App 实例
 func NewApp(ctx context.Context, config *Config, logger *log.Logger) (*App, error) {
+
 	roomManager := NewRoomManager(logger, config.Unknown)
 	return &App{
 		ctx:         ctx,
 		logger:      logger,
 		config:      config,
 		roomManager: roomManager,
+		ready:       make(chan struct{}),
 	}, nil
 }
 
@@ -48,6 +51,10 @@ func (a *App) Run() error {
 		if isPortAvailable(port) {
 			a.httpServer = &http.Server{Addr: addr, Handler: mux}
 			a.runningPort = strconv.Itoa(port)
+
+			close(a.ready) // <--- 【核心】端口绑定成功，关闭 Channel 发信号
+
+			a.logger.Printf("WebSocket 服务启动成功，监听端口: %s", a.runningPort)
 			return a.httpServer.ListenAndServe()
 		}
 		port++

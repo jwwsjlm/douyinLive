@@ -1,0 +1,8 @@
+# 抖音直播配置文件
+# 复制此文件为 config.yaml 即可使用
+
+# WebSocket 服务端口
+port: 1088
+
+# 是否输出未知消息类型（调试用）
+unknown: false

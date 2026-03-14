@@ -21,10 +21,9 @@ func main() {
 		logger.Println("1. 在同目录下创建 config.yaml 文件")
 		logger.Println("   示例内容:")
 		logger.Println("   port: 1088")
-		logger.Println("   room: \"你的直播间号\"")
 		logger.Println("   unknown: false")
 		logger.Println("\n2. 或使用命令行参数:")
-		logger.Println("   douyinLive.exe --room 933572413882 --port 1088")
+		logger.Println("   douyinLive.exe --port 1088")
 		logger.Println("\n按回车键退出...")
 		fmt.Printf("错误信息%v\n", err)
 		fmt.Scanln() // 防止窗口立即关闭

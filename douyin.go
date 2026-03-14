@@ -23,6 +23,7 @@ import (
 	"github.com/jwwsjlm/douyinLive/generated/douyin"
 	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
 	"github.com/jwwsjlm/douyinLive/jsScript"
+	"github.com/jwwsjlm/douyinLive/sign"
 	"github.com/jwwsjlm/douyinLive/utils"
 )
 
@@ -50,9 +51,40 @@ var (
 	emptyStrings = [][]string{{"", "", "", "", ""}}
 )
 
+// DouyinLive 结构体定义
+type DouyinLive struct {
+	liveID            string
+	roomID            string
+	pushID            string
+	LiveName          string
+	ttwid             string
+	userAgent         string
+	client            *req.Client
+	conn              *websocket.Conn
+	headers           http.Header
+	bufferPool        *sync.Pool
+	logger            logger
+	eventHandlers     []EventHandler
+	mu                sync.Mutex
+	isLiveClosed      bool
+	manualClose       bool
+	additionalCookies map[string]string   // 新增：存储额外的 Cookie
+	cookieManager     *sign.CookieManager // 新增：Cookie 管理器
+}
+
+type logger interface {
+	Print(v ...interface{})
+	Printf(format string, v ...interface{})
+	Println(v ...interface{})
+}
+
+type EventHandler struct {
+	ID      string
+	Handler func(*new_douyin.Webcast_Im_Message)
+}
+
 // NewDouyinLive 创建一个新的 DouyinLive 实例
 func NewDouyinLive(liveID string, logger logger) (*DouyinLive, error) {
-	//log.SetOutput(os.Stdout)
 	dl := &DouyinLive{
 		liveID:    liveID,
 		userAgent: utils.RandomUserAgent(),
@@ -62,9 +94,16 @@ func NewDouyinLive(liveID string, logger logger) (*DouyinLive, error) {
 				return bytes.NewBuffer(make([]byte, 0, gzipBufferSize))
 			},
 		},
-		headers: make(http.Header),
-		logger:  logger,
+		headers:           make(http.Header),
+		additionalCookies: make(map[string]string),
+		logger:            logger,
 	}
+
+	// 初始化 Cookie 管理器
+	dl.cookieManager = sign.NewCookieManager()
+	// 尝试加载配置文件中的 Cookie
+	dl.cookieManager.LoadConfig("config.yaml")
+
 	if dl.IsLive() == false {
 		return nil, fmt.Errorf("直播间 %s 未开播", liveID)
 	}
@@ -138,24 +177,60 @@ func (dl *DouyinLive) initialize() error {
 	}
 
 	dl.headers.Set("User-Agent", dl.userAgent)
-	dl.headers.Set("Cookie", fmt.Sprintf("ttwid=%s", dl.ttwid))
+
+	// 设置 Cookie - 优先使用配置文件中的 Cookie，其次使用获取到的 Cookie
+	dl.setupCookies()
+
 	return nil
 }
 
-// fetchTTWID 获取 TTWID
+// setupCookies 设置 Cookie，优先使用配置文件中的 Cookie
+func (dl *DouyinLive) setupCookies() {
+	// 从配置文件获取 Cookie
+	configCookie := dl.cookieManager.GetDouyinCookie()
+	if configCookie != "" {
+		// 使用配置文件中的 Cookie
+		dl.headers.Set("Cookie", configCookie)
+	} else {
+		// 使用获取到的 Cookie
+		cookieParts := []string{fmt.Sprintf("ttwid=%s", dl.ttwid)}
+
+		// 添加额外的 Cookie
+		for name, value := range dl.additionalCookies {
+			cookieParts = append(cookieParts, fmt.Sprintf("%s=%s", name, value))
+		}
+
+		dl.headers.Set("Cookie", strings.Join(cookieParts, "; "))
+	}
+}
+
+// fetchTTWID 获取 TTWID 和其他 Cookie
 func (dl *DouyinLive) fetchTTWID() error {
 	resp, err := dl.client.R().Get("https://live.douyin.com/")
 	if err != nil {
 		return fmt.Errorf("请求TTWID失败: %w", err)
 	}
 
+	// 收集所有 Cookie
+	cookies := make(map[string]string)
 	for _, c := range resp.Cookies() {
-		if c.Name == "ttwid" {
-			dl.ttwid = c.Value
-			return nil
+		cookies[c.Name] = c.Value
+	}
+
+	// 优先使用 ttwid，如果没有找到则报错
+	if ttwid, exists := cookies["ttwid"]; exists {
+		dl.ttwid = ttwid
+	} else {
+		return errors.New("未找到TTWID cookie")
+	}
+
+	// 存储其他重要 Cookie
+	for name, value := range cookies {
+		if name != "ttwid" {
+			dl.additionalCookies[name] = value
 		}
 	}
-	return errors.New("未找到TTWID cookie")
+	return nil
 }
 
 // fetchRoomInfo 获取房间信息
@@ -181,9 +256,24 @@ func (dl *DouyinLive) fetchRoomInfo() error {
 
 // getPageContent 获取直播间页面内容
 func (dl *DouyinLive) getPageContent() (string, error) {
-	cookies := []*http.Cookie{
-		{Name: "ttwid", Value: "ttwid=" + dl.ttwid},
-		{Name: "__ac_nonce", Value: "0123407cc00a9e438deb4"},
+	// 使用配置文件中的 Cookie 或者获取到的 Cookie
+	var cookies []*http.Cookie
+
+	configCookie := dl.cookieManager.GetDouyinCookie()
+	if configCookie != "" {
+		// 解析配置文件中的 Cookie
+		parsedCookies := dl.cookieManager.ParseCookies(configCookie)
+		cookies = parsedCookies
+	} else {
+		// 使用获取到的 Cookie
+		cookies = []*http.Cookie{
+			{Name: "ttwid", Value: dl.ttwid},
+			{Name: "__ac_nonce", Value: "0123407cc00a9e438deb4"},
+		}
+		// 添加额外的 Cookie
+		for name, value := range dl.additionalCookies {
+			cookies = append(cookies, &http.Cookie{Name: name, Value: value})
+		}
 	}
 
 	resp, err := dl.client.R().
@@ -230,6 +320,10 @@ func (dl *DouyinLive) Start() {
 
 	if err := dl.startWebSocket(); err != nil {
 		dl.logger.Printf("WebSocket连接失败: %v\n", err)
+		// 尝试重连
+		if dl.reconnect(defaultMaxRetries) {
+			dl.processMessages()
+		}
 		return
 	}
 
@@ -266,10 +360,12 @@ func (dl *DouyinLive) makeURL() (string, error) {
 	browserInfo := strings.SplitN(dl.userAgent, "Mozilla", 2)[1]
 	parsedBrowser := strings.ReplaceAll(browserInfo, " ", "%20")
 
+	// 使用纯算 a_bogus 签名
+	//params := fmt.Sprintf("aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&web_rid=%s", dl.roomID)
+	//signature := sign.AbSign(params, dl.userAgent)
 	signature := jsScript.ExecuteJS(utils.GetxMSStub(
 		utils.NewOrderedMap(dl.roomID, dl.pushID),
 	))
-
 	return fmt.Sprintf(wssURLTemplate,
 		parsedBrowser,
 		dl.roomID,
@@ -452,6 +548,8 @@ func (dl *DouyinLive) reconnect(attempts int) bool {
 		dl.logger.Println("连接被手动关闭，不进行重连")
 		return false
 	}
+
+	dl.mu.Lock()
 	if dl.conn != nil {
 		// 使用标准方法发送关闭帧
 		msg := websocket.FormatCloseMessage(websocket.CloseGoingAway, "reconnecting")
@@ -459,8 +557,12 @@ func (dl *DouyinLive) reconnect(attempts int) bool {
 		dl.conn.Close()
 		dl.conn = nil
 	}
+	dl.mu.Unlock()
 
 	retryable := func() error {
+		dl.mu.Lock()
+		defer dl.mu.Unlock()
+
 		url, err := dl.makeURL()
 		if err != nil {
 			return fmt.Errorf("构建WebSocket URL失败: %w", err)
@@ -490,7 +592,6 @@ func (dl *DouyinLive) reconnect(attempts int) bool {
 		retry.Attempts(uint(attempts)),
 		retry.DelayType(retry.BackOffDelay),
 		retry.RetryIf(func(err error) bool {
-			//return true
 			// 过滤不可重试的错误
 			return !websocket.IsCloseError(err,
 				websocket.ClosePolicyViolation,
@@ -503,10 +604,11 @@ func (dl *DouyinLive) reconnect(attempts int) bool {
 	)
 	if err != nil {
 		dl.logger.Printf("连接最终失败: %v", err)
+		return false
 	} else {
-		dl.logger.Println("连接成功，未触发重试")
+		dl.logger.Println("重连成功")
+		return true
 	}
-	return err == nil
 }
 
 // 使用库方法判断意外关闭
@@ -520,6 +622,9 @@ func isUnexpectedClose(err error) bool {
 
 // cleanup 清理资源
 func (dl *DouyinLive) cleanup() {
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+
 	if dl.conn != nil {
 		dl.conn.Close()
 	}
@@ -544,6 +649,9 @@ func (dl *DouyinLive) Subscribe(handler func(*new_douyin.Webcast_Im_Message)) st
 
 // Unsubscribe 取消订阅事件，通过ID查找并移除
 func (dl *DouyinLive) Unsubscribe(id string) {
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+
 	for i, h := range dl.eventHandlers {
 		if h.ID == id {
 			dl.eventHandlers = append(dl.eventHandlers[:i], dl.eventHandlers[i+1:]...)

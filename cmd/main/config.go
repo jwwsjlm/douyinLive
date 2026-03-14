@@ -15,7 +15,6 @@ import (
 type Config struct {
 	Port    string
 	Unknown bool
-	Room    string
 }
 
 // NewConfig 创建并加载应用配置
@@ -23,7 +22,6 @@ func NewConfig() (*Config, error) {
 	// 绑定命令行参数
 	pflag.String("port", "1088", "WebSocket 服务端口")
 	pflag.Bool("unknown", false, "是否输出未知源的 pb 消息")
-	pflag.String("room", "", "抖音直播间号")
 	configFile := pflag.String("config", "", "指定配置文件路径")
 	pflag.Parse()
 
@@ -77,12 +75,6 @@ func NewConfig() (*Config, error) {
 	cfg := &Config{
 		Port:    viper.GetString("port"),
 		Unknown: viper.GetBool("unknown"),
-		Room:    viper.GetString("room"),
-	}
-
-	// ✅ 验证必要配置
-	if cfg.Room == "" {
-		return nil, errors.New("直播间号不能为空，请在 config.yaml 中配置或通过 --room 参数指定")
 	}
 
 	return cfg, nil

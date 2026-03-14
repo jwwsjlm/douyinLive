@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 抖音直播配置文件
 # 复制此文件为 config.yaml 即可使用
 
@@ -6,3 +7,38 @@ port: 1088
 
 # 是否输出未知消息类型（调试用）
 unknown: false
+=======
+# 抖音直播 Cookie 配置示例
+# 复制此文件为 config.yaml 并填入你的 Cookie
+
+cookie:
+  # 抖音 Cookie（必填）
+  # 获取方式：浏览器打开 https://live.douyin.com -> F12 -> Network -> 复制任意请求的 Cookie
+  douyin: "ttwid=1%7C2iDIYVmjzMcpZ20fcaFde0VghXAA3NaNXE_SLR68IyE%7C1761045455%7Cab35197d5cfb21df6cbb2fa7ef1c9262206b062c315b9d04da746d0b37dfbc7d; my_rd=1; passport_csrf_token=3ab34460fa656183fccfb904b16ff742; passport_csrf_token_default=3ab34460fa656183fccfb904b16ff742; d_ticket=9f562383ac0547d0b561904513229d76c9c21"
+  
+  # TikTok Cookie（可选）
+  tiktok: ""
+  
+  # 快手 Cookie（可选）
+  kuaishou: ""
+  
+  # 虎牙 Cookie（可选）
+  huya: ""
+  
+  # 斗鱼 Cookie（可选）
+  douyu: ""
+  
+  # B 站 Cookie（可选）
+  bilibili: ""
+
+# 其他配置
+settings:
+  # 是否启用 Cookie 自动更新
+  auto_update_cookie: true
+  
+  # Cookie 过期检查（小时）
+  cookie_expire_check_hours: 24
+  
+  # 请求超时（秒）
+  request_timeout: 30
+>>>>>>> 25985f247561897f97f49d2ee28f8c9f4dc7486f

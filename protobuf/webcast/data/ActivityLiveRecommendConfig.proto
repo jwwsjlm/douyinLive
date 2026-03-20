@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package webcast.data;
+message ActivityLiveRecommendConfig {
+    string name = 1;                           // 名称
+    string level = 2;                           // 等级
+    int64 start_time = 3;                       // 开始时间
+    int64 end_time = 4;                         // 结束时间
+    int32 live_type = 5;                        // 直播类型
+    repeated int64 actor_uids = 6;              // 参与者用户ID列表
+    EpisodeInfo episode_info = 7;               // 剧集信息，假设是一个嵌套或相关的消息类型
+  }
+  message EpisodeInfo {
+    int32 content_type = 1;                    // 内容类型
+    string content =2;
+  }

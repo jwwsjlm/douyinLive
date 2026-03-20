@@ -1,0 +1,14 @@
+# 抖音直播配置文件
+# 复制此文件为 config.yaml 即可使用
+
+# WebSocket 服务端口
+port: "1088"
+
+# 是否输出未知消息类型（调试用）
+unknown: false
+
+# Cookie 配置（可选，不配置则自动获取）
+cookie:
+  # 抖音 Cookie（可选，用于需要登录态的请求）
+  # 获取方式：浏览器打开 https://live.douyin.com -> F12 -> Network -> 复制任意请求的 Cookie
+  douyin: ""

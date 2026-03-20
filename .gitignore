@@ -1,0 +1,21 @@
+# Binaries
+main
+*.exe
+*.zip
+*.7z
+*.tar.gz
+
+# IDE
+.idea
+.vscode
+/.vscode
+
+# Build
+/build/
+/cmd/main/build-*
+
+# Protobuf
+/protobuf/*.zip
+
+# Config
+/config.yaml

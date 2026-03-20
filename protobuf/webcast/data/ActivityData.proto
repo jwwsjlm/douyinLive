@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package webcast.data;
+message ActivityData {
+    bool xg_play =1;
+    MatchRoomData match =2;
+}
+message MatchRoomData{
+
+}

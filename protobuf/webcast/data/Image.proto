@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package webcast.data;
+
+// Image 消息类型定义
+message Image {
+  string url_list = 1; // 图片URL列表
+  string uri = 2;                // 图片统一资源标识符
+  uint64 height = 3;               // 图片高度
+  uint64 width = 4;                // 图片宽度
+  string avg_color = 5;           // 图片平均颜色
+  int32 image_type = 6;           // 图片类型
+  string open_web_url = 7;        // 打开网页的URL
+  Content content = 8;       // 图片内容，假设是一个嵌套消息类型
+  bool is_animated = 9;           // 是否是动画图片
+   NinePatchSetting flex_setting_list = 10; // 弹性设置列表，假设是一个嵌套消息类型
+  NinePatchSetting text_setting_list = 11;   // 文本设置列表，假设是一个嵌套消息类型
+}
+
+// 嵌套消息类型 Content，假设定义如下
+message Content {
+    string name = 1;                // 名称
+    string font_color = 2;          // 字体颜色
+    uint64 level = 3;                // 等级
+    string alternative_text = 4;   // 替代文本
+  }
+
+// 嵌套消息类型 NinePatchSetting，假设定义如下
+message NinePatchSetting {
+    // 假设 setting_list 是一个包含 int64 值的重复字段
+    uint64 setting_list = 1;
+  }

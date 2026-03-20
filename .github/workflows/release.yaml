@@ -1,0 +1,33 @@
+name: build
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  build-go-binary:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+        exclude:
+          - goarch: arm64
+            goos: windows
+    steps:
+      - uses: actions/checkout@v6
+      - uses: wangyoucao577/go-release-action@v1
+        env:
+          CGO_ENABLED: 0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          project_path: ./cmd/main
+          goos: ${{ matrix.goos }}
+          goarch: ${{ matrix.goarch }}
+          goversion: "1.25.7"
+          release_tag: ${{ github.ref_name }}
+          build_command: "go build"
+          extra_files: README.md LICENSE  # 改为小写 README.md

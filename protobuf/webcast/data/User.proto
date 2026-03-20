@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package webcast.data;
+
+// 假设 Image 消息类型已经被定义在其他 .proto 文件中
+import "webcast/data/Image.proto";
+
+// 假设 User.FollowInfo, User.PayGrade, User.FansClub, User.Border, User.UserAttr, User.OwnRoom, User.AnchorInfo, User.AnchorLevel, User.AuthorStats, User.XiguaParams, User.ActivityInfo, User.NobleLevelInfo, User.BrotherhoodInfo, User.AuthenticationInfo, User.PoiInfo, User.UserVIPInfo, User.FansGroupInfo, User.JAccreditInfo, User.Subscribe, User.UserDressInfo, User.BizRelation, MemberEntranceInfo, User.PublicAreaBadgeInfo, User.ExtraInfo, IndustryCertification 等类型已经被定义
+// import "webcast/data/...proto";
+
+// User 消息类型定义
+message User {
+  int64 id = 1;                            // 用户ID
+  int64 short_id = 2;                      // 简短的用户ID
+  string nickname = 3;                     // 用户昵称
+  int32 gender = 4;                        // 性别
+  string signature = 5;                    // 用户签名
+  int32 level = 6;                          // 用户等级
+  int64 birthday = 7;                       // 生日
+  string telephone = 8;                    // 电话号码
+  Image avatar_thumb = 9;                  // 小头像
+  Image avatar_medium = 10;                // 中头像
+  Image avatar_large = 11;                 // 大头像
+  bool verified = 12;                       // 是否已验证
+  int32 experience = 13;                    // 经验值
+  string city = 14;                         // 城市
+  int32 status = 15;                         // 状态
+  int64 create_time = 16;                   // 创建时间
+  int64 modify_time = 17;                   // 修改时间
+  int32 secret = 18;                         // 保密级别
+  string share_qrcode_uri = 19;             // 分享二维码URI
+  int32 income_share_percent = 20;          // 收入分享百分比
+  repeated Image badge_image_list = 21;     // 徽章图片列表
+  FollowInfo follow_info = 22;              // 关注信息
+  PayGrade pay_grade = 23;                  // 付费等级
+  FansClub fans_club = 24;                  // 粉丝俱乐部
+  Border border = 25;                       // 边框
+  // ... 其他字段
+}
+
+// 其他相关消息类型的定义也需要在这里或相应的 .proto 文件中给出

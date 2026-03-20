@@ -1,0 +1,22 @@
+syntax = "proto3";
+package webcast.data;
+import "webcast/data/TextFormat.proto";
+import "webcast/data/TextPieceUser.proto";
+import "webcast/data/TextPieceGift.proto";
+import "webcast/data/TextPieceHeart.proto";
+import "webcast/data/TextPiecePatternRef.proto";
+import "webcast/data/TextPieceImage.proto";
+
+// TextPiece 消息定义
+message TextPiece {
+  int32 type = 1;                           // 类型字段
+  TextFormat format = 2;                    // TextFormat 类型字段
+  string value_ref = 3;                     // 引用值字段
+  string string_value = 11;                 // 字符串值字段
+  TextPieceUser user_value = 21;            // TextPieceUser 类型字段
+  TextPieceGift gift_value = 22;            // TextPieceGift 类型字段
+  TextPieceHeart heart_value = 23;          // TextPieceHeart 类型字段
+  TextPiecePatternRef pattern_ref_value = 24; // TextPiecePatternRef 类型字段
+  TextPieceImage image_value = 25;          // TextPieceImage 类型字段
+  string schema_key = 100;                  // 模式键字段
+}

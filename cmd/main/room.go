@@ -16,6 +16,16 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const clientSendQueueSize = 256
+
+var (
+	pongMessage              = []byte("pong")
+	serviceClosingMessage    = []byte(`{"type":"system","message":"服务正在关闭"}`)
+	liveInvalidMessage       = []byte(`{"type":"system","message":"直播间未开播或ID无效"}`)
+	liveNotStartedMessage    = []byte(`{"type":"system","message":"直播间未开播"}`)
+	slowClientClosingMessage = []byte(`{"type":"system","message":"客户端消费过慢，连接已关闭"}`)
+)
+
 // RoomManager 管理所有直播间实例
 type RoomManager struct {
 	rooms   sync.Map // key: roomID, value: *Room
@@ -37,7 +47,7 @@ func NewRoomManager(logger *log.Logger, unknown bool, cookie string) *RoomManage
 // GetOrCreateRoom 获取或创建一个新的房间实例
 func (rm *RoomManager) GetOrCreateRoom(roomID string) *Room {
 	val, _ := rm.rooms.LoadOrStore(roomID, NewRoom(roomID, rm.logger, rm.unknown, rm.cookie, func() {
-		rm.rooms.Delete(roomID) // 提供一个回调函数，在房间关闭时从管理器中删除自己
+		rm.rooms.Delete(roomID)
 		rm.logger.Printf("房间 %s 已从管理器中移除", roomID)
 	}))
 	return val.(*Room)
@@ -52,70 +62,207 @@ func (rm *RoomManager) CloseAll() {
 	})
 }
 
+type outboundMessage struct {
+	opcode  gws.Opcode
+	payload []byte
+}
+
+type Client struct {
+	id        string
+	conn      *gws.Conn
+	sendQueue chan outboundMessage
+	stopCh    chan struct{}
+	closeOnce sync.Once
+}
+
+func NewClient(id string, conn *gws.Conn) *Client {
+	return &Client{
+		id:        id,
+		conn:      conn,
+		sendQueue: make(chan outboundMessage, clientSendQueueSize),
+		stopCh:    make(chan struct{}),
+	}
+}
+
+func (c *Client) enqueue(opcode gws.Opcode, payload []byte) bool {
+	select {
+	case <-c.stopCh:
+		return false
+	default:
+	}
+
+	select {
+	case c.sendQueue <- outboundMessage{opcode: opcode, payload: payload}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Client) writeLoop(room *Room) {
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		case msg := <-c.sendQueue:
+			if err := c.conn.WriteMessage(msg.opcode, msg.payload); err != nil {
+				room.logger.Printf("发送消息到客户端 %s (房间: %s) 失败: %v", c.id, room.id, err)
+				c.close(nil)
+				return
+			}
+		}
+	}
+}
+
+func (c *Client) close(closePayload []byte) {
+	c.closeOnce.Do(func() {
+		close(c.stopCh)
+		if closePayload != nil {
+			_ = c.conn.WriteClose(1000, closePayload)
+		}
+		if nc := c.conn.NetConn(); nc != nil {
+			_ = nc.Close()
+		}
+	})
+}
+
 // Room 代表一个直播间
 type Room struct {
-	id          string
-	logger      *log.Logger
-	connections *gws.ConcurrentMap[string, *gws.Conn]
-	douyinLive  *douyinLive.DouyinLive
-	mu          sync.Mutex
-	onClose     func() // 当房间关闭时调用的回调
-	unknown     bool
-	cookie      string // 抖音 Cookie
+	id         string
+	logger     *log.Logger
+	clients    map[string]*Client
+	clientsMu  sync.RWMutex
+	douyinLive *douyinLive.DouyinLive
+	mu         sync.Mutex
+	onClose    func()
+	unknown    bool
+	cookie     string
 }
 
 // NewRoom 创建一个新的房间实例
 // cookie 参数：可选的抖音 Cookie
 func NewRoom(id string, logger *log.Logger, unknown bool, cookie string, onClose func()) *Room {
 	return &Room{
-		id:          id,
-		logger:      logger,
-		connections: gws.NewConcurrentMap[string, *gws.Conn](16, 128),
-		onClose:     onClose,
-		unknown:     unknown,
-		cookie:      cookie,
+		id:      id,
+		logger:  logger,
+		clients: make(map[string]*Client),
+		onClose: onClose,
+		unknown: unknown,
+		cookie:  cookie,
 	}
+}
+
+func (r *Room) clientCount() int {
+	r.clientsMu.RLock()
+	defer r.clientsMu.RUnlock()
+	return len(r.clients)
+}
+
+func (r *Room) addClient(client *Client) int {
+	r.clientsMu.Lock()
+	defer r.clientsMu.Unlock()
+	r.clients[client.id] = client
+	return len(r.clients)
+}
+
+func (r *Room) getClient(clientID string) (*Client, bool) {
+	r.clientsMu.RLock()
+	defer r.clientsMu.RUnlock()
+	client, ok := r.clients[clientID]
+	return client, ok
+}
+
+func (r *Room) removeClient(clientID string) (*Client, int, bool) {
+	r.clientsMu.Lock()
+	defer r.clientsMu.Unlock()
+	client, ok := r.clients[clientID]
+	if !ok {
+		return nil, len(r.clients), false
+	}
+	delete(r.clients, clientID)
+	return client, len(r.clients), true
+}
+
+func (r *Room) snapshotClients() []*Client {
+	r.clientsMu.RLock()
+	defer r.clientsMu.RUnlock()
+	clients := make([]*Client, 0, len(r.clients))
+	for _, client := range r.clients {
+		clients = append(clients, client)
+	}
+	return clients
+}
+
+func (r *Room) clearClients() []*Client {
+	r.clientsMu.Lock()
+	defer r.clientsMu.Unlock()
+	clients := make([]*Client, 0, len(r.clients))
+	for _, client := range r.clients {
+		clients = append(clients, client)
+	}
+	r.clients = make(map[string]*Client)
+	return clients
 }
 
 // AddClient 将一个客户端添加到房间
 func (r *Room) AddClient(socket *gws.Conn) {
+	clientID := socket.RemoteAddr().String()
+	client := NewClient(clientID, socket)
+	count := r.addClient(client)
+	go client.writeLoop(r)
+
+	r.logger.Printf("客户端 %s 连接到房间 %s, 当前连接数: %d", clientID, r.id, count)
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	clientID := socket.RemoteAddr().String()
-	r.connections.Store(clientID, socket)
-	r.logger.Printf("客户端 %s 连接到房间 %s, 当前连接数: %d", clientID, r.id, r.connections.Len())
-
-	// 如果这是第一个客户端，则启动抖音直播会话
 	if r.douyinLive == nil {
 		r.logger.Printf("房间 %s 的第一个客户端连接, 正在启动抖音直播监听...", r.id)
-		if err := r.startLiveSession(socket); err != nil {
+		if err := r.startLiveSession(client); err != nil {
 			r.logger.Printf("启动抖音直播监听失败: %v", err)
-			// 从连接中移除该客户端
-			r.connections.Delete(clientID)
+			_, _, _ = r.removeClient(clientID)
+			client.close(liveInvalidMessage)
 		}
 	} else if !r.douyinLive.IsLive() {
-		// 如果已存在实例但未在直播，通知客户端
-		_ = socket.WriteClose(1000, []byte(`{"type":"system","message":"直播间未开播"}`))
-		r.connections.Delete(clientID) // 移除此无效连接
+		_, _, _ = r.removeClient(clientID)
+		client.close(liveNotStartedMessage)
 	}
 }
 
 // RemoveClient 从房间移除一个客户端
 func (r *Room) RemoveClient(clientID string) {
-	r.mu.Lock()
-	r.connections.Delete(clientID)
-	remaining := r.connections.Len()
-	shouldClose := remaining == 0 && r.douyinLive != nil
-	r.mu.Unlock()
+	client, remaining, removed := r.removeClient(clientID)
+	if !removed {
+		return
+	}
+
+	if client != nil {
+		client.close(nil)
+	}
 
 	r.logger.Printf("客户端 %s 断开连接, 房间 %s 剩余连接数: %d", clientID, r.id, remaining)
 
-	// 如果这是最后一个客户端，则关闭抖音直播会话
+	r.mu.Lock()
+	shouldClose := remaining == 0 && r.douyinLive != nil
+	r.mu.Unlock()
+
 	if shouldClose {
 		r.logger.Printf("房间 %s 的最后一个客户端已断开, 正在关闭抖音直播监听...", r.id)
 		go r.closeDouyinLive()
 	}
+}
+
+func (r *Room) sendToClient(clientID string, opcode gws.Opcode, payload []byte) {
+	client, ok := r.getClient(clientID)
+	if !ok {
+		return
+	}
+	if client.enqueue(opcode, payload) {
+		return
+	}
+
+	r.logger.Printf("客户端 %s (房间: %s) 消费过慢，关闭连接", clientID, r.id)
+	client.close(slowClientClosingMessage)
 }
 
 // closeDouyinLive 在后台关闭抖音直播连接
@@ -131,11 +278,9 @@ func (r *Room) closeDouyinLive() {
 }
 
 // startLiveSession 启动抖音直播监听和事件处理
-func (r *Room) startLiveSession(socket *gws.Conn) error {
+func (r *Room) startLiveSession(client *Client) error {
 	d, err := douyinLive.NewDouyinLive(r.id, r.logger, r.cookie)
 	if err != nil {
-		// 启动失败，通知客户端并关闭连接
-		_ = socket.WriteClose(1000, []byte(`{"type":"system","message":"直播间未开播或ID无效"}`))
 		return err
 	}
 
@@ -164,22 +309,18 @@ func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, liveN
 		return
 	}
 
-	// 使用 protojson 进行序列化
 	jsonBytes, err := protojson.Marshal(msg)
 	if err != nil {
 		r.logger.Printf("JSON 序列化失败: %v", err)
 		return
 	}
 
-	// 直接在 JSON 中插入 livename 字段，避免 map 转换
-	// 查找最后一个 } 的位置
 	lastCloseBrace := bytes.LastIndexByte(jsonBytes, '}')
 	if lastCloseBrace == -1 {
 		r.logger.Printf("无效的 JSON 格式")
 		return
 	}
 
-	// 构建带 livename 的新 JSON
 	livenameJSON := []byte(fmt.Sprintf(`,"livename":%s`, strconv.Quote(liveName)))
 	finalJSON := make([]byte, 0, len(jsonBytes)+len(livenameJSON))
 	finalJSON = append(finalJSON, jsonBytes[:lastCloseBrace]...)
@@ -191,45 +332,33 @@ func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, liveN
 
 // Broadcast 将消息广播到房间内的所有客户端
 func (r *Room) Broadcast(message []byte) {
-	r.connections.Range(func(key string, conn *gws.Conn) bool {
-		if err := conn.WriteMessage(gws.OpcodeText, message); err != nil {
-			r.logger.Printf("发送消息到客户端 %s (房间: %s) 失败: %v", key, r.id, err)
+	for _, client := range r.snapshotClients() {
+		if client.enqueue(gws.OpcodeText, message) {
+			continue
 		}
-		return true
-	})
+		r.logger.Printf("客户端 %s (房间: %s) 消费过慢，关闭连接", client.id, r.id)
+		client.close(slowClientClosingMessage)
+	}
 }
 
 // Close 关闭房间，停止监听并清理资源（优雅退出）
 func (r *Room) Close() {
 	r.mu.Lock()
-	connections := r.connections
 	d := r.douyinLive
 	r.douyinLive = nil
 	onClose := r.onClose
 	r.mu.Unlock()
 
-	// 1. 先关闭所有客户端连接
-	if connections != nil {
-		connections.Range(func(key string, conn *gws.Conn) bool {
-			// 发送关闭消息，通知客户端
-			_ = conn.WriteClose(1000, []byte(`{"type":"system","message":"服务正在关闭"}`))
-			// 获取底层连接并关闭
-			if nc := conn.NetConn(); nc != nil {
-				_ = nc.Close()
-			}
-			connections.Delete(key)
-			return true
-		})
-		r.logger.Printf("房间 %s 的所有客户端连接已关闭", r.id)
+	for _, client := range r.clearClients() {
+		client.close(serviceClosingMessage)
 	}
+	r.logger.Printf("房间 %s 的所有客户端连接已关闭", r.id)
 
-	// 2. 关闭抖音直播连接
 	if d != nil {
 		d.Close()
 		r.logger.Printf("房间 %s 的抖音直播监听已关闭", r.id)
 	}
 
-	// 3. 调用回调，通知 RoomManager 将自己移除
 	if onClose != nil {
 		onClose()
 	}

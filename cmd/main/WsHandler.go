@@ -26,8 +26,7 @@ func (c *WsHandler) OnClose(socket *gws.Conn, err error) {
 // OnMessage 当收到消息时调用
 func (c *WsHandler) OnMessage(socket *gws.Conn, message *gws.Message) {
 	defer message.Close()
-	// 实现心跳检查
 	if message.Data.String() == "ping" {
-		_ = socket.WriteString("pong")
+		c.room.sendToClient(socket.RemoteAddr().String(), gws.OpcodeText, pongMessage)
 	}
 }

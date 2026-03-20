@@ -76,6 +76,12 @@ func (a *App) Shutdown() error {
 }
 
 // handleWebSocket 处理新的 WebSocket 连接请求
+func (a *App) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
 func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	roomID := strings.TrimPrefix(r.URL.Path, "/ws/")
 	if roomID == "" {

@@ -1,0 +1,15 @@
+.git
+.github
+.vscode
+.idea
+build
+main
+*.exe
+*.zip
+*.7z
+*.tar.gz
+config.yaml
+config.yaml_bak
+logs
+image
+*.log

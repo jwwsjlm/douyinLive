@@ -1,52 +1,55 @@
-BINARY_NAME := build/douyinlive
+BINARY_NAME := build/douyinLive
 CMD_PATH := ./cmd/main
-
-# Go commands
-GO_BUILD := go build
-GO_CLEAN := go clean
-GO_TIDY := go mod tidy
+GO ?= go
+GO_BUILD := $(GO) build
+GO_CLEAN := $(GO) clean
+GO_TIDY := $(GO) mod tidy
 LDFLAGS := -s -w
-# OS-specific settings
-GOOS_WINDOWS := windows
-GOARCH_WINDOWS := amd64
-GOOS_LINUX := linux
-GOARCH_LINUX := amd64
-#TAGS := jsoniter
-# Build binary for Windows
+
+.PHONY: all build build-linux build-windows build-darwin install clean proto help
+
+all: build
+
+build:
+	@echo "Building application..."
+	mkdir -p build
+	$(GO_BUILD) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) $(CMD_PATH)
+
+build-linux:
+	@echo "Building application for Linux..."
+	mkdir -p build
+	GOOS=linux GOARCH=amd64 $(GO_BUILD) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-linux-amd64 $(CMD_PATH)
+
 build-windows:
 	@echo "Building application for Windows..."
-	$(GO_BUILD) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-windows.exe $(CMD_PATH)
-# Build binary for Linux
-build-linux:
-	@echo Building application for Linux...
-	set GOOS=$(GOOS_LINUX)& set GOARCH=$(GOARCH_LINUX)& $(GO_BUILD) -tags=$(TAGS) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-linux $(CMD_PATH)
+	mkdir -p build
+	GOOS=windows GOARCH=amd64 $(GO_BUILD) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-windows-amd64.exe $(CMD_PATH)
 
-# Install dependencies
+build-darwin:
+	@echo "Building application for macOS..."
+	mkdir -p build
+	GOOS=darwin GOARCH=amd64 $(GO_BUILD) -ldflags="$(LDFLAGS)" -o $(BINARY_NAME)-darwin-amd64 $(CMD_PATH)
+
 install:
-	@echo "Installing dependencies..."
+	@echo "Tidying dependencies..."
 	$(GO_TIDY)
 
-# Generate Go code from .proto files
 proto:
 	@echo "Generating Go code from .proto files..."
 	protoc --proto_path=protobuf --go_out=. protobuf/douyin.proto
 
-# Clean generated files
 clean:
 	@echo "Cleaning build artifacts..."
 	$(GO_CLEAN)
-	del /F /Q $(BINARY_NAME)-windows.exe
+	rm -rf build
 
-# Default target
-all: build-windows
-
-# Help information
 help:
 	@echo "Usage:"
+	@echo "  make build         - Build application for current platform"
+	@echo "  make build-linux   - Build application for Linux"
 	@echo "  make build-windows - Build application for Windows"
-	@echo "  make install       - Install dependencies"
+	@echo "  make build-darwin  - Build application for macOS"
+	@echo "  make install       - Tidy dependencies"
 	@echo "  make clean         - Clean build artifacts"
 	@echo "  make proto         - Generate Go code from .proto files"
 	@echo "  make help          - Display this help message"
-
-.PHONY: build-windows install clean proto help all

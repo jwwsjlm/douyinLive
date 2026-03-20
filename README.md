@@ -75,6 +75,20 @@ go build -o douyinLive ./cmd/main
 ./douyinLive
 ```
 
+### 方式三：Docker 运行
+
+```bash
+docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:latest
+```
+
+如果你需要自定义配置，可以挂载自己的配置文件：
+
+```bash
+docker run --rm -p 1088:1088 \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  ghcr.io/jwwsjlm/douyinlive:latest --config /app/config.yaml
+```
+
 ---
 
 ## 最重要的一点：房间参数怎么传

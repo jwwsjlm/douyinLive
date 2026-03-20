@@ -1,5 +1,5 @@
 # Binaries
-main
+/main
 *.exe
 *.zip
 *.7z

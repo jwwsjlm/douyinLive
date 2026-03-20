@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"strconv"
@@ -28,7 +27,8 @@ var (
 
 // RoomManager 管理所有直播间实例
 type RoomManager struct {
-	rooms   sync.Map // key: roomID, value: *Room
+	rooms   map[string]*Room
+	roomsMu sync.RWMutex
 	logger  *log.Logger
 	unknown bool
 	cookie  string // 抖音 Cookie
@@ -38,6 +38,7 @@ type RoomManager struct {
 // cookie 参数：可选的抖音 Cookie
 func NewRoomManager(logger *log.Logger, unknown bool, cookie string) *RoomManager {
 	return &RoomManager{
+		rooms:   make(map[string]*Room),
 		logger:  logger,
 		unknown: unknown,
 		cookie:  cookie,
@@ -46,20 +47,41 @@ func NewRoomManager(logger *log.Logger, unknown bool, cookie string) *RoomManage
 
 // GetOrCreateRoom 获取或创建一个新的房间实例
 func (rm *RoomManager) GetOrCreateRoom(roomID string) *Room {
-	val, _ := rm.rooms.LoadOrStore(roomID, NewRoom(roomID, rm.logger, rm.unknown, rm.cookie, func() {
-		rm.rooms.Delete(roomID)
+	rm.roomsMu.RLock()
+	room, ok := rm.rooms[roomID]
+	rm.roomsMu.RUnlock()
+	if ok {
+		return room
+	}
+
+	rm.roomsMu.Lock()
+	defer rm.roomsMu.Unlock()
+	if room, ok = rm.rooms[roomID]; ok {
+		return room
+	}
+
+	room = NewRoom(roomID, rm.logger, rm.unknown, rm.cookie, func() {
+		rm.roomsMu.Lock()
+		delete(rm.rooms, roomID)
+		rm.roomsMu.Unlock()
 		rm.logger.Printf("房间 %s 已从管理器中移除", roomID)
-	}))
-	return val.(*Room)
+	})
+	rm.rooms[roomID] = room
+	return room
 }
 
 // CloseAll 关闭所有房间
 func (rm *RoomManager) CloseAll() {
-	rm.rooms.Range(func(key, value interface{}) bool {
-		room := value.(*Room)
+	rm.roomsMu.RLock()
+	rooms := make([]*Room, 0, len(rm.rooms))
+	for _, room := range rm.rooms {
+		rooms = append(rooms, room)
+	}
+	rm.roomsMu.RUnlock()
+
+	for _, room := range rooms {
 		room.Close()
-		return true
-	})
+	}
 }
 
 type outboundMessage struct {
@@ -106,7 +128,6 @@ func (c *Client) writeLoop(room *Room) {
 			return
 		case msg := <-c.sendQueue:
 			if err := c.conn.WriteMessage(msg.opcode, msg.payload); err != nil {
-				room.logger.Printf("发送消息到客户端 %s (房间: %s) 失败: %v", c.id, room.id, err)
 				c.close(nil)
 				return
 			}
@@ -128,15 +149,18 @@ func (c *Client) close(closePayload []byte) {
 
 // Room 代表一个直播间
 type Room struct {
-	id         string
-	logger     *log.Logger
-	clients    map[string]*Client
-	clientsMu  sync.RWMutex
-	douyinLive *douyinLive.DouyinLive
-	mu         sync.Mutex
-	onClose    func()
-	unknown    bool
-	cookie     string
+	id                   string
+	logger               *log.Logger
+	clients              map[string]*Client
+	clientsMu            sync.RWMutex
+	douyinLive           *douyinLive.DouyinLive
+	mu                   sync.Mutex
+	onClose              func()
+	unknown              bool
+	cookie               string
+	liveNameCacheMu      sync.RWMutex
+	liveNameCacheKey     string
+	liveNameCachePayload []byte
 }
 
 // NewRoom 创建一个新的房间实例
@@ -150,12 +174,6 @@ func NewRoom(id string, logger *log.Logger, unknown bool, cookie string, onClose
 		unknown: unknown,
 		cookie:  cookie,
 	}
-}
-
-func (r *Room) clientCount() int {
-	r.clientsMu.RLock()
-	defer r.clientsMu.RUnlock()
-	return len(r.clients)
 }
 
 func (r *Room) addClient(client *Client) int {
@@ -204,6 +222,25 @@ func (r *Room) clearClients() []*Client {
 	return clients
 }
 
+func (r *Room) getLiveNamePayload(liveName string) []byte {
+	r.liveNameCacheMu.RLock()
+	if r.liveNameCacheKey == liveName {
+		payload := r.liveNameCachePayload
+		r.liveNameCacheMu.RUnlock()
+		return payload
+	}
+	r.liveNameCacheMu.RUnlock()
+
+	payload := []byte(fmt.Sprintf(`,"livename":%s`, strconv.Quote(liveName)))
+
+	r.liveNameCacheMu.Lock()
+	r.liveNameCacheKey = liveName
+	r.liveNameCachePayload = payload
+	r.liveNameCacheMu.Unlock()
+
+	return payload
+}
+
 // AddClient 将一个客户端添加到房间
 func (r *Room) AddClient(socket *gws.Conn) {
 	clientID := socket.RemoteAddr().String()
@@ -218,7 +255,7 @@ func (r *Room) AddClient(socket *gws.Conn) {
 
 	if r.douyinLive == nil {
 		r.logger.Printf("房间 %s 的第一个客户端连接, 正在启动抖音直播监听...", r.id)
-		if err := r.startLiveSession(client); err != nil {
+		if err := r.startLiveSession(); err != nil {
 			r.logger.Printf("启动抖音直播监听失败: %v", err)
 			_, _, _ = r.removeClient(clientID)
 			client.close(liveInvalidMessage)
@@ -278,7 +315,7 @@ func (r *Room) closeDouyinLive() {
 }
 
 // startLiveSession 启动抖音直播监听和事件处理
-func (r *Room) startLiveSession(client *Client) error {
+func (r *Room) startLiveSession() error {
 	d, err := douyinLive.NewDouyinLive(r.id, r.logger, r.cookie)
 	if err != nil {
 		return err
@@ -299,7 +336,7 @@ func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, liveN
 	msg, err := generated.GetMessageInstance(eventData.Method)
 	if err != nil {
 		if r.unknown {
-			r.logger.Printf("未知消息类型: %v, Payload: %s", err, hex.EncodeToString(eventData.Payload))
+			r.logger.Printf("未知消息类型: method=%s payload_len=%d", eventData.Method, len(eventData.Payload))
 		}
 		return
 	}
@@ -321,7 +358,7 @@ func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, liveN
 		return
 	}
 
-	livenameJSON := []byte(fmt.Sprintf(`,"livename":%s`, strconv.Quote(liveName)))
+	livenameJSON := r.getLiveNamePayload(liveName)
 	finalJSON := make([]byte, 0, len(jsonBytes)+len(livenameJSON))
 	finalJSON = append(finalJSON, jsonBytes[:lastCloseBrace]...)
 	finalJSON = append(finalJSON, livenameJSON...)

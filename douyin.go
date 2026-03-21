@@ -659,16 +659,26 @@ func (dl *DouyinLive) stopHeartbeatLoop() {
 
 // handleGzipMessage 处理 GZIP 消息
 func (dl *DouyinLive) handleGzipMessage(pushFrame *new_douyin.Webcast_Im_PushFrame, response *new_douyin.Webcast_Im_Response, controlMsg *douyin.ControlMessage) {
-
 	uncompressed, err := dl.decompressGzip(pushFrame.Payload)
 	if err != nil {
 		dl.logger.Printf("GZIP解压失败: %v\n", err)
 		return
 	}
-
-	if err := proto.Unmarshal(uncompressed, response); err != nil {
+	if err := dl.decodeResponse(uncompressed, pushFrame, response, controlMsg); err != nil {
 		dl.logger.Printf("解析Response失败: %v\n", err)
-		return
+	}
+}
+
+func (dl *DouyinLive) handlePlainMessage(pushFrame *new_douyin.Webcast_Im_PushFrame, response *new_douyin.Webcast_Im_Response, controlMsg *douyin.ControlMessage) {
+	if err := dl.decodeResponse(pushFrame.Payload, pushFrame, response, controlMsg); err != nil {
+		dl.logger.Printf("解析Response失败: %v\n", err)
+	}
+}
+
+func (dl *DouyinLive) decodeResponse(data []byte, pushFrame *new_douyin.Webcast_Im_PushFrame, response *new_douyin.Webcast_Im_Response, controlMsg *douyin.ControlMessage) error {
+	*response = new_douyin.Webcast_Im_Response{}
+	if err := proto.Unmarshal(data, response); err != nil {
+		return err
 	}
 
 	if response.NeedAck {
@@ -678,6 +688,7 @@ func (dl *DouyinLive) handleGzipMessage(pushFrame *new_douyin.Webcast_Im_PushFra
 	for _, msg := range response.Messages {
 		dl.handleSingleMessage(msg, controlMsg)
 	}
+	return nil
 }
 
 // decompressGzip 解压 GZIP 数据

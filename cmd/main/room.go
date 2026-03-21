@@ -369,12 +369,14 @@ func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, liveN
 
 // Broadcast 将消息广播到房间内的所有客户端
 func (r *Room) Broadcast(message []byte) {
-	for _, client := range r.snapshotClients() {
+	clients := r.snapshotClients()
+	for _, client := range clients {
 		if client.enqueue(gws.OpcodeText, message) {
 			continue
 		}
 		r.logger.Printf("客户端 %s (房间: %s) 消费过慢，关闭连接", client.id, r.id)
 		client.close(slowClientClosingMessage)
+		go r.RemoveClient(client.id)
 	}
 }
 

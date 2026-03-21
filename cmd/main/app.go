@@ -39,6 +39,7 @@ func NewApp(ctx context.Context, config *Config, logger *log.Logger) (*App, erro
 func (a *App) Run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws/", a.handleWebSocket)
+	mux.HandleFunc("/health", a.handleHealth)
 
 	port, err := strconv.Atoi(a.config.Port)
 	if err != nil {

@@ -39,7 +39,6 @@ func NewApp(ctx context.Context, config *Config, logger *log.Logger) (*App, erro
 func (a *App) Run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws/", a.handleWebSocket)
-	mux.HandleFunc("/health", a.handleHealth)
 
 	port, err := strconv.Atoi(a.config.Port)
 	if err != nil {
@@ -77,12 +76,6 @@ func (a *App) Shutdown() error {
 }
 
 // handleWebSocket 处理新的 WebSocket 连接请求
-func (a *App) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok"}`))
-}
-
 func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	roomID := strings.TrimPrefix(r.URL.Path, "/ws/")
 	if roomID == "" {

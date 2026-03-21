@@ -120,8 +120,6 @@ func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, er
 		consecutiveFailures:    0,
 		lastReconnectReason:    "",
 		lastReconnectErrorTime: time.Time{},
-		heartbeatStopCh:        make(chan struct{}),
-		heartbeatDoneCh:        make(chan struct{}),
 	}
 
 	// 初始化 Cookie 管理器
@@ -650,10 +648,18 @@ func (dl *DouyinLive) stopHeartbeatLoop() {
 	dl.mu.Unlock()
 
 	if stopCh != nil {
-		close(stopCh)
+		select {
+		case <-stopCh:
+		default:
+			close(stopCh)
+		}
 	}
 	if doneCh != nil {
-		<-doneCh
+		select {
+		case <-doneCh:
+		case <-time.After(1500 * time.Millisecond):
+			dl.logger.Printf("等待心跳循环退出超时，跳过阻塞等待\n")
+		}
 	}
 }
 

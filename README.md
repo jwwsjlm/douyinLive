@@ -77,8 +77,22 @@ go build -o douyinLive ./cmd/main
 
 ### 方式三：Docker 运行
 
+直接启动最新版镜像：
+
 ```bash
 docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:latest
+```
+
+程序启动后，对外提供的 WebSocket 地址仍然是：
+
+```text
+ws://127.0.0.1:1088/ws/直播间标识
+```
+
+如果你需要固定版本，也可以直接拉指定 tag：
+
+```bash
+docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:v2.0.3
 ```
 
 如果你需要自定义配置，可以挂载自己的配置文件：
@@ -87,6 +101,25 @@ docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:latest
 docker run --rm -p 1088:1088 \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
   ghcr.io/jwwsjlm/douyinlive:latest --config /app/config.yaml
+```
+
+如果你希望容器退出后自动删除，就保留 `--rm`；如果你希望长期后台运行，可以改成：
+
+```bash
+docker run -d \
+  --name douyinlive \
+  --restart unless-stopped \
+  -p 1088:1088 \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  ghcr.io/jwwsjlm/douyinlive:latest --config /app/config.yaml
+```
+
+常用查看命令：
+
+```bash
+docker logs -f douyinlive
+docker ps
+docker stop douyinlive
 ```
 
 ---

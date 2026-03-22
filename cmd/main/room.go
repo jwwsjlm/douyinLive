@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/jwwsjlm/douyinLive"
 	"github.com/jwwsjlm/douyinLive/generated"
@@ -15,7 +17,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const clientSendQueueSize = 256
+const (
+	clientSendQueueSize    = 256
+	liveStatusPollInterval = 15 * time.Second
+)
 
 var (
 	pongMessage              = []byte("pong")
@@ -23,6 +28,8 @@ var (
 	liveInvalidMessage       = []byte(`{"type":"system","message":"直播间未开播或ID无效"}`)
 	liveNotStartedMessage    = []byte(`{"type":"system","message":"直播间未开播"}`)
 	slowClientClosingMessage = []byte(`{"type":"system","message":"客户端消费过慢，连接已关闭"}`)
+
+	errRoomInactive = errors.New("房间已关闭或无客户端")
 )
 
 // RoomManager 管理所有直播间实例
@@ -161,6 +168,10 @@ type Room struct {
 	liveNameCacheMu      sync.RWMutex
 	liveNameCacheKey     string
 	liveNameCachePayload []byte
+	starting             bool
+	closed               bool
+	monitorStopCh        chan struct{}
+	monitorDoneCh        chan struct{}
 }
 
 // NewRoom 创建一个新的房间实例
@@ -199,6 +210,12 @@ func (r *Room) removeClient(clientID string) (*Client, int, bool) {
 	}
 	delete(r.clients, clientID)
 	return client, len(r.clients), true
+}
+
+func (r *Room) clientCount() int {
+	r.clientsMu.RLock()
+	defer r.clientsMu.RUnlock()
+	return len(r.clients)
 }
 
 func (r *Room) snapshotClients() []*Client {
@@ -251,19 +268,50 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	r.logger.Printf("客户端 %s 连接到房间 %s, 当前连接数: %d", clientID, r.id, count)
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.douyinLive == nil {
-		r.logger.Printf("房间 %s 的第一个客户端连接, 正在启动抖音直播监听...", r.id)
-		if err := r.startLiveSession(); err != nil {
-			r.logger.Printf("启动抖音直播监听失败: %v", err)
-			_, _, _ = r.removeClient(clientID)
-			client.close(liveInvalidMessage)
-		}
-	} else if !r.douyinLive.IsLive() {
+	switch {
+	case r.closed:
+		r.mu.Unlock()
 		_, _, _ = r.removeClient(clientID)
-		client.close(liveNotStartedMessage)
+		client.close(serviceClosingMessage)
+		return
+	case r.douyinLive != nil:
+		r.mu.Unlock()
+		return
+	case r.monitorStopCh != nil:
+		r.mu.Unlock()
+		r.sendToClient(clientID, gws.OpcodeText, liveNotStartedMessage)
+		return
+	case r.starting:
+		r.mu.Unlock()
+		return
+	default:
+		r.starting = true
+		r.mu.Unlock()
 	}
+
+	r.logger.Printf("房间 %s 的第一个客户端连接, 正在检查直播状态...", r.id)
+	err := r.startLiveSession()
+
+	r.mu.Lock()
+	r.starting = false
+	r.mu.Unlock()
+
+	if err == nil {
+		return
+	}
+	if errors.Is(err, errRoomInactive) {
+		return
+	}
+	if errors.Is(err, douyinLive.ErrLiveNotStarted) {
+		r.logger.Printf("房间 %s 当前未开播，进入后台轮询监控", r.id)
+		r.Broadcast(liveNotStartedMessage)
+		r.startMonitorLoop()
+		return
+	}
+
+	r.logger.Printf("启动抖音直播监听失败: %v", err)
+	_, _, _ = r.removeClient(clientID)
+	client.close(liveInvalidMessage)
 }
 
 // RemoveClient 从房间移除一个客户端
@@ -279,13 +327,9 @@ func (r *Room) RemoveClient(clientID string) {
 
 	r.logger.Printf("客户端 %s 断开连接, 房间 %s 剩余连接数: %d", clientID, r.id, remaining)
 
-	r.mu.Lock()
-	shouldClose := remaining == 0 && r.douyinLive != nil
-	r.mu.Unlock()
-
-	if shouldClose {
-		r.logger.Printf("房间 %s 的最后一个客户端已断开, 正在关闭抖音直播监听...", r.id)
-		go r.closeDouyinLive()
+	if remaining == 0 {
+		r.logger.Printf("房间 %s 的最后一个客户端已断开, 正在关闭后台监听...", r.id)
+		go r.closeBackgroundWorkers()
 	}
 }
 
@@ -302,6 +346,11 @@ func (r *Room) sendToClient(clientID string, opcode gws.Opcode, payload []byte) 
 	client.close(slowClientClosingMessage)
 }
 
+func (r *Room) closeBackgroundWorkers() {
+	r.stopMonitorLoop()
+	r.closeDouyinLive()
+}
+
 // closeDouyinLive 在后台关闭抖音直播连接
 func (r *Room) closeDouyinLive() {
 	r.mu.Lock()
@@ -311,6 +360,105 @@ func (r *Room) closeDouyinLive() {
 
 	if d != nil {
 		d.Close()
+	}
+}
+
+func (r *Room) startMonitorLoop() {
+	r.mu.Lock()
+	if r.closed || r.monitorStopCh != nil || r.douyinLive != nil {
+		r.mu.Unlock()
+		return
+	}
+	stopCh := make(chan struct{})
+	doneCh := make(chan struct{})
+	r.monitorStopCh = stopCh
+	r.monitorDoneCh = doneCh
+	r.mu.Unlock()
+
+	go func() {
+		defer close(doneCh)
+		defer func() {
+			r.mu.Lock()
+			if r.monitorStopCh == stopCh {
+				r.monitorStopCh = nil
+				r.monitorDoneCh = nil
+			}
+			r.mu.Unlock()
+		}()
+
+		ticker := time.NewTicker(liveStatusPollInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stopCh:
+				return
+			default:
+			}
+
+			if r.clientCount() == 0 {
+				return
+			}
+
+			r.mu.Lock()
+			if r.closed || r.douyinLive != nil {
+				r.mu.Unlock()
+				return
+			}
+			if r.starting {
+				r.mu.Unlock()
+			} else {
+				r.starting = true
+				r.mu.Unlock()
+
+				err := r.startLiveSession()
+
+				r.mu.Lock()
+				r.starting = false
+				r.mu.Unlock()
+
+				switch {
+				case err == nil:
+					return
+				case errors.Is(err, errRoomInactive):
+					return
+				case errors.Is(err, douyinLive.ErrLiveNotStarted):
+					r.logger.Printf("房间 %s 仍未开播，继续等待", r.id)
+				default:
+					r.logger.Printf("房间 %s 检查直播状态失败，将继续轮询: %v", r.id, err)
+				}
+			}
+
+			select {
+			case <-stopCh:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+func (r *Room) stopMonitorLoop() {
+	r.mu.Lock()
+	stopCh := r.monitorStopCh
+	doneCh := r.monitorDoneCh
+	r.monitorStopCh = nil
+	r.monitorDoneCh = nil
+	r.mu.Unlock()
+
+	if stopCh != nil {
+		select {
+		case <-stopCh:
+		default:
+			close(stopCh)
+		}
+	}
+	if doneCh != nil {
+		select {
+		case <-doneCh:
+		case <-time.After(1500 * time.Millisecond):
+			r.logger.Printf("等待房间 %s 的监控循环退出超时，跳过阻塞等待", r.id)
+		}
 	}
 }
 
@@ -325,10 +473,45 @@ func (r *Room) startLiveSession() error {
 		r.handleDouyinEvent(eventData, d.LiveName)
 	})
 
-	go d.Start()
+	if r.clientCount() == 0 {
+		d.Close()
+		return errRoomInactive
+	}
+
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		d.Close()
+		return errRoomInactive
+	}
 	r.douyinLive = d
+	r.mu.Unlock()
+
+	go r.runLiveSession(d)
 	r.logger.Printf("房间 %s 的抖音直播监听已成功启动", r.id)
 	return nil
+}
+
+func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
+	d.Start()
+
+	r.mu.Lock()
+	if r.douyinLive == d {
+		r.douyinLive = nil
+	}
+	closed := r.closed
+	monitorRunning := r.monitorStopCh != nil
+	r.mu.Unlock()
+
+	if closed || r.clientCount() == 0 {
+		return
+	}
+
+	r.Broadcast(liveNotStartedMessage)
+	if !monitorRunning {
+		r.logger.Printf("房间 %s 直播连接已结束，切回未开播监控模式", r.id)
+		r.startMonitorLoop()
+	}
 }
 
 // handleDouyinEvent 处理从抖音接收到的事件（优化版：减少 JSON 转换）
@@ -383,10 +566,13 @@ func (r *Room) Broadcast(message []byte) {
 // Close 关闭房间，停止监听并清理资源（优雅退出）
 func (r *Room) Close() {
 	r.mu.Lock()
+	r.closed = true
 	d := r.douyinLive
 	r.douyinLive = nil
 	onClose := r.onClose
 	r.mu.Unlock()
+
+	r.stopMonitorLoop()
 
 	for _, client := range r.clearClients() {
 		client.close(serviceClosingMessage)

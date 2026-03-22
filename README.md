@@ -469,7 +469,7 @@ douyinLive/
 本项目参考过这些项目和资料：
 
 - [ihmily/DouyinLiveRecorder](https://github.com/ihmily/DouyinLiveRecorder)
-- [saermar/DouyinLiveWebFetcher](https://github.com/saermar/DouyinLiveWebFetcher)
+- [saermart/DouyinLiveWebFetcher](https://github.com/saermart/DouyinLiveWebFetcher)
 - [douyin_proto](https://github.com/Remember-the-past/douyin_proto)
 
 感谢原作者们的公开分享。

@@ -58,6 +58,7 @@ var (
 	anchorInfoRegex = regexp.MustCompile(`data-anchor-info="([\s\S]*?)" data-room-info="`)
 
 	ErrRiskControlPage = errors.New("检测到页面风控或验证")
+	ErrLiveNotStarted  = errors.New("直播间未开播")
 )
 
 // DouyinLive 结构体定义
@@ -132,7 +133,7 @@ func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, er
 	}
 
 	if dl.IsLive() == false {
-		return nil, fmt.Errorf("直播间 %s 未开播", liveID)
+		return nil, fmt.Errorf("直播间 %s 未开播: %w", liveID, ErrLiveNotStarted)
 	}
 	return dl, nil
 }

@@ -156,26 +156,28 @@ func (c *Client) close(closePayload []byte) {
 
 // Room 代表一个直播间
 type Room struct {
-	id                   string
-	logger               *log.Logger
-	clients              map[string]*Client
-	clientsMu            sync.RWMutex
-	douyinLive           *douyinLive.DouyinLive
-	mu                   sync.Mutex
-	onClose              func()
-	unknown              bool
-	cookie               string
-	pollInterval         time.Duration
-	notifyInterval       time.Duration
-	liveNameCacheMu      sync.RWMutex
-	liveNameCacheKey     string
-	liveNameCachePayload []byte
-	starting             bool
-	closed               bool
-	monitorStopCh        chan struct{}
-	monitorDoneCh        chan struct{}
-	statusMessageCache   []byte
-	statusMessageKey     string
+	id                    string
+	logger                *log.Logger
+	clients               map[string]*Client
+	clientsMu             sync.RWMutex
+	douyinLive            *douyinLive.DouyinLive
+	mu                    sync.Mutex
+	onClose               func()
+	unknown               bool
+	cookie                string
+	pollInterval          time.Duration
+	notifyInterval        time.Duration
+	liveNameCacheMu       sync.RWMutex
+	liveNameCacheKey      string
+	liveNameCachePayload  []byte
+	starting              bool
+	closed                bool
+	monitorStopCh         chan struct{}
+	monitorDoneCh         chan struct{}
+	offlineStatusCache    []byte
+	offlineStatusCacheKey string
+	onlineStatusCache     []byte
+	onlineStatusCacheKey  string
 }
 
 // NewRoom 创建一个新的房间实例
@@ -264,24 +266,50 @@ func (r *Room) getLiveNamePayload(liveName string) []byte {
 	return payload
 }
 
-func (r *Room) offlineStatusMessage() []byte {
-	key := fmt.Sprintf("%s|%s", r.id, r.notifyInterval)
+func (r *Room) liveStatusMessage(live bool) []byte {
+	if live {
+		key := r.id
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.onlineStatusCacheKey == key && len(r.onlineStatusCache) > 0 {
+			return r.onlineStatusCache
+		}
 
+		payload := []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":true,"room_id":%s,"message":"直播间已开播"}`,
+			strconv.Quote(r.id)))
+		r.onlineStatusCacheKey = key
+		r.onlineStatusCache = payload
+		return payload
+	}
+
+	key := fmt.Sprintf("%s|%s", r.id, r.notifyInterval)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.statusMessageKey == key && len(r.statusMessageCache) > 0 {
-		return r.statusMessageCache
+	if r.offlineStatusCacheKey == key && len(r.offlineStatusCache) > 0 {
+		return r.offlineStatusCache
 	}
 
 	payload := []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":false,"room_id":%s,"message":"直播间未开播","retry_interval_seconds":%d}`,
 		strconv.Quote(r.id), int(r.notifyInterval/time.Second)))
-	r.statusMessageKey = key
-	r.statusMessageCache = payload
+	r.offlineStatusCacheKey = key
+	r.offlineStatusCache = payload
 	return payload
+}
+
+func (r *Room) offlineStatusMessage() []byte {
+	return r.liveStatusMessage(false)
+}
+
+func (r *Room) onlineStatusMessage() []byte {
+	return r.liveStatusMessage(true)
 }
 
 func (r *Room) notifyOfflineStatus() {
 	r.Broadcast(r.offlineStatusMessage())
+}
+
+func (r *Room) notifyOnlineStatus() {
+	r.Broadcast(r.onlineStatusMessage())
 }
 
 // AddClient 将一个客户端添加到房间
@@ -302,6 +330,7 @@ func (r *Room) AddClient(socket *gws.Conn) {
 		return
 	case r.douyinLive != nil:
 		r.mu.Unlock()
+		r.sendToClient(clientID, gws.OpcodeText, r.onlineStatusMessage())
 		return
 	case r.monitorStopCh != nil:
 		r.mu.Unlock()
@@ -515,6 +544,7 @@ func (r *Room) startLiveSession() error {
 	r.douyinLive = d
 	r.mu.Unlock()
 
+	r.notifyOnlineStatus()
 	go r.runLiveSession(d)
 	r.logger.Printf("房间 %s 的抖音直播监听已成功启动", r.id)
 	return nil

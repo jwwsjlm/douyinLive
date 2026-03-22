@@ -377,6 +377,12 @@ setInterval(() => {
 {"type":"system","event":"live_status","live":false,"room_id":"516466932480","message":"直播间未开播","retry_interval_seconds":30}
 ```
 
+检测到开播时，也会先返回一条状态消息：
+
+```json
+{"type":"system","event":"live_status","live":true,"room_id":"516466932480","message":"直播间已开播"}
+```
+
 ---
 
 ## 项目结构

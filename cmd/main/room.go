@@ -156,28 +156,30 @@ func (c *Client) close(closePayload []byte) {
 
 // Room 代表一个直播间
 type Room struct {
-	id                    string
-	logger                *log.Logger
-	clients               map[string]*Client
-	clientsMu             sync.RWMutex
-	douyinLive            *douyinLive.DouyinLive
-	mu                    sync.Mutex
-	onClose               func()
-	unknown               bool
-	cookie                string
-	pollInterval          time.Duration
-	notifyInterval        time.Duration
-	liveNameCacheMu       sync.RWMutex
-	liveNameCacheKey      string
-	liveNameCachePayload  []byte
-	starting              bool
-	closed                bool
-	monitorStopCh         chan struct{}
-	monitorDoneCh         chan struct{}
-	offlineStatusCache    []byte
-	offlineStatusCacheKey string
-	onlineStatusCache     []byte
-	onlineStatusCacheKey  string
+	id                      string
+	logger                  *log.Logger
+	clients                 map[string]*Client
+	clientsMu               sync.RWMutex
+	douyinLive              *douyinLive.DouyinLive
+	mu                      sync.Mutex
+	onClose                 func()
+	unknown                 bool
+	cookie                  string
+	pollInterval            time.Duration
+	notifyInterval          time.Duration
+	liveNameCacheMu         sync.RWMutex
+	liveNameCacheKey        string
+	liveNameCachePayload    []byte
+	starting                bool
+	closed                  bool
+	monitorStopCh           chan struct{}
+	monitorDoneCh           chan struct{}
+	offlineStatusCache      []byte
+	offlineStatusCacheKey   string
+	onlineStatusCache       []byte
+	onlineStatusCacheKey    string
+	offlineEndedStatusCache []byte
+	offlineEndedStatusKey   string
 }
 
 // NewRoom 创建一个新的房间实例
@@ -266,22 +268,7 @@ func (r *Room) getLiveNamePayload(liveName string) []byte {
 	return payload
 }
 
-func (r *Room) liveStatusMessage(live bool) []byte {
-	if live {
-		key := r.id
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		if r.onlineStatusCacheKey == key && len(r.onlineStatusCache) > 0 {
-			return r.onlineStatusCache
-		}
-
-		payload := []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":true,"room_id":%s,"message":"直播间已开播"}`,
-			strconv.Quote(r.id)))
-		r.onlineStatusCacheKey = key
-		r.onlineStatusCache = payload
-		return payload
-	}
-
+func (r *Room) offlineStatusMessage() []byte {
 	key := fmt.Sprintf("%s|%s", r.id, r.notifyInterval)
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -296,16 +283,42 @@ func (r *Room) liveStatusMessage(live bool) []byte {
 	return payload
 }
 
-func (r *Room) offlineStatusMessage() []byte {
-	return r.liveStatusMessage(false)
+func (r *Room) offlineEndedStatusMessage() []byte {
+	key := fmt.Sprintf("%s|%s", r.id, r.notifyInterval)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.offlineEndedStatusKey == key && len(r.offlineEndedStatusCache) > 0 {
+		return r.offlineEndedStatusCache
+	}
+
+	payload := []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":false,"room_id":%s,"message":"直播间已下播","ended":true,"retry_interval_seconds":%d}`,
+		strconv.Quote(r.id), int(r.notifyInterval/time.Second)))
+	r.offlineEndedStatusKey = key
+	r.offlineEndedStatusCache = payload
+	return payload
 }
 
 func (r *Room) onlineStatusMessage() []byte {
-	return r.liveStatusMessage(true)
+	key := r.id
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.onlineStatusCacheKey == key && len(r.onlineStatusCache) > 0 {
+		return r.onlineStatusCache
+	}
+
+	payload := []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":true,"room_id":%s,"message":"直播间已开播"}`,
+		strconv.Quote(r.id)))
+	r.onlineStatusCacheKey = key
+	r.onlineStatusCache = payload
+	return payload
 }
 
 func (r *Room) notifyOfflineStatus() {
 	r.Broadcast(r.offlineStatusMessage())
+}
+
+func (r *Room) notifyOfflineEndedStatus() {
+	r.Broadcast(r.offlineEndedStatusMessage())
 }
 
 func (r *Room) notifyOnlineStatus() {
@@ -565,7 +578,7 @@ func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 		return
 	}
 
-	r.notifyOfflineStatus()
+	r.notifyOfflineEndedStatus()
 	if !monitorRunning {
 		r.logger.Printf("房间 %s 直播连接已结束，切回未开播监控模式", r.id)
 		r.startMonitorLoop()

@@ -326,7 +326,13 @@ ws.onmessage = (event) => {
   console.log('收到消息:', data);
 
   if (data.event === 'live_status') {
-    console.log(`状态通知: ${data.message}，${data.retry_interval_seconds} 秒后重试`);
+    if (data.live) {
+      console.log('状态通知: 直播间已开播');
+    } else if (data.ended) {
+      console.log(`状态通知: ${data.message}，后续会继续按 ${data.retry_interval_seconds} 秒轮询`);
+    } else {
+      console.log(`状态通知: ${data.message}，${data.retry_interval_seconds} 秒后重试`);
+    }
     return;
   }
 
@@ -381,6 +387,12 @@ setInterval(() => {
 
 ```json
 {"type":"system","event":"live_status","live":true,"room_id":"516466932480","message":"直播间已开播"}
+```
+
+如果直播过程中下播，也会先返回一条状态消息：
+
+```json
+{"type":"system","event":"live_status","live":false,"room_id":"516466932480","message":"直播间已下播","ended":true,"retry_interval_seconds":30}
 ```
 
 ---

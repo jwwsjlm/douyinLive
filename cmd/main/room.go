@@ -17,16 +17,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const (
-	clientSendQueueSize    = 256
-	liveStatusPollInterval = 15 * time.Second
-)
+const clientSendQueueSize = 256
 
 var (
 	pongMessage              = []byte("pong")
 	serviceClosingMessage    = []byte(`{"type":"system","message":"服务正在关闭"}`)
 	liveInvalidMessage       = []byte(`{"type":"system","message":"直播间未开播或ID无效"}`)
-	liveNotStartedMessage    = []byte(`{"type":"system","message":"直播间未开播"}`)
 	slowClientClosingMessage = []byte(`{"type":"system","message":"客户端消费过慢，连接已关闭"}`)
 
 	errRoomInactive = errors.New("房间已关闭或无客户端")
@@ -34,21 +30,25 @@ var (
 
 // RoomManager 管理所有直播间实例
 type RoomManager struct {
-	rooms   map[string]*Room
-	roomsMu sync.RWMutex
-	logger  *log.Logger
-	unknown bool
-	cookie  string // 抖音 Cookie
+	rooms          map[string]*Room
+	roomsMu        sync.RWMutex
+	logger         *log.Logger
+	unknown        bool
+	cookie         string // 抖音 Cookie
+	pollInterval   time.Duration
+	notifyInterval time.Duration
 }
 
 // NewRoomManager 创建一个新的 RoomManager
 // cookie 参数：可选的抖音 Cookie
-func NewRoomManager(logger *log.Logger, unknown bool, cookie string) *RoomManager {
+func NewRoomManager(logger *log.Logger, unknown bool, cookie string, pollInterval time.Duration, notifyInterval time.Duration) *RoomManager {
 	return &RoomManager{
-		rooms:   make(map[string]*Room),
-		logger:  logger,
-		unknown: unknown,
-		cookie:  cookie,
+		rooms:          make(map[string]*Room),
+		logger:         logger,
+		unknown:        unknown,
+		cookie:         cookie,
+		pollInterval:   pollInterval,
+		notifyInterval: notifyInterval,
 	}
 }
 
@@ -67,7 +67,7 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string) *Room {
 		return room
 	}
 
-	room = NewRoom(roomID, rm.logger, rm.unknown, rm.cookie, func() {
+	room = NewRoom(roomID, rm.logger, rm.unknown, rm.cookie, rm.pollInterval, rm.notifyInterval, func() {
 		rm.roomsMu.Lock()
 		delete(rm.rooms, roomID)
 		rm.roomsMu.Unlock()
@@ -165,6 +165,8 @@ type Room struct {
 	onClose              func()
 	unknown              bool
 	cookie               string
+	pollInterval         time.Duration
+	notifyInterval       time.Duration
 	liveNameCacheMu      sync.RWMutex
 	liveNameCacheKey     string
 	liveNameCachePayload []byte
@@ -172,18 +174,22 @@ type Room struct {
 	closed               bool
 	monitorStopCh        chan struct{}
 	monitorDoneCh        chan struct{}
+	statusMessageCache   []byte
+	statusMessageKey     string
 }
 
 // NewRoom 创建一个新的房间实例
 // cookie 参数：可选的抖音 Cookie
-func NewRoom(id string, logger *log.Logger, unknown bool, cookie string, onClose func()) *Room {
+func NewRoom(id string, logger *log.Logger, unknown bool, cookie string, pollInterval time.Duration, notifyInterval time.Duration, onClose func()) *Room {
 	return &Room{
-		id:      id,
-		logger:  logger,
-		clients: make(map[string]*Client),
-		onClose: onClose,
-		unknown: unknown,
-		cookie:  cookie,
+		id:             id,
+		logger:         logger,
+		clients:        make(map[string]*Client),
+		onClose:        onClose,
+		unknown:        unknown,
+		cookie:         cookie,
+		pollInterval:   pollInterval,
+		notifyInterval: notifyInterval,
 	}
 }
 
@@ -258,6 +264,26 @@ func (r *Room) getLiveNamePayload(liveName string) []byte {
 	return payload
 }
 
+func (r *Room) offlineStatusMessage() []byte {
+	key := fmt.Sprintf("%s|%s", r.id, r.notifyInterval)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.statusMessageKey == key && len(r.statusMessageCache) > 0 {
+		return r.statusMessageCache
+	}
+
+	payload := []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":false,"room_id":%s,"message":"直播间未开播","retry_interval_seconds":%d}`,
+		strconv.Quote(r.id), int(r.notifyInterval/time.Second)))
+	r.statusMessageKey = key
+	r.statusMessageCache = payload
+	return payload
+}
+
+func (r *Room) notifyOfflineStatus() {
+	r.Broadcast(r.offlineStatusMessage())
+}
+
 // AddClient 将一个客户端添加到房间
 func (r *Room) AddClient(socket *gws.Conn) {
 	clientID := socket.RemoteAddr().String()
@@ -279,7 +305,7 @@ func (r *Room) AddClient(socket *gws.Conn) {
 		return
 	case r.monitorStopCh != nil:
 		r.mu.Unlock()
-		r.sendToClient(clientID, gws.OpcodeText, liveNotStartedMessage)
+		r.sendToClient(clientID, gws.OpcodeText, r.offlineStatusMessage())
 		return
 	case r.starting:
 		r.mu.Unlock()
@@ -304,7 +330,7 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	}
 	if errors.Is(err, douyinLive.ErrLiveNotStarted) {
 		r.logger.Printf("房间 %s 当前未开播，进入后台轮询监控", r.id)
-		r.Broadcast(liveNotStartedMessage)
+		r.notifyOfflineStatus()
 		r.startMonitorLoop()
 		return
 	}
@@ -373,6 +399,8 @@ func (r *Room) startMonitorLoop() {
 	doneCh := make(chan struct{})
 	r.monitorStopCh = stopCh
 	r.monitorDoneCh = doneCh
+	pollInterval := r.pollInterval
+	notifyInterval := r.notifyInterval
 	r.mu.Unlock()
 
 	go func() {
@@ -386,28 +414,34 @@ func (r *Room) startMonitorLoop() {
 			r.mu.Unlock()
 		}()
 
-		ticker := time.NewTicker(liveStatusPollInterval)
-		defer ticker.Stop()
+		pollTicker := time.NewTicker(pollInterval)
+		defer pollTicker.Stop()
+		notifyTicker := time.NewTicker(notifyInterval)
+		defer notifyTicker.Stop()
 
 		for {
 			select {
 			case <-stopCh:
 				return
-			default:
-			}
+			case <-notifyTicker.C:
+				if r.clientCount() == 0 {
+					return
+				}
+				r.notifyOfflineStatus()
+			case <-pollTicker.C:
+				if r.clientCount() == 0 {
+					return
+				}
 
-			if r.clientCount() == 0 {
-				return
-			}
-
-			r.mu.Lock()
-			if r.closed || r.douyinLive != nil {
-				r.mu.Unlock()
-				return
-			}
-			if r.starting {
-				r.mu.Unlock()
-			} else {
+				r.mu.Lock()
+				if r.closed || r.douyinLive != nil {
+					r.mu.Unlock()
+					return
+				}
+				if r.starting {
+					r.mu.Unlock()
+					continue
+				}
 				r.starting = true
 				r.mu.Unlock()
 
@@ -427,12 +461,6 @@ func (r *Room) startMonitorLoop() {
 				default:
 					r.logger.Printf("房间 %s 检查直播状态失败，将继续轮询: %v", r.id, err)
 				}
-			}
-
-			select {
-			case <-stopCh:
-				return
-			case <-ticker.C:
 			}
 		}
 	}()
@@ -507,7 +535,7 @@ func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 		return
 	}
 
-	r.Broadcast(liveNotStartedMessage)
+	r.notifyOfflineStatus()
 	if !monitorRunning {
 		r.logger.Printf("房间 %s 直播连接已结束，切回未开播监控模式", r.id)
 		r.startMonitorLoop()

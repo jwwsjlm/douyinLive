@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
-	"strings"
 )
 
 // CookieConfig 存储 Cookie 配置
@@ -16,11 +17,18 @@ type CookieConfig struct {
 	Douyin string // 抖音 Cookie
 }
 
+// MonitorConfig 存储未开播监控相关配置
+type MonitorConfig struct {
+	PollInterval   time.Duration
+	NotifyInterval time.Duration
+}
+
 // Config 存储应用的所有配置
 type Config struct {
 	Port    string
 	Unknown bool
 	Cookie  CookieConfig
+	Monitor MonitorConfig
 }
 
 // NewConfig 创建并加载应用配置
@@ -64,6 +72,8 @@ func NewConfig() (*Config, error) {
 	viper.SetDefault("port", "1088")
 	viper.SetDefault("unknown", false)
 	viper.SetDefault("cookie.douyin", "")
+	viper.SetDefault("monitor.poll_interval", "15s")
+	viper.SetDefault("monitor.notify_interval", "30s")
 
 	// 读取配置
 	if err := viper.ReadInConfig(); err != nil {
@@ -78,12 +88,32 @@ func NewConfig() (*Config, error) {
 		fmt.Printf("✅ 使用配置文件：%s\n", viper.ConfigFileUsed())
 	}
 
+	pollInterval, err := time.ParseDuration(viper.GetString("monitor.poll_interval"))
+	if err != nil {
+		return nil, fmt.Errorf("monitor.poll_interval 配置无效：%w", err)
+	}
+	if pollInterval <= 0 {
+		return nil, fmt.Errorf("monitor.poll_interval 必须大于 0")
+	}
+
+	notifyInterval, err := time.ParseDuration(viper.GetString("monitor.notify_interval"))
+	if err != nil {
+		return nil, fmt.Errorf("monitor.notify_interval 配置无效：%w", err)
+	}
+	if notifyInterval <= 0 {
+		return nil, fmt.Errorf("monitor.notify_interval 必须大于 0")
+	}
+
 	// 填充 Config 结构体
 	cfg := &Config{
 		Port:    viper.GetString("port"),
 		Unknown: viper.GetBool("unknown"),
 		Cookie: CookieConfig{
 			Douyin: viper.GetString("cookie.douyin"),
+		},
+		Monitor: MonitorConfig{
+			PollInterval:   pollInterval,
+			NotifyInterval: notifyInterval,
 		},
 	}
 

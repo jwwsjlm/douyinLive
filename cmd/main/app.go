@@ -25,7 +25,7 @@ type App struct {
 // NewApp 创建并返回一个新的 App 实例
 func NewApp(ctx context.Context, config *Config, logger *log.Logger) (*App, error) {
 
-	roomManager := NewRoomManager(logger, config.Unknown, config.Cookie.Douyin)
+	roomManager := NewRoomManager(logger, config.Unknown, config.Cookie.Douyin, config.Monitor.PollInterval, config.Monitor.NotifyInterval)
 	return &App{
 		ctx:         ctx,
 		logger:      logger,

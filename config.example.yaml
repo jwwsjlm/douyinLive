@@ -7,6 +7,13 @@ port: "1088"
 # 是否输出未知消息类型（调试用）
 unknown: false
 
+# 未开播监控配置
+monitor:
+  # 检查是否开播的时间间隔
+  poll_interval: "15s"
+  # 未开播期间，向本地 WebSocket 客户端重复推送状态通知的时间间隔
+  notify_interval: "30s"
+
 # Cookie 配置（可选，不配置则自动获取）
 cookie:
   # 抖音 Cookie（可选，用于需要登录态的请求）

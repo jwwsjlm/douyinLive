@@ -156,7 +156,14 @@ https://live.douyin.com/xxxxx
 - `https://live.douyin.com/516466932480`
   - 则连接：`ws://127.0.0.1:1088/ws/516466932480`
 
-如果你传的是无效标识，或者直播间未开播，服务端会关闭这个连接。
+如果你传的是无效标识，服务端会关闭这个连接。
+
+如果直播间暂时未开播：
+
+- 本地 WebSocket 连接会保留
+- 服务端会先返回一条“直播间未开播”的状态通知
+- 然后按配置的时间间隔持续推送未开播状态
+- 一旦检测到开播，就自动切回正常消息流
 
 ---
 
@@ -203,6 +210,9 @@ https://live.douyin.com/xxxxx
 ```yaml
 port: "1088"
 unknown: false
+monitor:
+  poll_interval: "15s"
+  notify_interval: "30s"
 cookie:
   douyin: ""
 ```
@@ -229,6 +239,32 @@ port: "1088"
 
 ```yaml
 unknown: false
+```
+
+#### `monitor.poll_interval`
+未开播时，服务端检查“是否已经开播”的时间间隔。
+
+默认值：
+
+```yaml
+monitor:
+  poll_interval: "15s"
+```
+
+#### `monitor.notify_interval`
+未开播时，服务端向本地 WebSocket 客户端重复推送状态通知的时间间隔。
+
+默认值：
+
+```yaml
+monitor:
+  notify_interval: "30s"
+```
+
+客户端会收到类似：
+
+```json
+{"type":"system","event":"live_status","live":false,"room_id":"516466932480","message":"直播间未开播","retry_interval_seconds":30}
 ```
 
 #### `cookie.douyin`
@@ -289,6 +325,11 @@ ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
   console.log('收到消息:', data);
 
+  if (data.event === 'live_status') {
+    console.log(`状态通知: ${data.message}，${data.retry_interval_seconds} 秒后重试`);
+    return;
+  }
+
   switch (data.method) {
     case 'WebcastChatMessage':
       console.log(`弹幕: ${data.user.nickname} - ${data.content}`);
@@ -330,101 +371,11 @@ setInterval(() => {
 
 - `livename`：直播间名称
 
----
+如果直播间还没开播，则会返回系统状态消息，例如：
 
-## 支持的消息类型
-
-目前常见的包括：
-
-- `WebcastChatMessage`：弹幕消息
-- `WebcastGiftMessage`：礼物消息
-- `WebcastLikeMessage`：点赞消息
-- `WebcastMemberMessage`：进场消息
-- `WebcastSocialMessage`：关注消息
-- `WebcastFansclubMessage`：粉丝团消息
-- `WebcastControlMessage`：开播 / 下播控制消息
-- `WebcastEmojiChatMessage`：表情弹幕
-- `WebcastRoomStatsMessage`：直播间统计
-- `WebcastRoomUserSeqMessage`：在线观众序列
-- `WebcastRankMessage`：排行相关消息
-
-项目会持续补充更多类型。
-
----
-
-## 作为 Go 库使用
-
-如果你不想跑本地 WebSocket 服务，也可以直接把它当库引入。
-
-```go
-package main
-
-import (
-	"fmt"
-	"log"
-
-	douyinLive "github.com/jwwsjlm/douyinLive"
-	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
-)
-
-func main() {
-	dl, err := douyinLive.NewDouyinLive("516466932480", log.Default(), "")
-	if err != nil {
-		panic(err)
-	}
-
-	dl.Subscribe(func(event *new_douyin.Webcast_Im_Message) {
-		fmt.Printf("method=%s payload_len=%d\n", event.Method, len(event.Payload))
-	})
-
-	go dl.Start()
-
-	select {}
-}
+```json
+{"type":"system","event":"live_status","live":false,"room_id":"516466932480","message":"直播间未开播","retry_interval_seconds":30}
 ```
-
-第三个参数是 Cookie：
-
-- 不需要时传 `""`
-- 需要登录态时传完整 Cookie 字符串
-
----
-
-## 常见问题
-
-### 1）程序启动了，但连接直播间失败
-先检查：
-
-- 直播间是否真的开播
-- `/ws/后面的标识` 是否正确
-- 是否需要补 Cookie
-
-### 2）没有配置文件能不能跑
-可以。
-
-没有 `config.yaml` 时，会使用默认配置。
-
-### 3）端口被占用了怎么办
-程序会从你指定端口开始往后找可用端口。
-
-例如你设置了 `1088`，如果被占用，程序可能实际监听到 `1089`、`1090` 等端口。
-
-以程序日志输出为准。
-
-### 4）为什么客户端发 `ping` 会收到 `pong`
-这是本地 WebSocket 服务做的简单心跳响应，用来方便前端检测连接是否还活着。
-
-### 5）这个项目稳不稳
-这个项目最近做过一轮重连、关闭流程、保活方面的优化，但抖音侧接口和风控本身会变化，所以稳定性仍然会受：
-
-- 直播间类型
-- Cookie 状态
-- 风控策略
-- 抖音页面 / 参数变化
-
-影响。
-
-如果你遇到特定房间更容易掉线，欢迎提 issue。
 
 ---
 

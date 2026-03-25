@@ -6,15 +6,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	utls "github.com/refraction-networking/utls"
 	"github.com/tidwall/gjson"
 
 	"github.com/avast/retry-go"
@@ -51,6 +52,16 @@ const (
 		"&im_path=/webcast/im/fetch/&identity=audience&need_persist_msg_count=15" +
 		"&insert_task_id=&live_reason=&room_id=%s&heartbeatDuration=0&signature=%s"
 )
+
+// 常用的 TLS 指纹字典，随机选择一个用于混淆
+// 参考了常见浏览器 JA3 指纹，降低被风控识别的概率
+var tlsFingerprints = []string{
+	"771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43-21,23-24,0",
+	"771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43,23-24,0",
+	"769,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43,23-24,0",
+	"771,4865-4866-4867-49195-49199-49196-49200-52393-49161-49162-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-51-45-43,23-24,0",
+	"771,4865-4866-4867-49195-49199-49196-49200-49161-49162-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-13-18-21,23-24,0",
+}
 
 var (
 	roomIDRegex     = regexp.MustCompile(`roomId\\":\\"(\d+)\\"`)
@@ -102,14 +113,77 @@ type EventHandler struct {
 	Handler func(*new_douyin.Webcast_Im_Message)
 }
 
+// utlsDialer 实现 req.Dialer 接口，使用随机 TLS JA3 指纹
+type utlsDialer struct{}
+
+// DialContext implements req.Dialer interface
+func (d *utlsDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if network != "tcp" {
+		// 非 TCP 连接走默认
+		dialer := &net.Dialer{
+			Timeout:   websocketConnectTimeout,
+			KeepAlive: 30 * time.Second,
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
+
+	// 分割主机和端口
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	// 标准 dialer 创建 TCP 连接
+	dialer := &net.Dialer{
+		Timeout:   websocketConnectTimeout,
+		KeepAlive: 30 * time.Second,
+	}
+	plainConn, err := dialer.DialContext(ctx, network, addr)
+	if err != nil {
+		return nil, err
+	}
+
+	// 随机选择一个内置浏览器指纹对抗风控
+	// 使用 uTLS 官方预定义的指纹，兼容性更好
+	var clientHelloId utls.ClientHelloID
+	switch rand.Intn(3) {
+	case 0:
+		clientHelloId = utls.HelloChrome_Auto
+	case 1:
+		clientHelloId = utls.HelloChrome_83
+	case 2:
+		clientHelloId = utls.HelloFirefox_Auto
+	}
+
+	// 使用 uTLS 建立 TLS 连接，使用随机选择的浏览器指纹
+	utlsConn := utls.UClient(plainConn, &utls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         host,
+	}, clientHelloId)
+
+	// 完成握手
+	if err := utlsConn.Handshake(); err != nil {
+		_ = plainConn.Close()
+		return nil, err
+	}
+
+	return utlsConn, nil
+}
+
 // NewDouyinLive 创建一个新的 DouyinLive 实例
 // cookie 参数：可选的手动传入 Cookie，用于需要登录态的请求
 func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, error) {
 	userAgent := utils.RandomUserAgent()
+
+	// 创建 HTTP 客户端，使用 uTLS 随机 TLS 指纹来对抗风控
+	client := req.C().SetUserAgent(userAgent)
+	// 设置自定义 DialContext 使用 uTLS 进行 TLS 指纹随机化
+	client.SetDial((&utlsDialer{}).DialContext)
+
 	dl := &DouyinLive{
 		liveID:    liveID,
 		userAgent: userAgent,
-		client:    req.C().SetUserAgent(userAgent),
+		client:    client,
 		bufferPool: &sync.Pool{
 			New: func() interface{} {
 				return bytes.NewBuffer(make([]byte, 0, gzipBufferSize))

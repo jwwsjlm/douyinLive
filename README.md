@@ -308,9 +308,121 @@ cookie:
 
 ---
 
-## 客户端怎么接
+## 作为 Go 库集成使用
 
-你的客户端只需要连本地 WebSocket 服务即可。
+你也可以直接把 `douyinLive` 作为 Go 库集成到你自己的项目中。
+
+### 安装
+
+```bash
+go get github.com/jwwsjlm/douyinLive/v2
+```
+
+### 最简使用示例
+
+```go
+package main
+
+import (
+	"log"
+
+	douyinlive "github.com/jwwsjlm/douyinLive/v2"
+	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
+)
+
+func main() {
+	// 直播间ID，从 https://live.douyin.com/xxxx 获取
+	roomID := "516466932480"
+	// 可选 Cookie，如果需要登录态可以传入，留空表示不使用
+	cookie := ""
+
+	// 创建实例
+	dl, err := douyinlive.NewDouyinLive(roomID, log.Default(), cookie)
+	if err != nil {
+		log.Fatalf("创建失败: %v", err)
+		return
+	}
+
+	// 订阅事件，所有抖音消息都会通过这个回调推送过来
+	dl.Subscribe(func(msg *new_douyin.Webcast_Im_Message) {
+		// 根据 msg.Method 判断消息类型，然后反序列化处理
+		log.Printf("收到消息 method=%s payload_len=%d\n", msg.Method, len(msg.Payload))
+		// 你可以在这里根据不同消息类型做相应处理
+	})
+
+	// 启动监听，会阻塞直到连接关闭
+	dl.Start()
+}
+```
+
+### 处理具体消息类型示例
+
+```go
+package main
+
+import (
+	"log"
+
+	douyinlive "github.com/jwwsjlm/douyinLive/v2"
+	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
+	"github.com/jwwsjlm/douyinLive/v2/generated/douyin"
+	"google.golang.org/protobuf/proto"
+)
+
+func main() {
+	roomID := "516466932480"
+	dl, err := douyinlive.NewDouyinLive(roomID, log.Default(), "")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	dl.Subscribe(func(msg *new_douyin.Webcast_Im_Message) {
+		switch msg.Method {
+		case "WebcastChatMessage":
+			chat := &douyin.WebcastChatMessage{}
+			if err := proto.Unmarshal(msg.Payload, chat); err != nil {
+				log.Println(err)
+				return
+			}
+			// chat.Content 就是弹幕内容
+			// chat.User 就是发送用户信息
+			if chat.GetContent() != "" && chat.GetUser() != nil {
+				log.Printf("弹幕 [%s]: %s\n", chat.User.GetNickname(), chat.GetContent())
+			}
+
+		case "WebcastGiftMessage":
+			gift := &douyin.WebcastGiftMessage{}
+			if err := proto.Unmarshal(msg.Payload, gift); err != nil {
+				log.Println(err)
+				return
+			}
+			log.Printf("礼物: %s 赠送了 %s x%d\n",
+				gift.GetUser().GetNickname(),
+				gift.GetGift().GetName(),
+				gift.GetGiftCount(),
+			)
+
+		case "WebcastLikeMessage":
+			like := &douyin.WebcastLikeMessage{}
+			if err := proto.Unmarshal(msg.Payload, like); err != nil {
+				log.Println(err)
+				return
+			}
+			log.Printf("%s 点赞了直播间\n", like.GetUser().GetNickname())
+		}
+	})
+
+	dl.Start()
+}
+```
+
+更多消息类型可以参考 `generated/douyin` 包下的 protobuf 生成代码。
+
+---
+
+## 客户端怎么接（独立服务模式）
+
+如果你直接运行独立服务，你的客户端只需要连本地 WebSocket 服务即可。
 
 ### JavaScript 示例
 

@@ -20,19 +20,20 @@ import (
 	"github.com/avast/retry-go"
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
-	"github.com/jwwsjlm/douyinLive/generated/douyin"
-	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
-	"github.com/jwwsjlm/douyinLive/jsScript"
-	"github.com/jwwsjlm/douyinLive/sign"
+	"github.com/jwwsjlm/douyinLive/v2/generated/douyin"
+	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
+	"github.com/jwwsjlm/douyinLive/v2/jsScript"
+	"github.com/jwwsjlm/douyinLive/v2/sign"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/jwwsjlm/douyinLive/utils"
+	"github.com/jwwsjlm/douyinLive/v2/utils"
 )
 
 const (
 	defaultMaxRetries       = 5
 	websocketConnectTimeout = 10 * time.Second
 	baseReconnectDelay      = 1500 * time.Millisecond
+	maxReconnectDelay       = 60 * time.Second
 	maxReconnectJitter      = 1200 * time.Millisecond
 	minUAChangeInterval     = 8 * time.Second
 	gzipBufferSize          = 1024 * 4
@@ -763,7 +764,18 @@ func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 }
 
 func (dl *DouyinLive) reconnectPlan(reason string, failureCount int, baseDelay time.Duration, allowUARefresh bool) (delay time.Duration, changeUA bool, rebuildHTTP bool) {
+	// 指数退避：delay = baseDelay * 2^(failureCount-1)
+	// 失败次数越多，等待时间越长，避免频繁重试触发风控
 	delay = baseDelay
+	if failureCount > 1 {
+		expDelay := baseDelay * (1 << (failureCount - 1))
+		if expDelay > maxReconnectDelay {
+			delay = maxReconnectDelay
+		} else {
+			delay = expDelay
+		}
+	}
+
 	changeUA = false
 	rebuildHTTP = false
 
@@ -777,24 +789,31 @@ func (dl *DouyinLive) reconnectPlan(reason string, failureCount int, baseDelay t
 	default:
 		changeUA = allowUARefresh
 		rebuildHTTP = true
-		delay += 2 * time.Second
 	}
 
 	switch reason {
 	case "try_again_later_1013":
-		delay = 5 * time.Second
+		delay = max(delay, 5 * time.Second)
 		changeUA = true
 	case "service_restart_1012":
-		delay = 3 * time.Second
+		delay = max(delay, 3 * time.Second)
 	case "going_away_1001":
-		delay = 2 * time.Second
+		delay = max(delay, 2 * time.Second)
 	case "risk_control_page":
-		delay = 6 * time.Second
+		delay = max(delay, 6 * time.Second)
 		changeUA = true
 		rebuildHTTP = true
 	}
 
 	return delay, changeUA, rebuildHTTP
+}
+
+// max 是 time.Duration 版本的 max 函数
+func max(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // reconnectDecision 描述重连策略

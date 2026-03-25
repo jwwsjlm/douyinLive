@@ -1,5 +1,6 @@
 # Binaries
 /main
+douyinLive
 *.exe
 *.zip
 *.7z
@@ -9,13 +10,27 @@
 .idea
 .vscode
 /.vscode
+*.swp
+*.swo
+*~
+.DS_Store
 
 # Build
 /build/
+/dist/
+/release/
 /cmd/main/build-*
 
 # Protobuf
 /protobuf/*.zip
 
 # Config
-/config.yaml
+config.yaml
+config*.local.yaml
+
+# Logs
+*.log
+
+# Go
+*.test
+*.out

@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jwwsjlm/douyinLive"
-	"github.com/jwwsjlm/douyinLive/generated"
-	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
+	"github.com/jwwsjlm/douyinLive/v2"
+	"github.com/jwwsjlm/douyinLive/v2/generated"
+	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 	"github.com/lxzan/gws"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"

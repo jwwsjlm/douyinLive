@@ -12,7 +12,7 @@ import (
 
 	"github.com/elliotchance/orderedmap"
 	"github.com/google/uuid"
-	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
+	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 )
 
 // HasGzipEncoding 判断消息头中是否包含gzip编码

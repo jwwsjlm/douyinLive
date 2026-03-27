@@ -575,9 +575,7 @@ func (dl *DouyinLive) buildWebsocketURL() string {
 	}
 	parsedBrowser := strings.ReplaceAll(browserInfo, " ", "%20")
 
-	// 使用纯算 a_bogus 签名
-	//params := fmt.Sprintf("aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&web_rid=%s", dl.roomID)
-	//signature := sign.AbSign(params, dl.userAgent)
+	// 使用嵌入的 JavaScript 计算 a_bogus 签名
 	signature := jsScript.ExecuteJS(utils.GetxMSStub(
 		utils.NewOrderedMap(dl.roomID, dl.pushID),
 	))

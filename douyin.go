@@ -10,7 +10,6 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -53,13 +52,7 @@ const (
 )
 
 var (
-	roomIDRegex     = regexp.MustCompile(`roomId\\":\\"(\d+)\\"`)
-	pushIDRegex     = regexp.MustCompile(`user_unique_id\\":\\"(\d+)\\"`)
-	isLiveRegex     = regexp.MustCompile(`id_str\\":\\"(\d+)\\",\\"status\\":(\d+),\\"status_str\\":\\"(\d+)\\",\\"title\\":\\"(.*?)\\",\\"user_count_str\\":\\"(.*?)\\"`)
-	anchorInfoRegex = regexp.MustCompile(`data-anchor-info="([\s\S]*?)" data-room-info="`)
-
-	ErrRiskControlPage = errors.New("检测到页面风控或验证")
-	ErrLiveNotStarted  = errors.New("直播间未开播")
+	ErrLiveNotStarted = errors.New("直播间未开播")
 )
 
 // DouyinLive 结构体定义
@@ -220,23 +213,6 @@ func (dl *DouyinLive) getConsecutiveFailures() int {
 	return dl.consecutiveFailures
 }
 
-func (dl *DouyinLive) isRiskControlContent(content string) bool {
-	markers := []string{
-		"验证后继续访问",
-		"请输入验证码",
-		"访问过于频繁",
-		"网络环境存在风险",
-		"风险提示",
-	}
-	lower := strings.ToLower(content)
-	for _, marker := range markers {
-		if strings.Contains(lower, strings.ToLower(marker)) {
-			return true
-		}
-	}
-	return false
-}
-
 // initialize 初始化 DouyinLive 实例
 func (dl *DouyinLive) initialize() error {
 	if err := dl.fetchTTWID(); err != nil {
@@ -357,62 +333,80 @@ func (dl *DouyinLive) fetchTTWID() error {
 	return nil
 }
 
+// fetchRoomEnterData 获取直播间接口数据（对齐 DouyinLiveRecorder 的 web/enter 逻辑）
+func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
+	params := fmt.Sprintf(
+		"aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=141.0.0.0&web_rid=%s&msToken=",
+		dl.liveID,
+	)
+	aBogus := sign.AbSign(params, dl.userAgent)
+	url := fmt.Sprintf("https://live.douyin.com/webcast/room/web/enter/?%s&a_bogus=%s", params, aBogus)
+
+	resp, err := dl.client.R().
+		SetCookies(dl.getCookies()...).
+		SetHeader("User-Agent", dl.userAgent).
+		SetHeader("Referer", fmt.Sprintf("https://live.douyin.com/%s", dl.liveID)).
+		Get(url)
+	if err != nil {
+		return "", fmt.Errorf("请求直播间信息失败: %w", err)
+	}
+
+	body := resp.String()
+	dl.lastPageContent = body
+	if body == "" {
+		return "", errors.New("直播间信息响应为空")
+	}
+	if statusCode := gjson.Get(body, "status_code").Int(); statusCode != 0 {
+		return "", fmt.Errorf("直播间信息接口返回异常 status_code=%d", statusCode)
+	}
+	if !gjson.Get(body, "data.data.0").Exists() {
+		return "", errors.New("直播间信息缺少房间数据")
+	}
+	return body, nil
+}
+
 // fetchRoomInfo 获取房间信息
 func (dl *DouyinLive) fetchRoomInfo() error {
-	body, err := dl.getPageContent()
+	body, err := dl.fetchRoomEnterData()
 	if err != nil {
 		return err
 	}
 
-	dl.roomID = extractString(roomIDRegex, body, 1)
-	dl.pushID = extractString(pushIDRegex, body, 1)
-	name := extractString(anchorInfoRegex, body, 1)
-	cleanJSON := strings.ReplaceAll(name, `&quot;`, `"`)
-	result := gjson.Get(cleanJSON, "nickname")
-	dl.LiveName = result.String()
-	if dl.roomID == "" || dl.pushID == "" {
+	roomID := gjson.Get(body, "data.data.0.id_str").String()
+	if roomID == "" {
+		roomID = gjson.Get(body, "data.enter_room_id").String()
+	}
+
+	pushID := gjson.Get(body, "data.user.id_str").String()
+	if pushID == "" {
+		pushID = gjson.Get(body, "data.data.0.owner_user_id_str").String()
+	}
+
+	liveName := gjson.Get(body, "data.user.nickname").String()
+	if liveName == "" {
+		liveName = gjson.Get(body, "data.data.0.owner.nickname").String()
+	}
+
+	if roomID == "" || pushID == "" {
 		return errors.New("无法提取房间信息")
 	}
+
+	dl.roomID = roomID
+	dl.pushID = pushID
+	dl.LiveName = liveName
 	return nil
-}
-
-// getPageContent 获取直播间页面内容
-func (dl *DouyinLive) getPageContent() (string, error) {
-	resp, err := dl.client.R().
-		SetCookies(dl.getCookies()...).
-		Get(fmt.Sprintf("https://live.douyin.com/%s", dl.liveID))
-
-	if err != nil {
-		return "", fmt.Errorf("请求直播间页面失败: %w", err)
-	}
-
-	content := resp.String()
-	dl.lastPageContent = content
-	if dl.isRiskControlContent(content) {
-		return content, ErrRiskControlPage
-	}
-	return content, nil
 }
 
 // IsLive 检查直播间是否开播
 func (dl *DouyinLive) IsLive() bool {
-	content, err := dl.getPageContent()
+	body, err := dl.fetchRoomEnterData()
 	if err != nil {
-		if errors.Is(err, ErrRiskControlPage) {
-			dl.logger.Println("检测到页面风控或验证页，暂不判定为正常开播")
-		}
 		dl.setLiveStatus(false)
 		return false
 	}
 
-	matches := isLiveRegex.FindStringSubmatch(content)
-	if len(matches) < 3 {
-		dl.setLiveStatus(false)
-		return false
-	}
-
-	status := matches[2]
-	dl.setLiveStatus(status == "2")
+	status := gjson.Get(body, "data.data.0.status").Int()
+	dl.setLiveStatus(status == 2)
 	return dl.isLiveStatus()
 }
 
@@ -793,16 +787,12 @@ func (dl *DouyinLive) reconnectPlan(reason string, failureCount int, baseDelay t
 
 	switch reason {
 	case "try_again_later_1013":
-		delay = max(delay, 5 * time.Second)
+		delay = max(delay, 5*time.Second)
 		changeUA = true
 	case "service_restart_1012":
-		delay = max(delay, 3 * time.Second)
+		delay = max(delay, 3*time.Second)
 	case "going_away_1001":
-		delay = max(delay, 2 * time.Second)
-	case "risk_control_page":
-		delay = max(delay, 6 * time.Second)
-		changeUA = true
-		rebuildHTTP = true
+		delay = max(delay, 2*time.Second)
 	}
 
 	return delay, changeUA, rebuildHTTP
@@ -824,10 +814,6 @@ func (dl *DouyinLive) reconnectDecision(err error) (reason string, shouldRetry b
 
 	if errors.Is(err, websocket.ErrCloseSent) {
 		return "close_sent", false, 0, false
-	}
-
-	if errors.Is(err, ErrRiskControlPage) {
-		return "risk_control_page", true, 6 * time.Second, true
 	}
 
 	var closeErr *websocket.CloseError
@@ -1006,12 +992,4 @@ func (dl *DouyinLive) Unsubscribe(id string) {
 			break
 		}
 	}
-}
-
-// extractString 辅助函数，从正则匹配中提取字符串
-func extractString(re *regexp.Regexp, s string, index int) string {
-	if matches := re.FindStringSubmatch(s); len(matches) > index {
-		return matches[index]
-	}
-	return ""
 }

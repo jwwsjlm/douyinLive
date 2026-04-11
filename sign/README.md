@@ -293,8 +293,8 @@ func (dl *DouyinLive) fetchLiveInfo() error {
     - 轮流切换使用，降低封号风险
     - 示例：`config_account1.yaml`, `config_account2.yaml`
 
-4. **风控处理** 🛡️
-    - 如果频繁请求被封，尝试：
+4. **接口限制处理** 🛡️
+    - 如果频繁请求受限或接口返回异常，尝试：
         - 更换 Cookie
         - 使用代理 IP
         - 降低请求频率

@@ -330,7 +330,7 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	clientID := socket.RemoteAddr().String()
 	client := NewClient(clientID, socket)
 	count := r.addClient(client)
-	go client.writeLoop(r)
+	go client.writeLoop()
 
 	r.logger.Printf("客户端 %s 连接到房间 %s, 当前连接数: %d", clientID, r.id, count)
 

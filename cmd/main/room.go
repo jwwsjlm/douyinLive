@@ -128,7 +128,7 @@ func (c *Client) enqueue(opcode gws.Opcode, payload []byte) bool {
 	}
 }
 
-func (c *Client) writeLoop(room *Room) {
+func (c *Client) writeLoop() {
 	for {
 		select {
 		case <-c.stopCh:

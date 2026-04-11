@@ -613,8 +613,10 @@ func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, liveN
 	}
 
 	livenameJSON := r.getLiveNamePayload(liveName)
-	finalJSON := make([]byte, 0, len(jsonBytes)+len(livenameJSON))
+	methodJSON := []byte(fmt.Sprintf(`,"method":%s`, strconv.Quote(eventData.Method)))
+	finalJSON := make([]byte, 0, len(jsonBytes)+len(methodJSON)+len(livenameJSON))
 	finalJSON = append(finalJSON, jsonBytes[:lastCloseBrace]...)
+	finalJSON = append(finalJSON, methodJSON...)
 	finalJSON = append(finalJSON, livenameJSON...)
 	finalJSON = append(finalJSON, '}')
 

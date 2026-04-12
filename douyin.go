@@ -38,6 +38,7 @@ const (
 	gzipBufferSize          = 1024 * 4
 	wsWriteTimeout          = 5 * time.Second
 	heartbeatInterval       = 20 * time.Second
+	liveStatusPollInterval  = 30 * time.Second
 	wssURLTemplate          = "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/" +
 		"?app_name=douyin_web&version_code=180800&webcast_sdk_version=1.0.14-beta.0" +
 		"&update_version_code=1.0.14-beta.0&compress=gzip&device_platform=web" +
@@ -397,17 +398,26 @@ func (dl *DouyinLive) fetchRoomInfo() error {
 	return nil
 }
 
+func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
+	body, err := dl.fetchRoomEnterData()
+	if err != nil {
+		return false, err
+	}
+
+	status := gjson.Get(body, "data.data.0.status").Int()
+	isLive := status == 2
+	dl.setLiveStatus(isLive)
+	return isLive, nil
+}
+
 // IsLive 检查直播间是否开播
 func (dl *DouyinLive) IsLive() bool {
-	body, err := dl.fetchRoomEnterData()
+	isLive, err := dl.refreshLiveStatusFromAPI()
 	if err != nil {
 		dl.setLiveStatus(false)
 		return false
 	}
-
-	status := gjson.Get(body, "data.data.0.status").Int()
-	dl.setLiveStatus(status == 2)
-	return dl.isLiveStatus()
+	return isLive
 }
 
 // setLiveStatus 设置直播间状态（线程安全）
@@ -616,17 +626,33 @@ func (dl *DouyinLive) startHeartbeatLoop() {
 	go func() {
 		defer close(doneCh)
 
-		ticker := time.NewTicker(heartbeatInterval)
-		defer ticker.Stop()
+		heartbeatTicker := time.NewTicker(heartbeatInterval)
+		defer heartbeatTicker.Stop()
+		statusTicker := time.NewTicker(liveStatusPollInterval)
+		defer statusTicker.Stop()
 
 		for {
 			select {
-			case <-ticker.C:
+			case <-heartbeatTicker.C:
 				if dl.isManualClose() || !dl.isLiveStatus() {
 					return
 				}
 				if err := dl.sendPing(); err != nil {
 					dl.logger.Printf("发送保活 ping 失败: %v\n", err)
+				}
+			case <-statusTicker.C:
+				if dl.isManualClose() || !dl.isLiveStatus() {
+					return
+				}
+				isLive, err := dl.refreshLiveStatusFromAPI()
+				if err != nil {
+					dl.logger.Printf("HTTP 兜底检测直播状态失败: %v\n", err)
+					continue
+				}
+				if !isLive {
+					dl.logger.Printf("[%s] HTTP 兜底检测到直播已下播，关闭当前 WS 连接\n", dl.LiveName)
+					dl.closeCurrentConnection(websocket.CloseNormalClosure, "live ended by api")
+					return
 				}
 			case <-stopCh:
 				return
@@ -657,6 +683,21 @@ func (dl *DouyinLive) stopHeartbeatLoop() {
 			dl.logger.Printf("等待心跳循环退出超时，跳过阻塞等待\n")
 		}
 	}
+}
+
+func (dl *DouyinLive) closeCurrentConnection(code int, reason string) {
+	dl.mu.Lock()
+	conn := dl.conn
+	dl.conn = nil
+	dl.mu.Unlock()
+
+	if conn == nil {
+		return
+	}
+
+	msg := websocket.FormatCloseMessage(code, reason)
+	_ = conn.WriteControl(websocket.CloseMessage, msg, time.Now().Add(2*time.Second))
+	_ = conn.Close()
 }
 
 // handleGzipMessage 处理 GZIP 消息
@@ -846,6 +887,18 @@ func (dl *DouyinLive) handleReadError(err error) bool {
 	// 如果是手动关闭，不进行重连
 	if dl.isManualClose() {
 		dl.logger.Println("连接被手动关闭，不进行重连")
+		return false
+	}
+	if !dl.isLiveStatus() {
+		dl.logger.Println("直播状态已结束，不进行重连")
+		return false
+	}
+
+	isLive, statusErr := dl.refreshLiveStatusFromAPI()
+	if statusErr != nil {
+		dl.logger.Printf("WS 读错后 HTTP 兜底检测失败，继续按重连流程处理: %v\n", statusErr)
+	} else if !isLive {
+		dl.logger.Printf("[%s] WS 读错后 HTTP 兜底确认直播已下播，不再重连\n", dl.LiveName)
 		return false
 	}
 

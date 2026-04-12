@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	"io"
 	"math/rand"
@@ -336,17 +337,53 @@ func (dl *DouyinLive) fetchTTWID() error {
 
 // fetchRoomEnterData 获取直播间接口数据（对齐 DouyinLiveRecorder 的 web/enter 逻辑）
 func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
+	var body string
+
+	// 重试逻辑：最多试3次，只重试「响应为空」错误
+	err := retry.Do(
+		func() error {
+			// 核心请求逻辑
+			reqBody, err := dl.doRequest()
+			if err != nil {
+				return err
+			}
+			body = reqBody
+			return nil
+		},
+		retry.Attempts(3),          // 最多重试 3 次
+		retry.Delay(1*time.Second), // 每次重试延迟1秒
+		retry.RetryIf(func(err error) bool {
+			// 只对【直播间信息响应为空】进行重试
+			return err.Error() == "直播间信息响应为空"
+		}),
+	)
+
+	if err != nil {
+		return "", err
+	}
+	return body, nil
+}
+
+// 把真正的请求抽成独立函数，代码更干净
+func (dl *DouyinLive) doRequest() (string, error) {
 	params := fmt.Sprintf(
-		"aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=141.0.0.0&web_rid=%s&msToken=",
+		"aid=6383&app_name=douyin_web&live_id=1&device_platform=web"+
+			"&language=zh-CN&browser_language=zh-CN"+
+			"&browser_platform=Win32&browser_name=Chrome&browser_version=116.0.0.0&web_rid=%s&msToken=",
 		dl.liveID,
 	)
-	aBogus := sign.AbSign(params, dl.userAgent)
+	//参考代码https://github.com/ihmily/DouyinLiveRecorder
+	headers := map[string]string{
+		"Cookie": "ttwid=1%7C2iDIYVmjzMcpZ20fcaFde0VghXAA3NaNXE_SLR68IyE%7C1761045455" +
+			"%7Cab35197d5cfb21df6cbb2fa7ef1c9262206b062c315b9d04da746d0b37dfbc7d",
+		"Referer":    "https://live.douyin.com/" + dl.liveID,
+		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36 Core/1.116.567.400 QQBrowser/19.7.6764.400",
+	}
+	aBogus := sign.AbSign(params, headers["User-Agent"])
 	url := fmt.Sprintf("https://live.douyin.com/webcast/room/web/enter/?%s&a_bogus=%s", params, aBogus)
-
+	log.Println("请求直播间信息接口 URL:", url)
 	resp, err := dl.client.R().
-		SetCookies(dl.getCookies()...).
-		SetHeader("User-Agent", dl.userAgent).
-		SetHeader("Referer", fmt.Sprintf("https://live.douyin.com/%s", dl.liveID)).
+		SetHeaders(headers).
 		Get(url)
 	if err != nil {
 		return "", fmt.Errorf("请求直播间信息失败: %w", err)
@@ -354,15 +391,19 @@ func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 
 	body := resp.String()
 	dl.lastPageContent = body
+
 	if body == "" {
 		return "", errors.New("直播间信息响应为空")
 	}
+
 	if statusCode := gjson.Get(body, "status_code").Int(); statusCode != 0 {
 		return "", fmt.Errorf("直播间信息接口返回异常 status_code=%d", statusCode)
 	}
+
 	if !gjson.Get(body, "data.data.0").Exists() {
 		return "", errors.New("直播间信息缺少房间数据")
 	}
+
 	return body, nil
 }
 
@@ -400,12 +441,14 @@ func (dl *DouyinLive) fetchRoomInfo() error {
 
 func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
 	body, err := dl.fetchRoomEnterData()
+	log.Println("API 直播间信息接口响应长度:", len(body), "是否为空:", err)
 	if err != nil {
 		return false, err
 	}
 
 	status := gjson.Get(body, "data.data.0.status").Int()
 	isLive := status == 2
+	log.Println("API 直播状态:", status, "=>", isLive)
 	dl.setLiveStatus(isLive)
 	return isLive, nil
 }
@@ -895,6 +938,7 @@ func (dl *DouyinLive) handleReadError(err error) bool {
 	}
 
 	isLive, statusErr := dl.refreshLiveStatusFromAPI()
+
 	if statusErr != nil {
 		dl.logger.Printf("WS 读错后 HTTP 兜底检测失败，继续按重连流程处理: %v\n", statusErr)
 	} else if !isLive {

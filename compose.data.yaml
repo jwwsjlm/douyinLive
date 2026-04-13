@@ -1,0 +1,10 @@
+services:
+  douyinlive:
+    image: ghcr.io/jwwsjlm/douyinlive:latest
+    container_name: douyinlive
+    restart: unless-stopped
+    ports:
+      - "1088:1088"
+    volumes:
+      - ./data:/app
+    command: ["--config", "/app/config.yaml"]

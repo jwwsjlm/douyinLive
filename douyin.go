@@ -6,8 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
-
 	"io"
 	"math/rand"
 	"net/http"
@@ -84,6 +82,8 @@ type DouyinLive struct {
 	heartbeatStopCh        chan struct{}
 	heartbeatDoneCh        chan struct{}
 	writeMu                sync.Mutex
+	title                  string
+	avatarThumb            string
 }
 
 type logger interface {
@@ -132,6 +132,12 @@ func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, er
 		return nil, fmt.Errorf("直播间 %s 未开播: %w", liveID, ErrLiveNotStarted)
 	}
 	return dl, nil
+}
+func (dl *DouyinLive) GetTitle() string {
+	return dl.title
+}
+func (dl *DouyinLive) GetAvatarThumb() string {
+	return dl.avatarThumb
 }
 
 // Close 关闭抖音直播连接，确保资源正确释放
@@ -338,7 +344,6 @@ func (dl *DouyinLive) fetchTTWID() error {
 // fetchRoomEnterData 获取直播间接口数据（对齐 DouyinLiveRecorder 的 web/enter 逻辑）
 func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 	var body string
-
 	// 重试逻辑：最多试3次，只重试「响应为空」错误
 	err := retry.Do(
 		func() error {
@@ -354,6 +359,9 @@ func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 		retry.Delay(1*time.Second), // 每次重试延迟1秒
 		retry.RetryIf(func(err error) bool {
 			// 只对【直播间信息响应为空】进行重试
+			if err == nil {
+				return false // 没有错误，不需要重试
+			}
 			return err.Error() == "直播间信息响应为空"
 		}),
 	)
@@ -381,7 +389,7 @@ func (dl *DouyinLive) doRequest() (string, error) {
 	}
 	aBogus := sign.AbSign(params, headers["User-Agent"])
 	url := fmt.Sprintf("https://live.douyin.com/webcast/room/web/enter/?%s&a_bogus=%s", params, aBogus)
-	log.Println("请求直播间信息接口 URL:", url)
+	//log.Println("请求直播间信息接口 URL:", url)
 	resp, err := dl.client.R().
 		SetHeaders(headers).
 		Get(url)
@@ -390,6 +398,9 @@ func (dl *DouyinLive) doRequest() (string, error) {
 	}
 
 	body := resp.String()
+	//dl.logger.Printf("直播间信息接口响应: %s, 是否为空: %t\n", body, body == "")
+	//参考json doRequest.example.json
+
 	dl.lastPageContent = body
 
 	if body == "" {
@@ -436,19 +447,21 @@ func (dl *DouyinLive) fetchRoomInfo() error {
 	dl.roomID = roomID
 	dl.pushID = pushID
 	dl.LiveName = liveName
+	dl.title = gjson.Get(body, "data.data.0.title").String()
+	dl.avatarThumb = gjson.Get(body, "data.user.avatar_thumb.url_list.2").String()
 	return nil
 }
 
 func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
 	body, err := dl.fetchRoomEnterData()
-	log.Println("API 直播间信息接口响应长度:", len(body), "是否为空:", err)
+	//log.Println("API 直播间信息接口响应长度:", len(body), "是否为空:", err)
 	if err != nil {
 		return false, err
 	}
 
 	status := gjson.Get(body, "data.data.0.status").Int()
 	isLive := status == 2
-	log.Println("API 直播状态:", status, "=>", isLive)
+	dl.logger.Println("API 直播状态:", status, "=>", isLive)
 	dl.setLiveStatus(isLive)
 	return isLive, nil
 }

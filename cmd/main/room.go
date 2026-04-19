@@ -258,7 +258,7 @@ func (r *Room) getLiveNamePayload(liveName string) []byte {
 	}
 	r.liveNameCacheMu.RUnlock()
 
-	payload := []byte(fmt.Sprintf(`,"livename":%s`, strconv.Quote(liveName)))
+	payload := []byte(fmt.Sprintf(`,"livename":%s,"title":%s, "avatarThumb":%s`, strconv.Quote(liveName), strconv.Quote(r.douyinLive.GetTitle()), strconv.Quote(r.douyinLive.GetAvatarThumb())))
 
 	r.liveNameCacheMu.Lock()
 	r.liveNameCacheKey = liveName
@@ -618,6 +618,7 @@ func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, liveN
 	finalJSON = append(finalJSON, jsonBytes[:lastCloseBrace]...)
 	finalJSON = append(finalJSON, methodJSON...)
 	finalJSON = append(finalJSON, livenameJSON...)
+	//finalJSON = append(finalJSON, dl...)
 	finalJSON = append(finalJSON, '}')
 
 	r.Broadcast(finalJSON)

@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/codeGROOVE-dev/retry"
+	"github.com/dgraph-io/ristretto/v2"
 	"io"
 	"math/rand"
 	"net/http"
@@ -15,16 +17,14 @@ import (
 
 	"github.com/tidwall/gjson"
 
-	"github.com/avast/retry-go"
 	"github.com/gorilla/websocket"
 	"github.com/imroc/req/v3"
 	"github.com/jwwsjlm/douyinLive/v2/generated/douyin"
 	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 	"github.com/jwwsjlm/douyinLive/v2/jsScript"
 	"github.com/jwwsjlm/douyinLive/v2/sign"
-	"google.golang.org/protobuf/proto"
-
 	"github.com/jwwsjlm/douyinLive/v2/utils"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -84,6 +84,8 @@ type DouyinLive struct {
 	writeMu                sync.Mutex
 	title                  string
 	avatarThumb            string
+	ristretto              *ristretto.Cache[string, string] // 新增：Ristretto 缓存
+
 }
 
 type logger interface {
@@ -101,6 +103,17 @@ type EventHandler struct {
 // cookie 参数：可选的手动传入 Cookie，用于需要登录态的请求
 func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, error) {
 	userAgent := utils.RandomUserAgent()
+	// 配置内存缓存：5秒过期（避免重复请求），1分钟清理一次过期数据
+	// 初始化缓存配置
+	cache, err := ristretto.NewCache(&ristretto.Config[string, string]{
+		NumCounters: 500, // number of keys to track frequency of (10M).
+		MaxCost:     500, // maximum cost of cache (1GB).
+		Metrics:     false,
+		BufferItems: 64, // number of keys per Get buffer.
+	})
+	if err != nil {
+		return nil, fmt.Errorf("初始化缓存失败: %w", err)
+	}
 	dl := &DouyinLive{
 		liveID:    liveID,
 		userAgent: userAgent,
@@ -110,6 +123,7 @@ func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, er
 				return bytes.NewBuffer(make([]byte, 0, gzipBufferSize))
 			},
 		},
+		ristretto:              cache,
 		headers:                make(http.Header),
 		additionalCookies:      make(map[string]string),
 		logger:                 logger,
@@ -344,7 +358,14 @@ func (dl *DouyinLive) fetchTTWID() error {
 // fetchRoomEnterData 获取直播间接口数据（对齐 DouyinLiveRecorder 的 web/enter 逻辑）
 func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 	var body string
-	// 重试逻辑：最多试3次，只重试「响应为空」错误
+
+	V, found := dl.ristretto.Get(dl.liveID)
+	if found {
+		dl.logger.Printf("从缓存获取直播间信息，liveID: %s\n", dl.liveID)
+		return V, nil
+	}
+
+	dl.logger.Printf("缓存未命中，开始请求直播间信息，liveID: %s\n", dl.liveID)
 	err := retry.Do(
 		func() error {
 			// 核心请求逻辑
@@ -369,6 +390,7 @@ func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	dl.ristretto.SetWithTTL(dl.liveID, body, 1, 5*time.Second) // 将结果缓存到 Ristretto，成本为 1
 	return body, nil
 }
 
@@ -461,7 +483,7 @@ func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
 
 	status := gjson.Get(body, "data.data.0.status").Int()
 	isLive := status == 2
-	dl.logger.Println("API 直播状态:", status, "=>", isLive)
+	//dl.logger.Println("API 直播状态:", status, "=>", isLive)
 	dl.setLiveStatus(isLive)
 	return isLive, nil
 }

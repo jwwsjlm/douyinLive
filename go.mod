@@ -3,7 +3,8 @@ module github.com/jwwsjlm/douyinLive/v2
 go 1.25.7
 
 require (
-	github.com/avast/retry-go v3.0.0+incompatible
+	github.com/codeGROOVE-dev/retry v1.3.1
+	github.com/dgraph-io/ristretto/v2 v2.4.0
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
 	github.com/elliotchance/orderedmap v1.8.0
 	github.com/google/uuid v1.6.0
@@ -19,8 +20,10 @@ require (
 
 require (
 	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dolthub/maphash v0.1.0 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect

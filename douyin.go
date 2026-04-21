@@ -8,6 +8,7 @@ import (
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/dgraph-io/ristretto/v2"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -58,7 +59,7 @@ type DouyinLive struct {
 	liveID                 string
 	roomID                 string
 	pushID                 string
-	LiveName               string
+	liveName               string
 	ttwid                  string
 	userAgent              string
 	client                 *req.Client
@@ -112,6 +113,7 @@ func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, er
 	}
 	dl := &DouyinLive{
 		liveID:    liveID,
+		liveName:  liveID,
 		userAgent: userAgent,
 		client:    req.C().SetUserAgent(userAgent),
 		bufferPool: &sync.Pool{
@@ -135,9 +137,13 @@ func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, er
 	}
 
 	if dl.IsLive() == false {
-		return nil, fmt.Errorf("直播间 %s 未开播: %w", liveID, ErrLiveNotStarted)
+		return dl, fmt.Errorf("直播间 %s 未开播: %w", liveID, ErrLiveNotStarted)
 	}
 	return dl, nil
+}
+func (dl *DouyinLive) GetName() string {
+
+	return dl.liveName
 }
 func (dl *DouyinLive) GetTitle() string {
 	return dl.title
@@ -189,7 +195,7 @@ func (dl *DouyinLive) initialize() error {
 		return err
 	}
 
-	if err := dl.fetchRoomInfo(); err != nil {
+	if _, err := dl.fetchRoomEnterData(); err != nil {
 		return err
 	}
 
@@ -341,60 +347,8 @@ func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 	)
 
 	if err != nil {
+		log.Println("请求直播间信息失败，重试结束:", err)
 		return "", err
-	}
-	dl.ristretto.SetWithTTL(dl.liveID, body, 1, 5*time.Second) // 将结果缓存到 Ristretto，成本为 1
-	return body, nil
-}
-
-// 把真正的请求抽成独立函数，代码更干净
-func (dl *DouyinLive) doRequest() (string, error) {
-	params := fmt.Sprintf(
-		"aid=6383&app_name=douyin_web&live_id=1&device_platform=web"+
-			"&language=zh-CN&browser_language=zh-CN"+
-			"&browser_platform=Win32&browser_name=Chrome&browser_version=116.0.0.0&web_rid=%s&msToken=",
-		dl.liveID,
-	)
-	//参考代码https://github.com/ihmily/DouyinLiveRecorder
-	headers := map[string]string{
-		"Referer":    "https://live.douyin.com/" + dl.liveID,
-		"User-Agent": dl.userAgent,
-	}
-	if cookie := dl.getCookieString(); cookie != "" {
-		headers["Cookie"] = cookie
-	}
-	aBogus := sign.AbSign(params, headers["User-Agent"])
-	url := fmt.Sprintf("https://live.douyin.com/webcast/room/web/enter/?%s&a_bogus=%s", params, aBogus)
-	resp, err := dl.client.R().
-		SetHeaders(headers).
-		Get(url)
-	if err != nil {
-		return "", fmt.Errorf("请求直播间信息失败: %w", err)
-	}
-
-	body := resp.String()
-	dl.lastPageContent = body
-
-	if body == "" {
-		return "", errors.New("直播间信息响应为空")
-	}
-
-	if statusCode := gjson.Get(body, "status_code").Int(); statusCode != 0 {
-		return "", fmt.Errorf("直播间信息接口返回异常 status_code=%d", statusCode)
-	}
-
-	if !gjson.Get(body, "data.data.0").Exists() {
-		return "", errors.New("直播间信息缺少房间数据")
-	}
-
-	return body, nil
-}
-
-// fetchRoomInfo 获取房间信息
-func (dl *DouyinLive) fetchRoomInfo() error {
-	body, err := dl.fetchRoomEnterData()
-	if err != nil {
-		return err
 	}
 
 	roomID := gjson.Get(body, "data.data.0.id_str").String()
@@ -413,15 +367,62 @@ func (dl *DouyinLive) fetchRoomInfo() error {
 	}
 
 	if roomID == "" || pushID == "" {
-		return errors.New("无法提取房间信息")
+		return "", errors.New("无法提取房间信息")
 	}
 
 	dl.roomID = roomID
 	dl.pushID = pushID
-	dl.LiveName = liveName
+	dl.liveName = liveName
 	dl.title = gjson.Get(body, "data.data.0.title").String()
 	dl.avatarThumb = gjson.Get(body, "data.user.avatar_thumb.url_list.2").String()
-	return nil
+	dl.liveName = gjson.Get(body, "data.user.nickname").String()
+	dl.ristretto.SetWithTTL(dl.liveID, body, 1, 5*time.Second) // 将结果缓存到 Ristretto，成本为 1
+
+	return body, nil
+}
+
+// 把真正的请求抽成独立函数，代码更干净
+func (dl *DouyinLive) doRequest() (string, error) {
+	params := fmt.Sprintf(
+		"aid=6383&app_name=douyin_web&live_id=1&device_platform=web"+
+			"&language=zh-CN&browser_language=zh-CN"+
+			"&browser_platform=Win32&browser_name=Chrome&browser_version=116.0.0.0&web_rid=%s&msToken=",
+		dl.liveID,
+	)
+	//参考代码https://github.com/ihmily/DouyinLiveRecorder
+	headers := map[string]string{
+		"Referer":    "https://live.douyin.com/" + dl.liveID,
+		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36 Core/1.116.567.400 QQBrowser/19.7.6764.400",
+	}
+	if cookie := dl.getCookieString(); cookie != "" {
+		headers["Cookie"] = cookie
+	}
+	aBogus := sign.AbSign(params, headers["User-Agent"])
+	url := fmt.Sprintf("https://live.douyin.com/webcast/room/web/enter/?%s&a_bogus=%s", params, aBogus)
+	resp, err := dl.client.R().
+		SetHeaders(headers).
+		Get(url)
+	body := resp.String()
+	if err != nil {
+
+		return body, fmt.Errorf("请求直播间信息失败: %w", err)
+	}
+
+	dl.lastPageContent = body
+
+	if body == "" {
+		return "", errors.New("直播间信息响应为空")
+	}
+
+	if statusCode := gjson.Get(body, "status_code").Int(); statusCode != 0 {
+		return "", fmt.Errorf("直播间信息接口返回异常 status_code=%d", statusCode)
+	}
+
+	if !gjson.Get(body, "data.data.0").Exists() {
+		return "", errors.New("直播间信息缺少房间数据")
+	}
+
+	return body, nil
 }
 
 func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
@@ -512,7 +513,7 @@ func (dl *DouyinLive) startWebSocket() error {
 		}
 		return fmt.Errorf("连接失败: %w", err)
 	}
-	dl.logger.Printf("直播间连接成功(状态码):[%d] 直播间名称:[%s]\n", resp.StatusCode, dl.LiveName)
+	dl.logger.Printf("直播间连接成功(状态码):[%d] 直播间名称:[%s]\n", resp.StatusCode, dl.GetName())
 	dl.mu.Lock()
 	dl.conn = conn
 	dl.mu.Unlock()
@@ -674,7 +675,7 @@ func (dl *DouyinLive) startHeartbeatLoop() {
 					continue
 				}
 				if !isLive {
-					dl.logger.Printf("[%s] HTTP 兜底检测到直播已下播，关闭当前 WS 连接\n", dl.LiveName)
+					dl.logger.Printf("[%s] HTTP 兜底检测到直播已下播，关闭当前 WS 连接\n", dl.GetName())
 					dl.closeCurrentConnection(websocket.CloseNormalClosure, "live ended by api")
 					return
 				}
@@ -820,7 +821,7 @@ func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 			return
 		}
 		if controlMsg.Status == 3 {
-			dl.logger.Printf("[%s]直播间已关闭", dl.LiveName)
+			dl.logger.Printf("[%s]直播间已关闭", dl.GetName())
 			dl.setLiveStatus(false)
 		}
 	}
@@ -927,7 +928,7 @@ func (dl *DouyinLive) handleReadError(err error) bool {
 	if statusErr != nil {
 		dl.logger.Printf("WS 读错后 HTTP 兜底检测失败，继续按重连流程处理: %v\n", statusErr)
 	} else if !isLive {
-		dl.logger.Printf("[%s] WS 读错后 HTTP 兜底确认直播已下播，不再重连\n", dl.LiveName)
+		dl.logger.Printf("[%s] WS 读错后 HTTP 兜底确认直播已下播，不再重连\n", dl.GetName())
 		return false
 	}
 

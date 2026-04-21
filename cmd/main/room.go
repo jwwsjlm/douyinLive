@@ -389,15 +389,17 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	r.mu.Unlock()
 
 	if err == nil {
+		r.logger.Printf("房间 %s 的直播连接已成功启动", r.douyinLive.GetName())
 		return
 	}
 	if errors.Is(err, errRoomInactive) {
 		return
 	}
 	if errors.Is(err, douyinLive.ErrLiveNotStarted) {
-		r.logger.Printf("房间 %s 当前未开播，进入后台轮询监控", r.id)
+		r.logger.Printf("房间 %s 当前未开播，进入后台轮询监控", r.douyinLive.GetName())
 		r.notifyOfflineStatus()
 		r.startMonitorLoop()
+
 		return
 	}
 
@@ -544,12 +546,13 @@ func (r *Room) stopMonitorLoop() {
 // startLiveSession 启动抖音直播监听和事件处理
 func (r *Room) startLiveSession() error {
 	d, err := douyinLive.NewDouyinLive(r.id, r.logger, r.cookie)
+	r.douyinLive = d
 	if err != nil {
 		return err
 	}
 
 	d.Subscribe(func(eventData *new_douyin.Webcast_Im_Message) {
-		r.handleDouyinEvent(eventData, d.LiveName)
+		r.handleDouyinEvent(eventData, d.GetName())
 	})
 
 	if r.clientCount() == 0 {
@@ -563,7 +566,7 @@ func (r *Room) startLiveSession() error {
 		d.Close()
 		return errRoomInactive
 	}
-	r.douyinLive = d
+
 	r.mu.Unlock()
 
 	r.notifyOnlineStatus()

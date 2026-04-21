@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -26,9 +25,6 @@ func main() {
 		logger.Println("   unknown: false")
 		logger.Println("\n2. 或使用命令行参数:")
 		logger.Println("   douyinLive.exe --port 1088")
-		logger.Println("\n按回车键退出...")
-		fmt.Printf("错误信息%v\n", err)
-		fmt.Scanln() // 防止窗口立即关闭
 		os.Exit(1)
 	}
 

@@ -3,13 +3,11 @@ package douyinLive
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
 	"errors"
 	"fmt"
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/dgraph-io/ristretto/v2"
 	"io"
-	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
@@ -103,13 +101,11 @@ type EventHandler struct {
 // cookie 参数：可选的手动传入 Cookie，用于需要登录态的请求
 func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, error) {
 	userAgent := utils.RandomUserAgent()
-	// 配置内存缓存：5秒过期（避免重复请求），1分钟清理一次过期数据
-	// 初始化缓存配置
 	cache, err := ristretto.NewCache(&ristretto.Config[string, string]{
-		NumCounters: 500, // number of keys to track frequency of (10M).
-		MaxCost:     500, // maximum cost of cache (1GB).
+		NumCounters: 500,
+		MaxCost:     500,
 		Metrics:     false,
-		BufferItems: 64, // number of keys per Get buffer.
+		BufferItems: 64,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("初始化缓存失败: %w", err)
@@ -133,13 +129,9 @@ func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, er
 		lastReconnectErrorTime: time.Time{},
 	}
 
-	// 初始化 Cookie 管理器
 	dl.cookieManager = sign.NewCookieManager()
-	// 优先使用手动传入的 Cookie，其次尝试从配置文件读取
 	if cookie != "" {
 		dl.cookieManager.SetDouyinCookie(cookie)
-	} else {
-		_ = dl.cookieManager.LoadConfig("config.yaml")
 	}
 
 	if dl.IsLive() == false {
@@ -156,54 +148,10 @@ func (dl *DouyinLive) GetAvatarThumb() string {
 
 // Close 关闭抖音直播连接，确保资源正确释放
 func (dl *DouyinLive) Close() {
-	// 原子性地设置直播状态为关闭
-	dl.setLiveStatus(false)
 	dl.setManualClose(true)
+	dl.setLiveStatus(false)
 	dl.stopHeartbeatLoop()
-
-	// 获取连接并在锁外关闭，避免长时间持锁
-	dl.mu.Lock()
-	conn := dl.conn
-	dl.conn = nil
-	dl.mu.Unlock()
-
-	// 检查连接是否已经关闭
-	if conn == nil {
-		dl.logger.Println("连接已关闭或未初始化")
-		return
-	}
-
-	// 创建一个带超时的通道，用于等待关闭操作完成
-	done := make(chan struct{})
-
-	// 异步执行关闭操作
-	go func() {
-		defer close(done)
-
-		// 发送关闭帧
-		msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "closing connection")
-
-		// 先尝试正常关闭
-		if err := conn.WriteControl(websocket.CloseMessage, msg, time.Now().Add(2*time.Second)); err != nil {
-			dl.logger.Printf("发送关闭消息失败: %v\n", err)
-		}
-
-		// 等待一段时间，让对方有机会响应
-		time.Sleep(500 * time.Millisecond)
-
-		// 确保连接最终关闭
-		if err := conn.Close(); err != nil {
-			dl.logger.Printf("关闭连接失败: %v\n", err)
-		}
-	}()
-
-	// 等待关闭操作完成或超时
-	select {
-	case <-done:
-		dl.logger.Println("连接已成功关闭")
-	case <-time.After(3 * time.Second):
-		dl.logger.Println("关闭连接超时")
-	}
+	dl.closeCurrentConnection(websocket.CloseNormalClosure, "closing connection")
 }
 
 func (dl *DouyinLive) rebuildHTTPClientAndHeaders() {
@@ -290,7 +238,12 @@ func (dl *DouyinLive) refreshReconnectContext(changeUA bool, rebuildHTTP bool) e
 func (dl *DouyinLive) getCookieParts() []string {
 	configCookie := dl.cookieManager.GetDouyinCookie()
 	if configCookie != "" {
-		return strings.Split(configCookie, "; ")
+		cookies := dl.cookieManager.ParseCookies(configCookie)
+		parts := make([]string, 0, len(cookies))
+		for _, c := range cookies {
+			parts = append(parts, fmt.Sprintf("%s=%s", c.Name, c.Value))
+		}
+		return parts
 	}
 
 	parts := []string{fmt.Sprintf("ttwid=%s", dl.ttwid)}
@@ -404,14 +357,14 @@ func (dl *DouyinLive) doRequest() (string, error) {
 	)
 	//参考代码https://github.com/ihmily/DouyinLiveRecorder
 	headers := map[string]string{
-		"Cookie": "ttwid=1%7C2iDIYVmjzMcpZ20fcaFde0VghXAA3NaNXE_SLR68IyE%7C1761045455" +
-			"%7Cab35197d5cfb21df6cbb2fa7ef1c9262206b062c315b9d04da746d0b37dfbc7d",
 		"Referer":    "https://live.douyin.com/" + dl.liveID,
-		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36 Core/1.116.567.400 QQBrowser/19.7.6764.400",
+		"User-Agent": dl.userAgent,
+	}
+	if cookie := dl.getCookieString(); cookie != "" {
+		headers["Cookie"] = cookie
 	}
 	aBogus := sign.AbSign(params, headers["User-Agent"])
 	url := fmt.Sprintf("https://live.douyin.com/webcast/room/web/enter/?%s&a_bogus=%s", params, aBogus)
-	//log.Println("请求直播间信息接口 URL:", url)
 	resp, err := dl.client.R().
 		SetHeaders(headers).
 		Get(url)
@@ -420,9 +373,6 @@ func (dl *DouyinLive) doRequest() (string, error) {
 	}
 
 	body := resp.String()
-	//dl.logger.Printf("直播间信息接口响应: %s, 是否为空: %t\n", body, body == "")
-	//参考json doRequest.example.json
-
 	dl.lastPageContent = body
 
 	if body == "" {
@@ -528,6 +478,7 @@ func (dl *DouyinLive) isManualClose() bool {
 
 // Start 启动直播间连接
 func (dl *DouyinLive) Start() {
+	dl.setManualClose(false)
 	defer dl.cleanup()
 
 	if !dl.IsLive() {
@@ -537,16 +488,11 @@ func (dl *DouyinLive) Start() {
 
 	if err := dl.startWebSocket(); err != nil {
 		dl.logger.Printf("WebSocket连接失败: %v\n", err)
-		// 尝试重连
 		if dl.reconnect(defaultMaxRetries, true, false) {
 			dl.processMessages()
 		}
 		return
 	}
-
-	// 使用 context 来控制 goroutine 生命周期
-	_, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	dl.processMessages()
 }
@@ -774,8 +720,12 @@ func (dl *DouyinLive) closeCurrentConnection(code int, reason string) {
 	}
 
 	msg := websocket.FormatCloseMessage(code, reason)
-	_ = conn.WriteControl(websocket.CloseMessage, msg, time.Now().Add(2*time.Second))
-	_ = conn.Close()
+	if err := conn.WriteControl(websocket.CloseMessage, msg, time.Now().Add(2*time.Second)); err != nil {
+		dl.logger.Printf("发送关闭消息失败: %v\n", err)
+	}
+	if err := conn.Close(); err != nil {
+		dl.logger.Printf("关闭连接失败: %v\n", err)
+	}
 }
 
 // handleGzipMessage 处理 GZIP 消息
@@ -989,7 +939,7 @@ func (dl *DouyinLive) handleReadError(err error) bool {
 
 	failureCount := dl.recordReconnectFailure(reason)
 	delay, changeUA, rebuildHTTP := dl.reconnectPlan(reason, failureCount, baseDelay, allowUARefresh)
-	jitter := time.Duration(rand.Int63n(int64(maxReconnectJitter)))
+	jitter := time.Duration(utils.GenerateJitterNanos(maxReconnectJitter))
 	sleepFor := delay + jitter
 	dl.logger.Printf("检测到需重连 [%s]，连续失败=%d，将在 %s 后尝试重连（changeUA=%v rebuildHTTP=%v）: %v\n", reason, failureCount, sleepFor, changeUA, rebuildHTTP, err)
 	time.Sleep(sleepFor)

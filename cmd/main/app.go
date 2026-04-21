@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -45,17 +46,16 @@ func (a *App) Run() error {
 		return err
 	}
 
-	// 查找可用端口
 	for {
 		addr := ":" + strconv.Itoa(port)
-		if isPortAvailable(port) {
+		listener, err := net.Listen("tcp", addr)
+		if err == nil {
 			a.httpServer = &http.Server{Addr: addr, Handler: mux}
 			a.runningPort = strconv.Itoa(port)
 
-			close(a.ready) // <--- 【核心】端口绑定成功，关闭 Channel 发信号
-
+			close(a.ready)
 			a.logger.Printf("WebSocket 服务启动成功，监听端口: %s", a.runningPort)
-			return a.httpServer.ListenAndServe()
+			return a.httpServer.Serve(listener)
 		}
 		port++
 	}

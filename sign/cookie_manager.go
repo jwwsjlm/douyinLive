@@ -1,7 +1,6 @@
 package sign
 
 import (
-	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -43,7 +42,6 @@ func (cm *CookieManager) LoadConfig(path string) error {
 	if err != nil {
 		return err
 	}
-	log.Println("加载配置文件成功", path)
 	var config CookieConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return err
@@ -87,15 +85,16 @@ func (cm *CookieManager) ParseCookies(cookieStr string) []*http.Cookie {
 		return cookies
 	}
 
-	pairs := strings.Split(cookieStr, "; ")
+	pairs := strings.Split(cookieStr, ";")
 	for _, pair := range pairs {
-		parts := strings.SplitN(pair, "=", 2)
-		if len(parts) == 2 {
-			cookies = append(cookies, &http.Cookie{
-				Name:  strings.TrimSpace(parts[0]),
-				Value: strings.TrimSpace(parts[1]),
-			})
+		parts := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+		if len(parts) != 2 {
+			continue
 		}
+		cookies = append(cookies, &http.Cookie{
+			Name:  strings.TrimSpace(parts[0]),
+			Value: strings.TrimSpace(parts[1]),
+		})
 	}
 
 	return cookies

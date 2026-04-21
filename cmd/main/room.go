@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -128,7 +128,7 @@ func (c *Client) enqueue(opcode gws.Opcode, payload []byte) bool {
 	}
 }
 
-func (c *Client) writeLoop() {
+func (c *Client) writeLoop(onWriteError func()) {
 	for {
 		select {
 		case <-c.stopCh:
@@ -136,6 +136,9 @@ func (c *Client) writeLoop() {
 		case msg := <-c.sendQueue:
 			if err := c.conn.WriteMessage(msg.opcode, msg.payload); err != nil {
 				c.close(nil)
+				if onWriteError != nil {
+					onWriteError()
+				}
 				return
 			}
 		}
@@ -154,6 +157,25 @@ func (c *Client) close(closePayload []byte) {
 	})
 }
 
+func (r *Room) closeClient(clientID string, closePayload []byte) {
+	client, _, removed := r.removeClient(clientID)
+	if !removed {
+		return
+	}
+
+	if client != nil {
+		client.close(closePayload)
+	}
+
+	remaining := r.clientCount()
+	r.logger.Printf("客户端 %s 断开连接, 房间 %s 剩余连接数: %d", clientID, r.id, remaining)
+
+	if remaining == 0 {
+		r.logger.Printf("房间 %s 的最后一个客户端已断开, 正在关闭后台监听...", r.id)
+		go r.closeBackgroundWorkers()
+	}
+}
+
 // Room 代表一个直播间
 type Room struct {
 	id                      string
@@ -167,9 +189,6 @@ type Room struct {
 	cookie                  string
 	pollInterval            time.Duration
 	notifyInterval          time.Duration
-	liveNameCacheMu         sync.RWMutex
-	liveNameCacheKey        string
-	liveNameCachePayload    []byte
 	starting                bool
 	closed                  bool
 	monitorStopCh           chan struct{}
@@ -249,23 +268,27 @@ func (r *Room) clearClients() []*Client {
 	return clients
 }
 
-func (r *Room) getLiveNamePayload(liveName string) []byte {
-	r.liveNameCacheMu.RLock()
-	if r.liveNameCacheKey == liveName {
-		payload := r.liveNameCachePayload
-		r.liveNameCacheMu.RUnlock()
-		return payload
+func (r *Room) buildEventJSON(jsonBytes []byte, eventData *new_douyin.Webcast_Im_Message, liveName string) ([]byte, error) {
+	payload := make(map[string]any)
+	if err := json.Unmarshal(jsonBytes, &payload); err != nil {
+		return nil, err
 	}
-	r.liveNameCacheMu.RUnlock()
 
-	payload := []byte(fmt.Sprintf(`,"livename":%s,"title":%s, "avatarThumb":%s`, strconv.Quote(liveName), strconv.Quote(r.douyinLive.GetTitle()), strconv.Quote(r.douyinLive.GetAvatarThumb())))
+	title := ""
+	avatarThumb := ""
+	r.mu.Lock()
+	if r.douyinLive != nil {
+		title = r.douyinLive.GetTitle()
+		avatarThumb = r.douyinLive.GetAvatarThumb()
+	}
+	r.mu.Unlock()
 
-	r.liveNameCacheMu.Lock()
-	r.liveNameCacheKey = liveName
-	r.liveNameCachePayload = payload
-	r.liveNameCacheMu.Unlock()
+	payload["method"] = eventData.Method
+	payload["livename"] = liveName
+	payload["title"] = title
+	payload["avatarThumb"] = avatarThumb
 
-	return payload
+	return json.Marshal(payload)
 }
 
 func (r *Room) offlineStatusMessage() []byte {
@@ -330,7 +353,9 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	clientID := socket.RemoteAddr().String()
 	client := NewClient(clientID, socket)
 	count := r.addClient(client)
-	go client.writeLoop()
+	go client.writeLoop(func() {
+		r.closeClient(clientID, nil)
+	})
 
 	r.logger.Printf("客户端 %s 连接到房间 %s, 当前连接数: %d", clientID, r.id, count)
 
@@ -338,8 +363,7 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	switch {
 	case r.closed:
 		r.mu.Unlock()
-		_, _, _ = r.removeClient(clientID)
-		client.close(serviceClosingMessage)
+		r.closeClient(clientID, serviceClosingMessage)
 		return
 	case r.douyinLive != nil:
 		r.mu.Unlock()
@@ -378,27 +402,12 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	}
 
 	r.logger.Printf("启动抖音直播监听失败: %v", err)
-	_, _, _ = r.removeClient(clientID)
-	client.close(liveInvalidMessage)
+	r.closeClient(clientID, liveInvalidMessage)
 }
 
 // RemoveClient 从房间移除一个客户端
 func (r *Room) RemoveClient(clientID string) {
-	client, remaining, removed := r.removeClient(clientID)
-	if !removed {
-		return
-	}
-
-	if client != nil {
-		client.close(nil)
-	}
-
-	r.logger.Printf("客户端 %s 断开连接, 房间 %s 剩余连接数: %d", clientID, r.id, remaining)
-
-	if remaining == 0 {
-		r.logger.Printf("房间 %s 的最后一个客户端已断开, 正在关闭后台监听...", r.id)
-		go r.closeBackgroundWorkers()
-	}
+	r.closeClient(clientID, nil)
 }
 
 func (r *Room) sendToClient(clientID string, opcode gws.Opcode, payload []byte) {
@@ -411,7 +420,7 @@ func (r *Room) sendToClient(clientID string, opcode gws.Opcode, payload []byte) 
 	}
 
 	r.logger.Printf("客户端 %s (房间: %s) 消费过慢，关闭连接", clientID, r.id)
-	client.close(slowClientClosingMessage)
+	r.closeClient(clientID, slowClientClosingMessage)
 }
 
 func (r *Room) closeBackgroundWorkers() {
@@ -585,7 +594,7 @@ func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 	}
 }
 
-// handleDouyinEvent 处理从抖音接收到的事件（优化版：减少 JSON 转换）
+// handleDouyinEvent 处理从抖音接收到的事件
 func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, liveName string) {
 	msg, err := generated.GetMessageInstance(eventData.Method)
 	if err != nil {
@@ -606,20 +615,11 @@ func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, liveN
 		return
 	}
 
-	lastCloseBrace := bytes.LastIndexByte(jsonBytes, '}')
-	if lastCloseBrace == -1 {
-		r.logger.Printf("无效的 JSON 格式")
+	finalJSON, err := r.buildEventJSON(jsonBytes, eventData, liveName)
+	if err != nil {
+		r.logger.Printf("事件 JSON 组装失败: %v, 方法: %s", err, eventData.Method)
 		return
 	}
-
-	livenameJSON := r.getLiveNamePayload(liveName)
-	methodJSON := []byte(fmt.Sprintf(`,"method":%s`, strconv.Quote(eventData.Method)))
-	finalJSON := make([]byte, 0, len(jsonBytes)+len(methodJSON)+len(livenameJSON))
-	finalJSON = append(finalJSON, jsonBytes[:lastCloseBrace]...)
-	finalJSON = append(finalJSON, methodJSON...)
-	finalJSON = append(finalJSON, livenameJSON...)
-	//finalJSON = append(finalJSON, dl...)
-	finalJSON = append(finalJSON, '}')
 
 	r.Broadcast(finalJSON)
 }
@@ -632,8 +632,7 @@ func (r *Room) Broadcast(message []byte) {
 			continue
 		}
 		r.logger.Printf("客户端 %s (房间: %s) 消费过慢，关闭连接", client.id, r.id)
-		client.close(slowClientClosingMessage)
-		go r.RemoveClient(client.id)
+		r.closeClient(client.id, slowClientClosingMessage)
 	}
 }
 

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/md5"
+	cryptorand "crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"strings"
+	"time"
 
 	"github.com/elliotchance/orderedmap"
 	"github.com/google/uuid"
@@ -41,12 +43,43 @@ func GetxMSStub(params *orderedmap.OrderedMap) string {
 	return hex.EncodeToString(hash[:])
 }
 
+func randomIndex(max int) int {
+	if max <= 1 {
+		return 0
+	}
+
+	n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(max)))
+	if err != nil {
+		return 0
+	}
+	return int(n.Int64())
+}
+
+func randomInt64(max int64) int64 {
+	if max <= 1 {
+		return 0
+	}
+
+	n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(max))
+	if err != nil {
+		return 0
+	}
+	return n.Int64()
+}
+
+func GenerateJitterNanos(maxDuration time.Duration) int64 {
+	if maxDuration <= 0 {
+		return 0
+	}
+	return randomInt64(int64(maxDuration))
+}
+
 // GenerateMsToken 生成随机的msToken
 func GenerateMsToken(length int) string {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+="
 	b := make([]byte, length)
 	for i := range b {
-		b[i] = charset[rand.Intn(len(charset))]
+		b[i] = charset[randomIndex(len(charset))]
 	}
 	return string(b) + "=_"
 }
@@ -100,8 +133,8 @@ func RandomUserAgent() string {
 		"108.0.5359.22", "98.0.4758.48", "97.0.4692.71",
 	}
 
-	os := osList[rand.Intn(len(osList))]
-	chromeVersion := chromeVersionList[rand.Intn(len(chromeVersionList))]
+	os := osList[randomIndex(len(osList))]
+	chromeVersion := chromeVersionList[randomIndex(len(chromeVersionList))]
 
 	return fmt.Sprintf("Mozilla/5.0 %s AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", os, chromeVersion)
 }

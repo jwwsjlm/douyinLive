@@ -2,18 +2,11 @@ package generated
 
 import (
 	"errors"
+
 	"google.golang.org/protobuf/reflect/protoreflect"
-	"log"
-	"os"
 )
 
-var messageFactories map[string]func() protoreflect.ProtoMessage
-
-func init() {
-	log.SetOutput(os.Stdout)
-	messageFactories = newMessage
-	log.Printf("注册消息类型到消息池，共注册%d种消息类型\n", len(messageFactories))
-}
+var messageFactories = newMessage
 
 // GetMessageInstance 获取消息实例
 func GetMessageInstance(name string) (protoreflect.ProtoMessage, error) {

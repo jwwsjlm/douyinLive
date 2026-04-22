@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -269,18 +268,13 @@ func (r *Room) clearClients() []*Client {
 	return clients
 }
 
-func appendJSONStringField(dst []byte, key, value string) ([]byte, error) {
-	encodedValue, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-
+func appendJSONStringField(dst []byte, key, value string) []byte {
 	dst = append(dst, ',')
 	dst = append(dst, '"')
 	dst = append(dst, key...)
 	dst = append(dst, '"', ':')
-	dst = append(dst, encodedValue...)
-	return dst, nil
+	dst = strconv.AppendQuote(dst, value)
+	return dst
 }
 
 func (r *Room) buildEventJSON(jsonBytes []byte, eventData *new_douyin.Webcast_Im_Message, liveName string) ([]byte, error) {
@@ -300,24 +294,10 @@ func (r *Room) buildEventJSON(jsonBytes []byte, eventData *new_douyin.Webcast_Im
 
 	result := make([]byte, 0, len(jsonBytes)+128)
 	result = append(result, jsonBytes[:len(jsonBytes)-1]...)
-
-	var err error
-	result, err = appendJSONStringField(result, "method", eventData.Method)
-	if err != nil {
-		return nil, err
-	}
-	result, err = appendJSONStringField(result, "livename", liveName)
-	if err != nil {
-		return nil, err
-	}
-	result, err = appendJSONStringField(result, "title", title)
-	if err != nil {
-		return nil, err
-	}
-	result, err = appendJSONStringField(result, "avatarThumb", avatarThumb)
-	if err != nil {
-		return nil, err
-	}
+	result = appendJSONStringField(result, "method", eventData.Method)
+	result = appendJSONStringField(result, "livename", liveName)
+	result = appendJSONStringField(result, "title", title)
+	result = appendJSONStringField(result, "avatarThumb", avatarThumb)
 
 	result = append(result, '}')
 	return result, nil

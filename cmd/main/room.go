@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -268,10 +269,24 @@ func (r *Room) clearClients() []*Client {
 	return clients
 }
 
-func (r *Room) buildEventJSON(jsonBytes []byte, eventData *new_douyin.Webcast_Im_Message, liveName string) ([]byte, error) {
-	payload := make(map[string]any)
-	if err := json.Unmarshal(jsonBytes, &payload); err != nil {
+func appendJSONStringField(dst []byte, key, value string) ([]byte, error) {
+	encodedValue, err := json.Marshal(value)
+	if err != nil {
 		return nil, err
+	}
+
+	dst = append(dst, ',')
+	dst = append(dst, '"')
+	dst = append(dst, key...)
+	dst = append(dst, '"', ':')
+	dst = append(dst, encodedValue...)
+	return dst, nil
+}
+
+func (r *Room) buildEventJSON(jsonBytes []byte, eventData *new_douyin.Webcast_Im_Message, liveName string) ([]byte, error) {
+	jsonBytes = bytes.TrimSpace(jsonBytes)
+	if len(jsonBytes) == 0 || jsonBytes[len(jsonBytes)-1] != '}' {
+		return nil, fmt.Errorf("无效的事件 JSON")
 	}
 
 	title := ""
@@ -283,12 +298,29 @@ func (r *Room) buildEventJSON(jsonBytes []byte, eventData *new_douyin.Webcast_Im
 	}
 	r.mu.Unlock()
 
-	payload["method"] = eventData.Method
-	payload["livename"] = liveName
-	payload["title"] = title
-	payload["avatarThumb"] = avatarThumb
+	result := make([]byte, 0, len(jsonBytes)+128)
+	result = append(result, jsonBytes[:len(jsonBytes)-1]...)
 
-	return json.Marshal(payload)
+	var err error
+	result, err = appendJSONStringField(result, "method", eventData.Method)
+	if err != nil {
+		return nil, err
+	}
+	result, err = appendJSONStringField(result, "livename", liveName)
+	if err != nil {
+		return nil, err
+	}
+	result, err = appendJSONStringField(result, "title", title)
+	if err != nil {
+		return nil, err
+	}
+	result, err = appendJSONStringField(result, "avatarThumb", avatarThumb)
+	if err != nil {
+		return nil, err
+	}
+
+	result = append(result, '}')
+	return result, nil
 }
 
 func (r *Room) offlineStatusMessage() []byte {

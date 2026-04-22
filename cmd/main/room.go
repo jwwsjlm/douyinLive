@@ -396,7 +396,7 @@ func (r *Room) AddClient(socket *gws.Conn) {
 		return
 	}
 	if errors.Is(err, douyinLive.ErrLiveNotStarted) {
-		r.logger.Printf("房间 %s 当前未开播，进入后台轮询监控", r.douyinLive.GetName())
+		r.logger.Printf("房间 %s 当前未开播，进入后台轮询监控", r.id)
 		r.notifyOfflineStatus()
 		r.startMonitorLoop()
 

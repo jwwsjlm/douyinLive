@@ -136,9 +136,6 @@ func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, er
 		dl.cookieManager.SetDouyinCookie(cookie)
 	}
 
-	if dl.IsLive() == false {
-		return dl, fmt.Errorf("直播间 %s 未开播: %w", liveID, ErrLiveNotStarted)
-	}
 	return dl, nil
 }
 func (dl *DouyinLive) GetName() string {
@@ -189,9 +186,20 @@ func (dl *DouyinLive) getConsecutiveFailures() int {
 	return dl.consecutiveFailures
 }
 
-// initialize 初始化 DouyinLive 实例
-func (dl *DouyinLive) initialize() error {
+// prepareRequestContext 初始化 HTTP 请求上下文
+func (dl *DouyinLive) prepareRequestContext() error {
 	if err := dl.fetchTTWID(); err != nil {
+		return err
+	}
+
+	dl.headers.Set("User-Agent", dl.userAgent)
+	dl.setupCookies()
+	return nil
+}
+
+// prepareWebSocketContext 初始化 WebSocket 连接上下文
+func (dl *DouyinLive) prepareWebSocketContext() error {
+	if err := dl.prepareRequestContext(); err != nil {
 		return err
 	}
 
@@ -202,11 +210,6 @@ func (dl *DouyinLive) initialize() error {
 	if err := jsScript.LoadGoja(dl.userAgent); err != nil {
 		return fmt.Errorf("加载JavaScript脚本失败: %w", err)
 	}
-
-	dl.headers.Set("User-Agent", dl.userAgent)
-
-	// 设置 Cookie - 优先使用配置文件中的 Cookie，其次使用获取到的 Cookie
-	dl.setupCookies()
 
 	return nil
 }
@@ -233,7 +236,7 @@ func (dl *DouyinLive) refreshReconnectContext(changeUA bool, rebuildHTTP bool) e
 		dl.headers.Set("User-Agent", dl.userAgent)
 	}
 
-	if err := dl.initialize(); err != nil {
+	if err := dl.prepareWebSocketContext(); err != nil {
 		return fmt.Errorf("刷新重连上下文失败: %w", err)
 	}
 
@@ -425,7 +428,12 @@ func (dl *DouyinLive) doRequest() (string, error) {
 	return body, nil
 }
 
+// refreshLiveStatusFromAPI 通过房间接口刷新当前直播状态。
 func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
+	if err := dl.prepareRequestContext(); err != nil {
+		return false, err
+	}
+
 	body, err := dl.fetchRoomEnterData()
 	//log.Println("API 直播间信息接口响应长度:", len(body), "是否为空:", err)
 	if err != nil {
@@ -439,14 +447,14 @@ func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
 	return isLive, nil
 }
 
-// IsLive 检查直播间是否开播
-func (dl *DouyinLive) IsLive() bool {
+// IsLive 检查直播间是否开播，并返回判活过程中的错误。
+func (dl *DouyinLive) IsLive() (bool, error) {
 	isLive, err := dl.refreshLiveStatusFromAPI()
 	if err != nil {
 		dl.setLiveStatus(false)
-		return false
+		return false, err
 	}
-	return isLive
+	return isLive, nil
 }
 
 // setLiveStatus 设置直播间状态（线程安全）
@@ -477,28 +485,26 @@ func (dl *DouyinLive) isManualClose() bool {
 	return dl.manualClose
 }
 
-// Start 启动直播间连接
-func (dl *DouyinLive) Start() {
+// Start 启动直播间连接。
+// 调用方应在进入该阶段前完成开播判定；该方法只负责 WS 建连、重连和消息处理。
+func (dl *DouyinLive) Start() error {
 	dl.setManualClose(false)
 	defer dl.cleanup()
-
-	if !dl.IsLive() {
-		dl.logger.Println("直播间未开播、连接失败或触发风控页")
-		return
-	}
 
 	if err := dl.startWebSocket(); err != nil {
 		dl.logger.Printf("WebSocket连接失败: %v\n", err)
 		if dl.reconnect(defaultMaxRetries, true, false) {
 			dl.processMessages()
+			return nil
 		}
-		return
+		return err
 	}
 
 	dl.processMessages()
+	return nil
 }
 
-// connectWebSocket 连接 WebSocket
+// startWebSocket 基于当前上下文建立 WebSocket 连接。
 func (dl *DouyinLive) startWebSocket() error {
 	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = websocketConnectTimeout
@@ -549,9 +555,9 @@ func (dl *DouyinLive) buildWebsocketURL() string {
 	)
 }
 
-// makeURL 初始化上下文后构建 WebSocket URL
+// makeURL 初始化 WebSocket 所需上下文后构建连接 URL。
 func (dl *DouyinLive) makeURL() (string, error) {
-	if err := dl.initialize(); err != nil {
+	if err := dl.prepareWebSocketContext(); err != nil {
 		return "", fmt.Errorf("初始化失败: %w", err)
 	}
 	return dl.buildWebsocketURL(), nil

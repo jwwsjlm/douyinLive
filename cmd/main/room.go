@@ -543,30 +543,41 @@ func (r *Room) stopMonitorLoop() {
 	}
 }
 
-// startLiveSession 启动抖音直播监听和事件处理
+// startLiveSession 启动抖音直播监听和事件处理。
+// 该方法负责创建 DouyinLive、显式判定开播状态，并在确认开播后启动后台 WS 会话。
 func (r *Room) startLiveSession() error {
 	d, err := douyinLive.NewDouyinLive(r.id, r.logger, r.cookie)
-	r.douyinLive = d
 	if err != nil {
 		return err
 	}
+
+	isLive, err := d.IsLive()
+	if err != nil {
+		return fmt.Errorf("检查直播间 %s 状态失败: %w", r.id, err)
+	}
+	if !isLive {
+		return fmt.Errorf("直播间 %s 未开播: %w", r.id, douyinLive.ErrLiveNotStarted)
+	}
+
+	r.mu.Lock()
+	r.douyinLive = d
+	r.mu.Unlock()
 
 	d.Subscribe(func(eventData *new_douyin.Webcast_Im_Message) {
 		r.handleDouyinEvent(eventData, d.GetName())
 	})
 
 	if r.clientCount() == 0 {
-		d.Close()
+		r.closeDouyinLive()
 		return errRoomInactive
 	}
 
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		d.Close()
+		r.closeDouyinLive()
 		return errRoomInactive
 	}
-
 	r.mu.Unlock()
 
 	r.notifyOnlineStatus()
@@ -576,7 +587,9 @@ func (r *Room) startLiveSession() error {
 }
 
 func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
-	d.Start()
+	if err := d.Start(); err != nil {
+		r.logger.Printf("房间 %s 直播监听运行结束: %v", r.id, err)
+	}
 
 	r.mu.Lock()
 	if r.douyinLive == d {

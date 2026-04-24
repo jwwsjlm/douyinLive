@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -28,6 +29,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	if cfg.Pprof.Enabled {
+		go func() {
+			addr := ":" + cfg.Pprof.Port
+			logger.Printf("pprof 调试服务启动成功，监听端口: %s", cfg.Pprof.Port)
+			if err := http.ListenAndServe(addr, nil); err != nil {
+				logger.Printf("pprof 服务异常退出: %v", err)
+			}
+		}()
+	}
+
 	// 创建应用实例
 	app, err := NewApp(context.Background(), cfg, logger)
 	if err != nil {
@@ -42,6 +53,9 @@ func main() {
 	}()
 	<-app.ready
 	logger.Printf("WebSocket 服务启动成功，地址为：ws://127.0.0.1:%v", app.runningPort)
+	if cfg.Pprof.Enabled {
+		logger.Printf("pprof 地址为：http://127.0.0.1:%s/debug/pprof/", cfg.Pprof.Port)
+	}
 
 	// 等待终止信号，实现优雅关闭
 	quit := make(chan os.Signal, 1)

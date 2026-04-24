@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     ports:
       - "1088:1088"
+      - "6060:6060"
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml"]

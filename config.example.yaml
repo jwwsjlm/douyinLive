@@ -7,6 +7,13 @@ port: "1088"
 # 是否输出未知消息类型（调试用）
 unknown: false
 
+# pprof 调试配置（内存/协程分析用）
+pprof:
+  # 是否启用 pprof
+  enabled: false
+  # pprof 服务端口
+  port: "6060"
+
 # 未开播监控配置
 monitor:
   # 检查是否开播的时间间隔

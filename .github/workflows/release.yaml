@@ -85,7 +85,7 @@ jobs:
           images: ghcr.io/${{ github.repository_owner }}/douyinlive
           tags: |
             type=ref,event=tag
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(github.event.release.tag_name, '-test') }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7

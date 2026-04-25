@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/dgraph-io/ristretto/v2"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -752,13 +751,8 @@ func (dl *DouyinLive) closeCurrentConnection(code int, reason string) {
 
 // handleGzipMessage 处理 GZIP 消息
 func (dl *DouyinLive) handleGzipMessage(pushFrame *new_douyin.Webcast_Im_PushFrame, response *new_douyin.Webcast_Im_Response, controlMsg *douyin.ControlMessage) {
-	uncompressed, err := dl.decompressGzip(pushFrame.Payload)
-	if err != nil {
-		dl.logger.Printf("GZIP解压失败: %v\n", err)
-		return
-	}
-	if err := dl.decodeResponse(uncompressed, pushFrame, response, controlMsg); err != nil {
-		dl.logger.Printf("解析Response失败: %v\n", err)
+	if err := dl.decodeGzipResponse(pushFrame.Payload, pushFrame, response, controlMsg); err != nil {
+		dl.logger.Printf("解析GZIP Response失败: %v\n", err)
 	}
 }
 
@@ -784,26 +778,25 @@ func (dl *DouyinLive) decodeResponse(data []byte, pushFrame *new_douyin.Webcast_
 	return nil
 }
 
-// decompressGzip 解压 GZIP 数据
-func (dl *DouyinLive) decompressGzip(data []byte) ([]byte, error) {
+func (dl *DouyinLive) decodeGzipResponse(data []byte, pushFrame *new_douyin.Webcast_Im_PushFrame, response *new_douyin.Webcast_Im_Response, controlMsg *douyin.ControlMessage) error {
 	buf := dl.bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
 	defer func() {
 		buf.Reset()
 		dl.bufferPool.Put(buf)
 	}()
 
-	buf.Write(data)
-	gz, err := gzip.NewReader(buf)
+	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer gz.Close()
 
-	result := bytes.NewBuffer(make([]byte, 0, len(data)*2))
-	if _, err = io.Copy(result, gz); err != nil {
-		return nil, err
+	if _, err = buf.ReadFrom(gz); err != nil {
+		return err
 	}
-	return result.Bytes(), nil
+
+	return dl.decodeResponse(buf.Bytes(), pushFrame, response, controlMsg)
 }
 
 // sendAck 发送 ACK 消息

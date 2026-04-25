@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"log"
@@ -199,6 +198,8 @@ type Room struct {
 	onlineStatusCacheKey    string
 	offlineEndedStatusCache []byte
 	offlineEndedStatusKey   string
+	cachedTitle             string
+	cachedAvatarThumb       string
 }
 
 // NewRoom 创建一个新的房间实例
@@ -278,21 +279,25 @@ func appendJSONStringField(dst []byte, key, value string) []byte {
 }
 
 func (r *Room) buildEventJSON(jsonBytes []byte, eventData *new_douyin.Webcast_Im_Message, liveName string) ([]byte, error) {
-	jsonBytes = bytes.TrimSpace(jsonBytes)
 	if len(jsonBytes) == 0 || jsonBytes[len(jsonBytes)-1] != '}' {
 		return nil, fmt.Errorf("无效的事件 JSON")
 	}
 
-	title := ""
-	avatarThumb := ""
 	r.mu.Lock()
+	title := r.cachedTitle
+	avatarThumb := r.cachedAvatarThumb
 	if r.douyinLive != nil {
 		title = r.douyinLive.GetTitle()
 		avatarThumb = r.douyinLive.GetAvatarThumb()
+		if title != r.cachedTitle || avatarThumb != r.cachedAvatarThumb {
+			r.cachedTitle = title
+			r.cachedAvatarThumb = avatarThumb
+		}
 	}
 	r.mu.Unlock()
 
-	result := make([]byte, 0, len(jsonBytes)+128)
+	extra := 64 + len(eventData.Method) + len(liveName) + len(title) + len(avatarThumb)
+	result := make([]byte, 0, len(jsonBytes)+extra)
 	result = append(result, jsonBytes[:len(jsonBytes)-1]...)
 	result = appendJSONStringField(result, "method", eventData.Method)
 	result = appendJSONStringField(result, "livename", liveName)
@@ -447,6 +452,8 @@ func (r *Room) closeDouyinLive() {
 	r.mu.Lock()
 	d := r.douyinLive
 	r.douyinLive = nil
+	r.cachedTitle = ""
+	r.cachedAvatarThumb = ""
 	r.mu.Unlock()
 
 	if d != nil {
@@ -608,6 +615,8 @@ func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 	r.mu.Lock()
 	if r.douyinLive == d {
 		r.douyinLive = nil
+		r.cachedTitle = ""
+		r.cachedAvatarThumb = ""
 	}
 	closed := r.closed
 	monitorRunning := r.monitorStopCh != nil
@@ -681,6 +690,8 @@ func (r *Room) Close() {
 	r.closed = true
 	d := r.douyinLive
 	r.douyinLive = nil
+	r.cachedTitle = ""
+	r.cachedAvatarThumb = ""
 	onClose := r.onClose
 	r.mu.Unlock()
 

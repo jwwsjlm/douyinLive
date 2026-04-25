@@ -565,9 +565,11 @@ func (r *Room) startLiveSession() error {
 
 	isLive, err := d.IsLive()
 	if err != nil {
+		d.Dispose()
 		return fmt.Errorf("检查直播间 %s 状态失败: %w", r.id, err)
 	}
 	if !isLive {
+		d.Dispose()
 		return fmt.Errorf("直播间 %s 未开播: %w", r.id, douyinLive.ErrLiveNotStarted)
 	}
 

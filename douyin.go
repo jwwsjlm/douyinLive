@@ -84,6 +84,7 @@ type DouyinLive struct {
 	title                  string
 	avatarThumb            string
 	ristretto              *ristretto.Cache[string, string] // 新增：Ristretto 缓存
+	releaseOnce            sync.Once
 
 }
 
@@ -155,6 +156,20 @@ func (dl *DouyinLive) Close() {
 	dl.setLiveStatus(false)
 	dl.stopHeartbeatLoop()
 	dl.closeCurrentConnection(websocket.CloseNormalClosure, "closing connection")
+}
+
+// Dispose releases resources for instances that won't enter Start().
+func (dl *DouyinLive) Dispose() {
+	dl.Close()
+	dl.releaseCache()
+}
+
+func (dl *DouyinLive) releaseCache() {
+	dl.releaseOnce.Do(func() {
+		if dl.ristretto != nil {
+			dl.ristretto.Close()
+		}
+	})
 }
 
 func (dl *DouyinLive) rebuildHTTPClientAndHeaders() {
@@ -1045,6 +1060,7 @@ func (dl *DouyinLive) cleanup() {
 	if conn != nil {
 		_ = conn.Close()
 	}
+	dl.releaseCache()
 }
 
 // emitEvent 触发事件，遍历处理所有有效处理器

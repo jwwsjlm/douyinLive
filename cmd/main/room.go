@@ -577,8 +577,8 @@ func (r *Room) startLiveSession() error {
 	r.douyinLive = d
 	r.mu.Unlock()
 
-	d.Subscribe(func(eventData *new_douyin.Webcast_Im_Message) {
-		r.handleDouyinEvent(eventData, d.GetName())
+	d.Subscribe(func(eventData *new_douyin.Webcast_Im_Message, parsed proto.Message) {
+		r.handleDouyinEvent(eventData, parsed, d.GetName())
 	})
 
 	if r.clientCount() == 0 {
@@ -625,18 +625,27 @@ func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 }
 
 // handleDouyinEvent 处理从抖音接收到的事件
-func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, liveName string) {
-	msg, err := generated.GetMessageInstance(eventData.Method)
-	if err != nil {
-		if r.unknown {
-			r.logger.Printf("未知消息类型: method=%s payload_len=%d", eventData.Method, len(eventData.Payload))
-		}
+func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, parsed proto.Message, liveName string) {
+	if r.clientCount() == 0 {
 		return
 	}
 
-	if err := proto.Unmarshal(eventData.Payload, msg); err != nil {
-		r.logger.Printf("Protobuf 反序列化失败: %v, 方法: %s", err, eventData.Method)
-		return
+	msg := parsed
+	var err error
+	if msg == nil {
+		msg, err = generated.GetMessageInstance(eventData.Method)
+		if err != nil {
+			if r.unknown {
+				r.logger.Printf("未知消息类型: method=%s payload_len=%d", eventData.Method, len(eventData.Payload))
+			}
+			return
+		}
+		defer generated.PutMessageInstance(eventData.Method, msg)
+
+		if err := proto.Unmarshal(eventData.Payload, msg); err != nil {
+			r.logger.Printf("Protobuf 反序列化失败: %v, 方法: %s", err, eventData.Method)
+			return
+		}
 	}
 
 	jsonBytes, err := protojson.Marshal(msg)

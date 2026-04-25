@@ -96,7 +96,7 @@ type logger interface {
 
 type EventHandler struct {
 	ID      string
-	Handler func(*new_douyin.Webcast_Im_Message)
+	Handler func(*new_douyin.Webcast_Im_Message, proto.Message)
 }
 
 // NewDouyinLive 创建一个新的 DouyinLive 实例
@@ -834,18 +834,20 @@ func (dl *DouyinLive) sendAck(logID uint64, internalExt string) {
 // handleSingleMessage 处理单条消息
 func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 	controlMsg *douyin.ControlMessage) {
-	dl.emitEvent(msg)
-
 	if msg.Method == "WebcastControlMessage" {
 		if err := proto.Unmarshal(msg.Payload, controlMsg); err != nil {
 			dl.logger.Printf("解析控制消息失败: %v\n", err)
 			return
 		}
+		dl.emitEvent(msg, controlMsg)
 		if controlMsg.Status == 3 {
 			dl.logger.Printf("[%s]直播间已关闭", dl.GetName())
 			dl.setLiveStatus(false)
 		}
+		return
 	}
+
+	dl.emitEvent(msg, nil)
 }
 
 func (dl *DouyinLive) reconnectPlan(reason string, failureCount int, baseDelay time.Duration, allowUARefresh bool) (delay time.Duration, changeUA bool, rebuildHTTP bool) {
@@ -1064,18 +1066,18 @@ func (dl *DouyinLive) cleanup() {
 }
 
 // emitEvent 触发事件，遍历处理所有有效处理器
-func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message) {
+func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto.Message) {
 	dl.mu.Lock()
 	handlers := append([]EventHandler(nil), dl.eventHandlers...)
 	dl.mu.Unlock()
 
 	for _, handler := range handlers {
-		handler.Handler(msg)
+		handler.Handler(msg, parsed)
 	}
 }
 
 // Subscribe 订阅事件，生成唯一ID
-func (dl *DouyinLive) Subscribe(handler func(*new_douyin.Webcast_Im_Message)) string {
+func (dl *DouyinLive) Subscribe(handler func(*new_douyin.Webcast_Im_Message, proto.Message)) string {
 	id := utils.GenerateUniqueID() // 假设这是一个生成唯一ID的函数
 	dl.mu.Lock()
 	dl.eventHandlers = append(dl.eventHandlers, EventHandler{

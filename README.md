@@ -75,40 +75,6 @@ go build -o douyinLive ./cmd/main
 ./douyinLive
 ```
 
-如果你要排查内存、goroutine 或 CPU 问题，可以开启内置 `pprof`：
-
-```bash
-./douyinLive --pprof
-```
-
-或指定端口：
-
-```bash
-./douyinLive --pprof --pprof-port 6060
-```
-
-程序启动后可访问：
-
-```text
-http://127.0.0.1:6060/debug/pprof/
-```
-
-常用命令：
-
-```bash
-go tool pprof http://127.0.0.1:6060/debug/pprof/heap
-go tool pprof http://127.0.0.1:6060/debug/pprof/allocs
-go tool pprof http://127.0.0.1:6060/debug/pprof/goroutine
-```
-
-也可以在 `config.yaml` 中配置：
-
-```yaml
-pprof:
-  enabled: true
-  port: "6060"
-```
-
 ### 方式三：Docker 运行
 
 #### 1. 直接启动最新版镜像

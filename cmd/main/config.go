@@ -23,19 +23,12 @@ type MonitorConfig struct {
 	NotifyInterval time.Duration
 }
 
-// PprofConfig 存储 pprof 调试配置
-type PprofConfig struct {
-	Enabled bool
-	Port    string
-}
-
 // Config 存储应用的所有配置
 type Config struct {
 	Port    string
 	Unknown bool
 	Cookie  CookieConfig
 	Monitor MonitorConfig
-	Pprof   PprofConfig
 }
 
 func firstNonEmpty(values ...string) string {
@@ -52,9 +45,6 @@ func NewConfig() (*Config, error) {
 	// 绑定命令行参数
 	pflag.String("port", "1088", "WebSocket 服务端口")
 	pflag.Bool("unknown", false, "是否输出未知源的 pb 消息")
-	pflag.Bool("pprof", false, "是否启用 pprof 调试服务")
-	pflag.Bool("pprof-enabled", false, "是否启用 pprof 调试服务（兼容命令行参数）")
-	pflag.String("pprof-port", "6060", "pprof 调试服务端口")
 	configFile := pflag.String("config", "", "指定配置文件路径")
 	pflag.Parse()
 
@@ -93,9 +83,6 @@ func NewConfig() (*Config, error) {
 	viper.SetDefault("cookie.douyin", "")
 	viper.SetDefault("monitor.poll_interval", "15s")
 	viper.SetDefault("monitor.notify_interval", "30s")
-	viper.SetDefault("pprof.enabled", false)
-	viper.SetDefault("pprof.port", "6060")
-
 	// 读取配置
 	if err := viper.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
@@ -125,13 +112,6 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("monitor.notify_interval 必须大于 0")
 	}
 
-	pprofPort := firstNonEmpty(
-		viper.GetString("pprof.port"),
-		viper.GetString("pprof-port"),
-		os.Getenv("APP_PPROF_PORT"),
-		"6060",
-	)
-
 	// 填充 Config 结构体
 	cfg := &Config{
 		Port:    viper.GetString("port"),
@@ -142,10 +122,6 @@ func NewConfig() (*Config, error) {
 		Monitor: MonitorConfig{
 			PollInterval:   pollInterval,
 			NotifyInterval: notifyInterval,
-		},
-		Pprof: PprofConfig{
-			Enabled: viper.GetBool("pprof.enabled") || viper.GetBool("pprof") || viper.GetBool("pprof-enabled"),
-			Port:    pprofPort,
 		},
 	}
 

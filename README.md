@@ -322,6 +322,8 @@ monitor:
   notify_interval: "30s"
 cookie:
   douyin: ""
+  rooms:
+    # "516466932480": "ttwid=...; sessionid=..."
 ```
 
 项目里也自带了一个示例文件：
@@ -375,13 +377,44 @@ monitor:
 ```
 
 #### `cookie.douyin`
-抖音 Cookie，可选。
+抖音默认 Cookie，可选。
 
-默认不填。
+默认不填。旧版本只配置 `cookie.douyin` 的写法仍然兼容，不需要修改配置文件。
 
 ```yaml
 cookie:
   douyin: "ttwid=...; sessionid=..."
+```
+
+#### `cookie.rooms`
+按直播间 ID 配置 Cookie，可选。
+
+当某些直播间需要使用不同账号登录态时，可以为指定直播间单独配置 Cookie。没有配置直播间 Cookie 的房间会自动回退使用 `cookie.douyin`；如果 `cookie.douyin` 也为空，则继续使用自动获取 Cookie 的逻辑。
+
+```yaml
+cookie:
+  douyin: "默认 Cookie"
+  rooms:
+    "516466932480": "直播间 516466932480 专用 Cookie"
+    "123456789": "直播间 123456789 专用 Cookie"
+```
+
+Cookie 优先级：
+
+```text
+WebSocket 临时 Cookie > 直播间 Cookie(cookie.rooms) > 默认 Cookie(cookie.douyin) > 自动获取
+```
+
+WebSocket 临时 Cookie 仅建议临时调试使用：
+
+```text
+ws://127.0.0.1:1088/ws/直播间ID?cookie_b64=BASE64URL_COOKIE
+```
+
+也支持直接传 URL 编码后的 Cookie：
+
+```text
+ws://127.0.0.1:1088/ws/直播间ID?cookie=URL_ENCODED_COOKIE
 ```
 
 ### 什么时候需要 Cookie

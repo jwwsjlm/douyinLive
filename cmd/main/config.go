@@ -14,7 +14,8 @@ import (
 
 // CookieConfig 存储 Cookie 配置
 type CookieConfig struct {
-	Douyin string // 抖音 Cookie
+	Douyin string            // 抖音默认 Cookie
+	Rooms  map[string]string // 按直播间 ID 配置的 Cookie
 }
 
 // MonitorConfig 存储未开播监控相关配置
@@ -81,6 +82,7 @@ func NewConfig() (*Config, error) {
 	viper.SetDefault("port", "1088")
 	viper.SetDefault("unknown", false)
 	viper.SetDefault("cookie.douyin", "")
+	viper.SetDefault("cookie.rooms", map[string]string{})
 	viper.SetDefault("monitor.poll_interval", "15s")
 	viper.SetDefault("monitor.notify_interval", "30s")
 	// 读取配置
@@ -118,6 +120,7 @@ func NewConfig() (*Config, error) {
 		Unknown: viper.GetBool("unknown"),
 		Cookie: CookieConfig{
 			Douyin: viper.GetString("cookie.douyin"),
+			Rooms:  viper.GetStringMapString("cookie.rooms"),
 		},
 		Monitor: MonitorConfig{
 			PollInterval:   pollInterval,

@@ -16,6 +16,10 @@ monitor:
 
 # Cookie 配置（可选，不配置则自动获取）
 cookie:
-  # 抖音 Cookie（可选，用于需要登录态的请求）
+  # 抖音默认 Cookie（可选，用于需要登录态的请求）
   # 获取方式：浏览器打开 https://live.douyin.com -> F12 -> Network -> 复制任意请求的 Cookie
   douyin: ""
+  # 按直播间 ID 配置 Cookie（可选）
+  # 优先级：直播间 Cookie > 默认 Cookie > 自动获取
+  rooms:
+    # "123456789": "ttwid=...; sessionid=..."

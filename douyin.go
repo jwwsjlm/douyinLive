@@ -5,13 +5,14 @@ import (
 	"compress/gzip"
 	"errors"
 	"fmt"
-	"github.com/codeGROOVE-dev/retry"
-	"github.com/dgraph-io/ristretto/v2"
 	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/codeGROOVE-dev/retry"
+	"github.com/dgraph-io/ristretto/v2"
 
 	"github.com/tidwall/gjson"
 
@@ -84,7 +85,6 @@ type DouyinLive struct {
 	avatarThumb            string
 	ristretto              *ristretto.Cache[string, string] // 新增：Ristretto 缓存
 	releaseOnce            sync.Once
-
 }
 
 type logger interface {
@@ -408,6 +408,7 @@ func (dl *DouyinLive) doRequest() (string, error) {
 	)
 	//参考代码https://github.com/ihmily/DouyinLiveRecorder
 	headers := map[string]string{
+		"Cookie":     "ttwid=1%7C2iDIYVmjzMcpZ20fcaFde0VghXAA3NaNXE_SLR68IyE%7C1761045455%7Cab35197d5cfb21df6cbb2fa7ef1c9262206b062c315b9d04da746d0b37dfbc7d",
 		"Referer":    "https://live.douyin.com/" + dl.liveID,
 		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36 Core/1.116.567.400 QQBrowser/19.7.6764.400",
 	}

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,28 +36,57 @@ type RoomManager struct {
 	roomsMu        sync.RWMutex
 	logger         *log.Logger
 	unknown        bool
-	cookie         string // 抖音 Cookie
+	cookie         string            // 抖音默认 Cookie
+	roomCookies    map[string]string // 按直播间 ID 配置的 Cookie
 	pollInterval   time.Duration
 	notifyInterval time.Duration
 }
 
 // NewRoomManager 创建一个新的 RoomManager
-// cookie 参数：可选的抖音 Cookie
-func NewRoomManager(logger *log.Logger, unknown bool, cookie string, pollInterval time.Duration, notifyInterval time.Duration) *RoomManager {
+// cookie 参数：可选的抖音默认 Cookie
+func NewRoomManager(logger *log.Logger, unknown bool, cookie string, roomCookies map[string]string, pollInterval time.Duration, notifyInterval time.Duration) *RoomManager {
 	return &RoomManager{
 		rooms:          make(map[string]*Room),
 		logger:         logger,
 		unknown:        unknown,
 		cookie:         cookie,
+		roomCookies:    roomCookies,
 		pollInterval:   pollInterval,
 		notifyInterval: notifyInterval,
 	}
 }
 
+func (rm *RoomManager) cookieForRoom(roomID string, override string) string {
+	if cookie := strings.TrimSpace(override); cookie != "" {
+		return cookie
+	}
+
+	if rm.roomCookies != nil {
+		if cookie := strings.TrimSpace(rm.roomCookies[roomID]); cookie != "" {
+			return cookie
+		}
+	}
+
+	return strings.TrimSpace(rm.cookie)
+}
+
+func roomManagerKey(roomID string, cookie string) string {
+	cookie = strings.TrimSpace(cookie)
+	if cookie == "" {
+		return roomID
+	}
+
+	sum := sha256.Sum256([]byte(cookie))
+	return roomID + "#" + hex.EncodeToString(sum[:8])
+}
+
 // GetOrCreateRoom 获取或创建一个新的房间实例
-func (rm *RoomManager) GetOrCreateRoom(roomID string) *Room {
+func (rm *RoomManager) GetOrCreateRoom(roomID string, cookieOverride string) *Room {
+	cookie := rm.cookieForRoom(roomID, cookieOverride)
+	key := roomManagerKey(roomID, cookie)
+
 	rm.roomsMu.RLock()
-	room, ok := rm.rooms[roomID]
+	room, ok := rm.rooms[key]
 	rm.roomsMu.RUnlock()
 	if ok {
 		return room
@@ -62,17 +94,17 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string) *Room {
 
 	rm.roomsMu.Lock()
 	defer rm.roomsMu.Unlock()
-	if room, ok = rm.rooms[roomID]; ok {
+	if room, ok = rm.rooms[key]; ok {
 		return room
 	}
 
-	room = NewRoom(roomID, rm.logger, rm.unknown, rm.cookie, rm.pollInterval, rm.notifyInterval, func() {
+	room = NewRoom(roomID, rm.logger, rm.unknown, cookie, rm.pollInterval, rm.notifyInterval, func() {
 		rm.roomsMu.Lock()
-		delete(rm.rooms, roomID)
+		delete(rm.rooms, key)
 		rm.roomsMu.Unlock()
 		rm.logger.Printf("房间 %s 已从管理器中移除", roomID)
 	})
-	rm.rooms[roomID] = room
+	rm.rooms[key] = room
 	return room
 }
 

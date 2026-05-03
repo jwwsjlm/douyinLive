@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -26,7 +28,7 @@ type App struct {
 // NewApp 创建并返回一个新的 App 实例
 func NewApp(ctx context.Context, config *Config, logger *log.Logger) (*App, error) {
 
-	roomManager := NewRoomManager(logger, config.Unknown, config.Cookie.Douyin, config.Monitor.PollInterval, config.Monitor.NotifyInterval)
+	roomManager := NewRoomManager(logger, config.Unknown, config.Cookie.Douyin, config.Cookie.Rooms, config.Monitor.PollInterval, config.Monitor.NotifyInterval)
 	return &App{
 		ctx:         ctx,
 		logger:      logger,
@@ -77,15 +79,21 @@ func (a *App) Shutdown() error {
 
 // handleWebSocket 处理新的 WebSocket 连接请求
 func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	roomID := strings.TrimPrefix(r.URL.Path, "/ws/")
+	roomID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/ws/"), "/")
 	if roomID == "" {
 		http.Error(w, "无效的房间ID", http.StatusBadRequest)
 		return
 	}
 
+	cookieOverride, err := parseCookieOverride(r)
+	if err != nil {
+		http.Error(w, "Cookie 参数无效", http.StatusBadRequest)
+		return
+	}
+
 	a.logger.Printf("接收到 WebSocket 连接请求, 房间ID: %s, 客户端: %s", roomID, r.RemoteAddr)
 
-	room := a.roomManager.GetOrCreateRoom(roomID)
+	room := a.roomManager.GetOrCreateRoom(roomID, cookieOverride)
 	handler := NewWsHandler(room)
 
 	upgrader := gws.NewUpgrader(handler, &gws.ServerOption{
@@ -101,4 +109,37 @@ func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go socket.ReadLoop()
+}
+
+func parseCookieOverride(r *http.Request) (string, error) {
+	q := r.URL.Query()
+	if cookie := strings.TrimSpace(q.Get("cookie")); cookie != "" {
+		return cookie, nil
+	}
+
+	cookieB64 := strings.TrimSpace(q.Get("cookie_b64"))
+	if cookieB64 == "" {
+		return "", nil
+	}
+
+	cookie, err := decodeCookieBase64(cookieB64)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(cookie), nil
+}
+
+func decodeCookieBase64(value string) (string, error) {
+	decoders := []*base64.Encoding{
+		base64.RawURLEncoding,
+		base64.URLEncoding,
+		base64.StdEncoding,
+	}
+	for _, decoder := range decoders {
+		data, err := decoder.DecodeString(value)
+		if err == nil {
+			return string(data), nil
+		}
+	}
+	return "", fmt.Errorf("invalid base64 cookie")
 }

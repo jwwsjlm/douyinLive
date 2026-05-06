@@ -412,9 +412,10 @@ func (dl *DouyinLive) doRequest() (string, error) {
 		"Referer":    "https://live.douyin.com/" + dl.liveID,
 		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36 Core/1.116.567.400 QQBrowser/19.7.6764.400",
 	}
-	if cookie := dl.getCookieString(); cookie != "" {
-		headers["Cookie"] = cookie
-	}
+	//#https://github.com/jwwsjlm/douyinLive/issues/40
+	//if cookie := dl.getCookieString(); cookie != "" {
+	//	headers["Cookie"] = cookie
+	//}
 	aBogus := sign.AbSign(params, headers["User-Agent"])
 	url := fmt.Sprintf("https://live.douyin.com/webcast/room/web/enter/?%s&a_bogus=%s", params, aBogus)
 	resp, err := dl.client.R().

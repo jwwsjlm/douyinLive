@@ -379,7 +379,7 @@ monitor:
 #### `cookie.douyin`
 抖音默认 Cookie，可选。
 
-默认不填。旧版本只配置 `cookie.douyin` 的写法仍然兼容，不需要修改配置文件。
+没有单独配置某个直播间的 Cookie 时，会优先回退到这里。再往后才是自动获取的逻辑。
 
 ```yaml
 cookie:
@@ -387,9 +387,9 @@ cookie:
 ```
 
 #### `cookie.rooms`
-按直播间 ID 配置 Cookie，可选。
+按直播间 ID 单独配置 Cookie，可选。
 
-当某些直播间需要使用不同账号登录态时，可以为指定直播间单独配置 Cookie。没有配置直播间 Cookie 的房间会自动回退使用 `cookie.douyin`；如果 `cookie.douyin` 也为空，则继续使用自动获取 Cookie 的逻辑。
+如果你要同时监听多个直播间，而且它们对应不同账号、不同登录态，就可以在这里分别配置。没有配置到的直播间，会自动回退使用 `cookie.douyin`。
 
 ```yaml
 cookie:
@@ -397,6 +397,22 @@ cookie:
   rooms:
     "516466932480": "直播间 516466932480 专用 Cookie"
     "123456789": "直播间 123456789 专用 Cookie"
+    "888888888": "直播间 888888888 专用 Cookie"
+```
+
+一个更完整的例子：
+
+```yaml
+port: "1088"
+unknown: false
+monitor:
+  poll_interval: "15s"
+  notify_interval: "30s"
+cookie:
+  douyin: "默认 Cookie"
+  rooms:
+    "516466932480": "room A 的 Cookie"
+    "123456789": "room B 的 Cookie"
 ```
 
 Cookie 优先级：

@@ -502,10 +502,19 @@ func (dl *DouyinLive) isManualClose() bool {
 }
 
 // Start 启动直播间连接。
-// 调用方应在进入该阶段前完成开播判定；该方法只负责 WS 建连、重连和消息处理。
+// 方法内部会先刷新直播状态，确保作为库直接调用时也能进入消息处理循环。
 func (dl *DouyinLive) Start() error {
 	dl.setManualClose(false)
 	defer dl.cleanup()
+
+	isLive, err := dl.refreshLiveStatusFromAPI()
+	if err != nil {
+		dl.setLiveStatus(false)
+		return err
+	}
+	if !isLive {
+		return ErrLiveNotStarted
+	}
 
 	if err := dl.startWebSocket(); err != nil {
 		dl.logger.Printf("WebSocket连接失败: %v\n", err)

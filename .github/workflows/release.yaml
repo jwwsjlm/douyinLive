@@ -1,15 +1,38 @@
 name: release
 
 on:
+  push:
+    tags:
+      - 'v*'
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to upload assets to, for example v2.0.13.'
+        required: true
+        type: string
+      push_docker:
+        description: 'Build and push Docker image to GHCR'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
   packages: write
 
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  APP_NAME: douyinLive
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+
 jobs:
   build-binaries:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -17,27 +40,35 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
-            asset_name: douyinLive-linux-amd64
+            ext: ''
+            package: tar
           - goos: linux
             goarch: arm64
-            asset_name: douyinLive-linux-arm64
+            ext: ''
+            package: tar
           - goos: windows
             goarch: amd64
-            asset_name: douyinLive-windows-amd64.exe
+            ext: .exe
+            package: zip
           - goos: darwin
             goarch: amd64
-            asset_name: douyinLive-darwin-amd64
+            ext: ''
+            package: tar
           - goos: darwin
             goarch: arm64
-            asset_name: douyinLive-darwin-arm64
+            ext: ''
+            package: tar
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v6.4.0
         with:
           go-version-file: go.mod
+          cache: true
 
       - name: Build binary
         env:
@@ -46,33 +77,44 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags='-s -w' -o "dist/${{ matrix.asset_name }}" ./cmd/main
+          base="${APP_NAME}-${RELEASE_TAG}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          go build -trimpath -ldflags='-s -w' -o "dist/${base}${{ matrix.ext }}" ./cmd/main
 
       - name: Package asset
         run: |
-          mkdir -p release
-          cp README.md LICENSE config.example.yaml release/
-          cp "dist/${{ matrix.asset_name }}" release/
-          cd release
-          tar -czf "../${{ matrix.asset_name }}.tar.gz" *
+          mkdir -p release/package release/assets
+          base="${APP_NAME}-${RELEASE_TAG}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          cp README.md LICENSE config.example.yaml release/package/
+          cp "dist/${base}${{ matrix.ext }}" release/package/
+          cd release/package
+          if [ "${{ matrix.package }}" = "zip" ]; then
+            zip -r "../assets/${base}.zip" .
+          else
+            tar -czf "../assets/${base}.tar.gz" .
+          fi
 
       - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.0
         with:
-          files: ${{ matrix.asset_name }}.tar.gz
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: release/assets/*
 
   docker:
+    name: Build Docker image
     runs-on: ubuntu-latest
     needs: build-binaries
+    if: github.event_name != 'workflow_dispatch' || inputs.push_docker
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@v4.0.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4.1.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -80,15 +122,15 @@ jobs:
 
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@v6.0.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/douyinlive
           tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ !contains(github.event.release.tag_name, '-test') }}
+            type=raw,value=${{ env.RELEASE_TAG }}
+            type=raw,value=latest,enable=${{ !contains(env.RELEASE_TAG, '-test') }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v7.1.0
         with:
           context: .
           file: ./Dockerfile

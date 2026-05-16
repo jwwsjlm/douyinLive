@@ -9,7 +9,6 @@ main
 *.7z
 *.tar.gz
 config.yaml
-config.yaml_bak
 logs
 image
 *.log

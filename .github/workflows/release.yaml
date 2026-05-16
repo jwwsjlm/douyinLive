@@ -84,8 +84,8 @@ jobs:
         run: |
           mkdir -p release/package release/assets
           base="${APP_NAME}-${RELEASE_TAG}-${{ matrix.goos }}-${{ matrix.goarch }}"
-          cp README.md LICENSE config.example.yaml release/package/
-          cp "dist/${base}${{ matrix.ext }}" release/package/
+          cp README.md LICENSE config.example.yaml compose.yaml compose.data.yaml release/package/
+          cp "dist/${base}${{ matrix.ext }}" "release/package/${APP_NAME}${{ matrix.ext }}"
           cd release/package
           if [ "${{ matrix.package }}" = "zip" ]; then
             zip -r "../assets/${base}.zip" .

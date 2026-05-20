@@ -41,6 +41,7 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
 
       - name: Validate and capture metadata
         id: meta
@@ -55,104 +56,10 @@ jobs:
           echo "short_sha=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
           echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
-  build-binaries:
-    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
-    runs-on: ubuntu-latest
-    needs: release-meta
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            ext: ''
-            package: tar
-          - goos: linux
-            goarch: arm64
-            ext: ''
-            package: tar
-          - goos: windows
-            goarch: amd64
-            ext: .exe
-            package: zip
-          - goos: darwin
-            goarch: amd64
-            ext: ''
-            package: tar
-          - goos: darwin
-            goarch: arm64
-            ext: ''
-            package: tar
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.2
-        with:
-          ref: ${{ needs.release-meta.outputs.release_tag }}
-
-      - name: Set up Go
-        uses: actions/setup-go@v6.4.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build binary
-        env:
-          CGO_ENABLED: 0
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          BUILD_TAG: ${{ needs.release-meta.outputs.release_tag }}
-          BUILD_COMMIT: ${{ needs.release-meta.outputs.short_sha }}
-          BUILD_DATE: ${{ needs.release-meta.outputs.build_date }}
-        run: |
-          mkdir -p dist
-          base="${APP_NAME}-${RELEASE_TAG}-${BUILD_COMMIT}-${{ matrix.goos }}-${{ matrix.goarch }}"
-          ldflags="-s -w -X main.buildTag=${BUILD_TAG} -X main.buildCommit=${BUILD_COMMIT} -X main.buildDate=${BUILD_DATE}"
-          go build -trimpath -ldflags="$ldflags" -o "dist/${base}${{ matrix.ext }}" ./cmd/main
-
-      - name: Package asset
-        run: |
-          mkdir -p release/package release/assets
-          base="${APP_NAME}-${RELEASE_TAG}-${{ needs.release-meta.outputs.short_sha }}-${{ matrix.goos }}-${{ matrix.goarch }}"
-          cp README.md LICENSE config.example.yaml compose.yaml compose.data.yaml release/package/
-          cp "dist/${base}${{ matrix.ext }}" "release/package/${APP_NAME}${{ matrix.ext }}"
-          cd release/package
-          if [ "${{ matrix.package }}" = "zip" ]; then
-            zip -r "../assets/${base}.zip" .
-          else
-            tar -czf "../assets/${base}.tar.gz" .
-          fi
-
-      - name: Upload release asset
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: ${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-${{ needs.release-meta.outputs.short_sha }}-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: release/assets/*
-          if-no-files-found: error
-
-  publish-release:
-    name: Publish release assets
-    runs-on: ubuntu-latest
-    needs: [release-meta, build-binaries, docker]
-    if: ${{ always() && needs.release-meta.result == 'success' && needs.build-binaries.result == 'success' && (needs.docker.result == 'success' || needs.docker.result == 'skipped') }}
-    permissions:
-      contents: write
-    steps:
-      - name: Download release assets
-        uses: actions/download-artifact@v8.0.1
-        with:
-          path: release/assets
-          merge-multiple: true
-
-      - name: Publish release assets
-        uses: softprops/action-gh-release@v3.0.0
-        with:
-          tag_name: ${{ needs.release-meta.outputs.release_tag }}
-          files: release/assets/*
-
   docker:
     name: Build Docker image
     runs-on: ubuntu-latest
-    needs: [release-meta, build-binaries]
+    needs: release-meta
     permissions:
       contents: read
       packages: write
@@ -197,3 +104,38 @@ jobs:
           cache-to: type=gha,mode=max
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
+
+  publish-release:
+    name: Publish Go release assets
+    runs-on: ubuntu-latest
+    needs: [release-meta, docker]
+    if: ${{ always() && needs.release-meta.result == 'success' && (needs.docker.result == 'success' || needs.docker.result == 'skipped') }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ needs.release-meta.outputs.release_tag }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7.2.2
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean --parallelism 1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_COMMIT: ${{ needs.release-meta.outputs.short_sha }}
+          BUILD_DATE: ${{ needs.release-meta.outputs.build_date }}
+          GORELEASER_CURRENT_TAG: ${{ needs.release-meta.outputs.release_tag }}

@@ -6,5 +6,5 @@ services:
     ports:
       - "1088:1088"
     volumes:
-      - ./data:/app
-    command: ["--config", "/app/config.yaml"]
+      - ./data:/app/data
+    command: ["--config", "/app/data/config.yaml"]

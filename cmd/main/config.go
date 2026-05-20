@@ -12,6 +12,8 @@ import (
 	"github.com/spf13/viper"
 )
 
+var showVersion bool
+
 // CookieConfig 存储 Cookie 配置
 type CookieConfig struct {
 	Douyin string            // 抖音默认 Cookie
@@ -47,7 +49,12 @@ func NewConfig() (*Config, error) {
 	pflag.String("port", "1088", "WebSocket 服务端口")
 	pflag.Bool("unknown", false, "是否输出未知源的 pb 消息")
 	configFile := pflag.String("config", "", "指定配置文件路径")
+	pflag.BoolVar(&showVersion, "version", false, "Print version information")
 	pflag.Parse()
+	if showVersion {
+		fmt.Println(VersionString())
+		os.Exit(0)
+	}
 
 	// 绑定到 viper
 	if err := viper.BindPFlags(pflag.CommandLine); err != nil {

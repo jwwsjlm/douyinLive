@@ -146,8 +146,8 @@ docker run -d \
   --name douyinlive \
   --restart unless-stopped \
   -p 1088:1088 \
-  -v $(pwd)/data:/app \
-  ghcr.io/jwwsjlm/douyinlive:latest --config /app/config.yaml
+  -v $(pwd)/data:/app/data \
+  ghcr.io/jwwsjlm/douyinlive:latest --config /app/data/config.yaml
 ```
 
 这种方式更适合统一管理容器运行时使用到的文件。
@@ -218,8 +218,8 @@ services:
     ports:
       - "1088:1088"
     volumes:
-      - ./data:/app
-    command: ["--config", "/app/config.yaml"]
+      - ./data:/app/data
+    command: ["--config", "/app/data/config.yaml"]
 ```
 
 此时你只需要保证宿主机存在：

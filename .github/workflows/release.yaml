@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -19,21 +17,48 @@ on:
         type: boolean
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
+  packages: read
 
 concurrency:
-  group: release-${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
   APP_NAME: douyinLive
-  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
+  release-meta:
+    name: Prepare release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      build_date: ${{ steps.meta.outputs.build_date }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Validate and capture metadata
+        id: meta
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag must look like v1.2.3 or v1.2.3-rc.1."
+            exit 1
+          fi
+          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
   build-binaries:
     name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
+    needs: release-meta
     strategy:
       fail-fast: false
       matrix:
@@ -62,7 +87,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.release-meta.outputs.release_tag }}
 
       - name: Set up Go
         uses: actions/setup-go@v6.4.0
@@ -75,15 +100,19 @@ jobs:
           CGO_ENABLED: 0
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          BUILD_TAG: ${{ needs.release-meta.outputs.release_tag }}
+          BUILD_COMMIT: ${{ needs.release-meta.outputs.short_sha }}
+          BUILD_DATE: ${{ needs.release-meta.outputs.build_date }}
         run: |
           mkdir -p dist
-          base="${APP_NAME}-${RELEASE_TAG}-${{ matrix.goos }}-${{ matrix.goarch }}"
-          go build -trimpath -ldflags='-s -w' -o "dist/${base}${{ matrix.ext }}" ./cmd/main
+          base="${APP_NAME}-${RELEASE_TAG}-${BUILD_COMMIT}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          ldflags="-s -w -X main.buildTag=${BUILD_TAG} -X main.buildCommit=${BUILD_COMMIT} -X main.buildDate=${BUILD_DATE}"
+          go build -trimpath -ldflags="$ldflags" -o "dist/${base}${{ matrix.ext }}" ./cmd/main
 
       - name: Package asset
         run: |
           mkdir -p release/package release/assets
-          base="${APP_NAME}-${RELEASE_TAG}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          base="${APP_NAME}-${RELEASE_TAG}-${{ needs.release-meta.outputs.short_sha }}-${{ matrix.goos }}-${{ matrix.goarch }}"
           cp README.md LICENSE config.example.yaml compose.yaml compose.data.yaml release/package/
           cp "dist/${base}${{ matrix.ext }}" "release/package/${APP_NAME}${{ matrix.ext }}"
           cd release/package
@@ -94,21 +123,45 @@ jobs:
           fi
 
       - name: Upload release asset
+        uses: actions/upload-artifact@v4.6.0
+        with:
+          name: ${{ env.APP_NAME }}-${{ env.RELEASE_TAG }}-${{ needs.release-meta.outputs.short_sha }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: release/assets/*
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish release assets
+    runs-on: ubuntu-latest
+    needs: [release-meta, build-binaries, docker]
+    if: ${{ always() && needs.release-meta.result == 'success' && needs.build-binaries.result == 'success' && (needs.docker.result == 'success' || needs.docker.result == 'skipped') }}
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4.3.0
+        with:
+          path: release/assets
+          merge-multiple: true
+
+      - name: Publish release assets
         uses: softprops/action-gh-release@v3.0.0
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
+          tag_name: ${{ needs.release-meta.outputs.release_tag }}
           files: release/assets/*
 
   docker:
     name: Build Docker image
     runs-on: ubuntu-latest
-    needs: build-binaries
+    needs: [release-meta, build-binaries]
+    permissions:
+      contents: read
+      packages: write
     if: github.event_name != 'workflow_dispatch' || inputs.push_docker
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.release-meta.outputs.release_tag }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.0.0
@@ -121,13 +174,13 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract Docker metadata
-        id: meta
+        id: docker_meta
         uses: docker/metadata-action@v6.0.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/douyinlive
           tags: |
-            type=raw,value=${{ env.RELEASE_TAG }}
-            type=raw,value=latest,enable=${{ !contains(env.RELEASE_TAG, '-test') }}
+            type=raw,value=${{ needs.release-meta.outputs.release_tag }}
+            type=raw,value=latest,enable=${{ !contains(needs.release-meta.outputs.release_tag, '-') }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7.1.0
@@ -136,5 +189,11 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_TAG=${{ needs.release-meta.outputs.release_tag }}
+            BUILD_COMMIT=${{ needs.release-meta.outputs.short_sha }}
+            BUILD_DATE=${{ needs.release-meta.outputs.build_date }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}

@@ -29,6 +29,8 @@ func main() {
 	}
 
 	// 创建应用实例
+	logger.Printf("Version: %s", VersionString())
+
 	app, err := NewApp(context.Background(), cfg, logger)
 	if err != nil {
 		logger.Fatalf("创建应用实例失败：%v", err)

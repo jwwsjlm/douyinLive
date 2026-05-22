@@ -74,7 +74,7 @@ jobs:
         uses: docker/setup-buildx-action@v4.0.0
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4.1.0
+        uses: docker/login-action@v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -82,19 +82,28 @@ jobs:
 
       - name: Extract Docker metadata
         id: docker_meta
-        uses: docker/metadata-action@v6.0.0
+        uses: docker/metadata-action@v6.1.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ghcr.io/${{ github.repository_owner }}/douyinlive
           tags: |
             type=raw,value=${{ needs.release-meta.outputs.release_tag }}
             type=raw,value=latest,enable=${{ !contains(needs.release-meta.outputs.release_tag, '-') }}
+          labels: |
+            org.opencontainers.image.title=${{ env.APP_NAME }}
+            org.opencontainers.image.description=Douyin live WebSocket message forwarder
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}#readme
+            org.opencontainers.image.licenses=MIT
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v7.1.0
+        id: docker_build
+        uses: docker/build-push-action@v7.2.0
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
             BUILD_TAG=${{ needs.release-meta.outputs.release_tag }}
@@ -104,6 +113,18 @@ jobs:
           cache-to: type=gha,mode=max
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
+          annotations: ${{ steps.docker_meta.outputs.annotations }}
+
+      - name: Summarize Docker image
+        run: |
+          {
+            echo "### Docker image"
+            echo ""
+            echo "- Image: \`ghcr.io/${{ github.repository_owner }}/douyinlive\`"
+            echo "- Tag: \`${{ needs.release-meta.outputs.release_tag }}\`"
+            echo "- Digest: \`${{ steps.docker_build.outputs.digest }}\`"
+            echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   publish-release:
     name: Publish Go release assets

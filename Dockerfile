@@ -5,6 +5,7 @@ ARG TARGETARCH=amd64
 ARG BUILD_TAG=dev
 ARG BUILD_COMMIT=unknown
 ARG BUILD_DATE=unknown
+ARG BUILD_SOURCE=local
 
 WORKDIR /src
 RUN apk add --no-cache git ca-certificates tzdata
@@ -13,7 +14,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w -X main.buildTag=${BUILD_TAG} -X main.buildCommit=${BUILD_COMMIT} -X main.buildDate=${BUILD_DATE}" -o /out/douyinLive ./cmd/main
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w -X main.buildTag=${BUILD_TAG} -X main.buildCommit=${BUILD_COMMIT} -X main.buildDate=${BUILD_DATE} -X main.buildSource=${BUILD_SOURCE}" -o /out/douyinLive ./cmd/main
 
 FROM alpine:3.22
 

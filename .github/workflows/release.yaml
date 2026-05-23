@@ -36,6 +36,7 @@ jobs:
       release_tag: ${{ steps.meta.outputs.release_tag }}
       short_sha: ${{ steps.meta.outputs.short_sha }}
       build_date: ${{ steps.meta.outputs.build_date }}
+      build_source: ${{ steps.meta.outputs.build_source }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -55,6 +56,7 @@ jobs:
           echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
           echo "short_sha=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
           echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+          echo "build_source=github-actions/${GITHUB_WORKFLOW}#${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
   docker:
     name: Build Docker image
@@ -109,6 +111,7 @@ jobs:
             BUILD_TAG=${{ needs.release-meta.outputs.release_tag }}
             BUILD_COMMIT=${{ needs.release-meta.outputs.short_sha }}
             BUILD_DATE=${{ needs.release-meta.outputs.build_date }}
+            BUILD_SOURCE=${{ needs.release-meta.outputs.build_source }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: ${{ steps.docker_meta.outputs.tags }}
@@ -124,6 +127,7 @@ jobs:
             echo "- Tag: \`${{ needs.release-meta.outputs.release_tag }}\`"
             echo "- Digest: \`${{ steps.docker_build.outputs.digest }}\`"
             echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
+            echo "- Build source: \`${{ needs.release-meta.outputs.build_source }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish-release:
@@ -159,4 +163,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUILD_COMMIT: ${{ needs.release-meta.outputs.short_sha }}
           BUILD_DATE: ${{ needs.release-meta.outputs.build_date }}
+          BUILD_SOURCE: ${{ needs.release-meta.outputs.build_source }}
           GORELEASER_CURRENT_TAG: ${{ needs.release-meta.outputs.release_tag }}

@@ -21,7 +21,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.buildTag={{ .Tag }} -X main.buildCommit={{ .Env.BUILD_COMMIT }} -X main.buildDate={{ .Env.BUILD_DATE }}
+      - -s -w -X main.buildTag={{ .Tag }} -X main.buildCommit={{ .Env.BUILD_COMMIT }} -X main.buildDate={{ .Env.BUILD_DATE }} -X main.buildSource={{ .Env.BUILD_SOURCE }}
 
 archives:
   - id: douyinLive

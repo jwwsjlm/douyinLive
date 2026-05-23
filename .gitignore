@@ -34,3 +34,5 @@ config*.local.yaml
 # Go
 *.test
 *.out
+/.gocache/
+/.gomodcache/

@@ -13,7 +13,6 @@ import (
 
 	"github.com/jwwsjlm/douyinLive/v2"
 	"github.com/jwwsjlm/douyinLive/v2/generated"
-	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 	"github.com/lxzan/gws"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -209,29 +208,21 @@ func (r *Room) closeClient(clientID string, closePayload []byte) {
 
 // Room 代表一个直播间
 type Room struct {
-	id                      string
-	logger                  *log.Logger
-	clients                 map[string]*Client
-	clientsMu               sync.RWMutex
-	douyinLive              *douyinLive.DouyinLive
-	mu                      sync.Mutex
-	onClose                 func()
-	unknown                 bool
-	cookie                  string
-	pollInterval            time.Duration
-	notifyInterval          time.Duration
-	starting                bool
-	closed                  bool
-	monitorStopCh           chan struct{}
-	monitorDoneCh           chan struct{}
-	offlineStatusCache      []byte
-	offlineStatusCacheKey   string
-	onlineStatusCache       []byte
-	onlineStatusCacheKey    string
-	offlineEndedStatusCache []byte
-	offlineEndedStatusKey   string
-	cachedTitle             string
-	cachedAvatarThumb       string
+	id             string
+	logger         *log.Logger
+	clients        map[string]*Client
+	clientsMu      sync.RWMutex
+	douyinLive     *douyinLive.DouyinLive
+	mu             sync.Mutex
+	onClose        func()
+	unknown        bool
+	cookie         string
+	pollInterval   time.Duration
+	notifyInterval time.Duration
+	starting       bool
+	closed         bool
+	monitorStopCh  chan struct{}
+	monitorDoneCh  chan struct{}
 }
 
 // NewRoom 创建一个新的房间实例
@@ -310,28 +301,15 @@ func appendJSONStringField(dst []byte, key, value string) []byte {
 	return dst
 }
 
-func (r *Room) buildEventJSON(jsonBytes []byte, eventData *new_douyin.Webcast_Im_Message, liveName string) ([]byte, error) {
+func (r *Room) buildEventJSON(jsonBytes []byte, method, liveName, title, avatarThumb string) ([]byte, error) {
 	if len(jsonBytes) == 0 || jsonBytes[len(jsonBytes)-1] != '}' {
 		return nil, fmt.Errorf("无效的事件 JSON")
 	}
 
-	r.mu.Lock()
-	title := r.cachedTitle
-	avatarThumb := r.cachedAvatarThumb
-	if r.douyinLive != nil {
-		title = r.douyinLive.GetTitle()
-		avatarThumb = r.douyinLive.GetAvatarThumb()
-		if title != r.cachedTitle || avatarThumb != r.cachedAvatarThumb {
-			r.cachedTitle = title
-			r.cachedAvatarThumb = avatarThumb
-		}
-	}
-	r.mu.Unlock()
-
-	extra := 64 + len(eventData.Method) + len(liveName) + len(title) + len(avatarThumb)
+	extra := 64 + len(method) + len(liveName) + len(title) + len(avatarThumb)
 	result := make([]byte, 0, len(jsonBytes)+extra)
 	result = append(result, jsonBytes[:len(jsonBytes)-1]...)
-	result = appendJSONStringField(result, "method", eventData.Method)
+	result = appendJSONStringField(result, "method", method)
 	result = appendJSONStringField(result, "livename", liveName)
 	result = appendJSONStringField(result, "title", title)
 	result = appendJSONStringField(result, "avatarThumb", avatarThumb)
@@ -341,48 +319,18 @@ func (r *Room) buildEventJSON(jsonBytes []byte, eventData *new_douyin.Webcast_Im
 }
 
 func (r *Room) offlineStatusMessage() []byte {
-	key := fmt.Sprintf("%s|%s", r.id, r.notifyInterval)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.offlineStatusCacheKey == key && len(r.offlineStatusCache) > 0 {
-		return r.offlineStatusCache
-	}
-
-	payload := []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":false,"room_id":%s,"message":"直播间未开播","retry_interval_seconds":%d}`,
+	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":false,"room_id":%s,"message":"直播间未开播","retry_interval_seconds":%d}`,
 		strconv.Quote(r.id), int(r.notifyInterval/time.Second)))
-	r.offlineStatusCacheKey = key
-	r.offlineStatusCache = payload
-	return payload
 }
 
 func (r *Room) offlineEndedStatusMessage() []byte {
-	key := fmt.Sprintf("%s|%s", r.id, r.notifyInterval)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.offlineEndedStatusKey == key && len(r.offlineEndedStatusCache) > 0 {
-		return r.offlineEndedStatusCache
-	}
-
-	payload := []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":false,"room_id":%s,"message":"直播间已下播","ended":true,"retry_interval_seconds":%d}`,
+	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":false,"room_id":%s,"message":"直播间已下播","ended":true,"retry_interval_seconds":%d}`,
 		strconv.Quote(r.id), int(r.notifyInterval/time.Second)))
-	r.offlineEndedStatusKey = key
-	r.offlineEndedStatusCache = payload
-	return payload
 }
 
 func (r *Room) onlineStatusMessage() []byte {
-	key := r.id
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.onlineStatusCacheKey == key && len(r.onlineStatusCache) > 0 {
-		return r.onlineStatusCache
-	}
-
-	payload := []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":true,"room_id":%s,"message":"直播间已开播"}`,
+	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":true,"room_id":%s,"message":"直播间已开播"}`,
 		strconv.Quote(r.id)))
-	r.onlineStatusCacheKey = key
-	r.onlineStatusCache = payload
-	return payload
 }
 
 func (r *Room) notifyOfflineStatus() {
@@ -438,7 +386,7 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	r.mu.Unlock()
 
 	if err == nil {
-		r.logger.Printf("房间 %s 的直播连接已成功启动", r.douyinLive.GetName())
+		r.logger.Printf("房间 %s 的直播连接已成功启动", r.id)
 		return
 	}
 	if errors.Is(err, errRoomInactive) {
@@ -484,8 +432,6 @@ func (r *Room) closeDouyinLive() {
 	r.mu.Lock()
 	d := r.douyinLive
 	r.douyinLive = nil
-	r.cachedTitle = ""
-	r.cachedAvatarThumb = ""
 	r.mu.Unlock()
 
 	if d != nil {
@@ -616,19 +562,19 @@ func (r *Room) startLiveSession() error {
 	r.douyinLive = d
 	r.mu.Unlock()
 
-	d.Subscribe(func(eventData *new_douyin.Webcast_Im_Message, parsed proto.Message) {
-		r.handleDouyinEvent(eventData, parsed, d.GetName())
+	d.SubscribeMessage(func(message *douyinLive.LiveMessage) {
+		r.handleDouyinEvent(message)
 	})
 
 	if r.clientCount() == 0 {
-		r.closeDouyinLive()
+		r.disposePendingLive(d)
 		return errRoomInactive
 	}
 
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		r.closeDouyinLive()
+		r.disposePendingLive(d)
 		return errRoomInactive
 	}
 	r.mu.Unlock()
@@ -639,6 +585,16 @@ func (r *Room) startLiveSession() error {
 	return nil
 }
 
+func (r *Room) disposePendingLive(d *douyinLive.DouyinLive) {
+	r.mu.Lock()
+	if r.douyinLive == d {
+		r.douyinLive = nil
+	}
+	r.mu.Unlock()
+
+	d.Dispose()
+}
+
 func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 	if err := d.Start(); err != nil {
 		r.logger.Printf("房间 %s 直播监听运行结束: %v", r.id, err)
@@ -647,8 +603,6 @@ func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 	r.mu.Lock()
 	if r.douyinLive == d {
 		r.douyinLive = nil
-		r.cachedTitle = ""
-		r.cachedAvatarThumb = ""
 	}
 	closed := r.closed
 	monitorRunning := r.monitorStopCh != nil
@@ -666,12 +620,16 @@ func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 }
 
 // handleDouyinEvent 处理从抖音接收到的事件
-func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, parsed proto.Message, liveName string) {
+func (r *Room) handleDouyinEvent(event *douyinLive.LiveMessage) {
 	if r.clientCount() == 0 {
 		return
 	}
+	if event == nil || event.Raw == nil {
+		return
+	}
 
-	msg := parsed
+	eventData := event.Raw
+	msg := event.Parsed
 	var err error
 	if msg == nil {
 		msg, err = generated.GetMessageInstance(eventData.Method)
@@ -695,7 +653,7 @@ func (r *Room) handleDouyinEvent(eventData *new_douyin.Webcast_Im_Message, parse
 		return
 	}
 
-	finalJSON, err := r.buildEventJSON(jsonBytes, eventData, liveName)
+	finalJSON, err := r.buildEventJSON(jsonBytes, eventData.Method, event.LiveName, event.Title, event.AvatarThumb)
 	if err != nil {
 		r.logger.Printf("事件 JSON 组装失败: %v, 方法: %s", err, eventData.Method)
 		return
@@ -722,8 +680,6 @@ func (r *Room) Close() {
 	r.closed = true
 	d := r.douyinLive
 	r.douyinLive = nil
-	r.cachedTitle = ""
-	r.cachedAvatarThumb = ""
 	onClose := r.onClose
 	r.mu.Unlock()
 

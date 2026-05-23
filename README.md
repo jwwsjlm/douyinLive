@@ -56,6 +56,15 @@
 2. 下载对应平台的程序
 3. 运行程序
 
+发布包名称会带上版本号和构建 commit，格式类似：
+
+```text
+douyinLive-v2.0.3-abcdef123456-linux-amd64.tar.gz
+douyinLive-v2.0.3-abcdef123456-windows-amd64.zip
+```
+
+压缩包里的可执行文件名仍然固定为 `douyinLive`，所以脚本和 Docker 启动命令不需要因为 hash 变化而每次修改。
+
 ```bash
 ./douyinLive
 ```
@@ -83,6 +92,18 @@ go build -o douyinLive ./cmd/main
 ./douyinLive
 ```
 
+查看当前二进制的构建信息：
+
+```bash
+./douyinLive --version
+```
+
+输出示例：
+
+```text
+tag=v2.0.3 commit=abcdef123456 buildDate=2026-05-24T00:00:00Z source=github-actions/release#123.1
+```
+
 ### 方式三：Docker 运行
 
 #### 1. 直接启动最新版镜像
@@ -101,6 +122,12 @@ ws://127.0.0.1:1088/ws/直播间标识
 
 ```bash
 docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:v2.0.3
+```
+
+Docker 镜像也支持查看构建信息：
+
+```bash
+docker run --rm ghcr.io/jwwsjlm/douyinlive:v2.0.3 --version
 ```
 
 #### 2. 通过 Docker 挂载 `config.yaml`
@@ -314,6 +341,19 @@ https://live.douyin.com/xxxxx
 ./douyinLive --unknown
 ```
 
+### 查看版本和构建来源
+
+```bash
+./douyinLive --version
+```
+
+输出会包含：
+
+- `tag`：本次构建对应的 tag，本地手动构建默认为 `dev`
+- `commit`：构建时注入的短 commit hash
+- `buildDate`：构建时间
+- `source`：构建来源，例如 GitHub Actions 或本地构建
+
 ---
 
 ## 配置文件
@@ -482,6 +522,36 @@ cookie:
 go get github.com/jwwsjlm/douyinLive/v2
 ```
 
+### 订阅接口怎么选
+
+新版本推荐使用 `LiveMessage` 相关订阅接口：
+
+- `SubscribeMessage(handler)`：订阅所有抖音消息
+- `SubscribeMethod(method, handler)`：只订阅一个消息类型
+- `SubscribeMethods(methods, handler)`：订阅多个消息类型
+
+消息类型由抖音 WebSocket 下发的 `method` 字段决定，例如 `WebcastChatMessage`、`WebcastGiftMessage`、`WebcastLikeMessage`。也就是说，订阅分发不是靠结构体类型猜测，而是先看 `method` 字符串，再把匹配到的消息交给对应 handler。
+
+`LiveMessage` 会同时带上原始消息、已解析消息和直播间元信息：
+
+```go
+type LiveMessage struct {
+	LiveID      string
+	RoomID      string
+	LiveName    string
+	Title       string
+	AvatarThumb string
+	Raw         *new_douyin.Webcast_Im_Message
+	Parsed      proto.Message
+	ReceivedAt  time.Time
+}
+```
+
+常用方法：
+
+- `msg.GetMethod()`：获取消息类型
+- `msg.GetPayload()`：获取 protobuf 原始 payload
+
 ### 最简使用示例
 
 ```go
@@ -491,7 +561,6 @@ import (
 	"log"
 
 	douyinlive "github.com/jwwsjlm/douyinLive/v2"
-	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 )
 
 func main() {
@@ -507,11 +576,13 @@ func main() {
 		return
 	}
 
-	// 订阅事件，所有抖音消息都会通过这个回调推送过来
-	dl.Subscribe(func(msg *new_douyin.Webcast_Im_Message) {
-		// 根据 msg.Method 判断消息类型，然后反序列化处理
-		log.Printf("收到消息 method=%s payload_len=%d\n", msg.Method, len(msg.Payload))
-		// 你可以在这里根据不同消息类型做相应处理
+	// 订阅所有抖音消息
+	dl.SubscribeMessage(func(msg *douyinlive.LiveMessage) {
+		log.Printf("收到消息 method=%s payload_len=%d live=%s\n",
+			msg.GetMethod(),
+			len(msg.GetPayload()),
+			msg.LiveName,
+		)
 	})
 
 	// 启动监听，会阻塞直到连接关闭
@@ -529,7 +600,6 @@ import (
 
 	douyinlive "github.com/jwwsjlm/douyinLive/v2"
 	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
-	"github.com/jwwsjlm/douyinLive/v2/generated/douyin"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -540,39 +610,45 @@ func main() {
 		log.Fatal(err)
 	}
 
-	dl.Subscribe(func(msg *new_douyin.Webcast_Im_Message) {
-		switch msg.Method {
-		case "WebcastChatMessage":
-			chat := &douyin.WebcastChatMessage{}
-			if err := proto.Unmarshal(msg.Payload, chat); err != nil {
+	dl.SubscribeMethod(douyinlive.WebcastChatMessage, func(msg *douyinlive.LiveMessage) {
+		chat := &new_douyin.Webcast_Im_ChatMessage{}
+		if err := proto.Unmarshal(msg.GetPayload(), chat); err != nil {
+			log.Println(err)
+			return
+		}
+		if chat.GetContent() != "" && chat.GetUser() != nil {
+			log.Printf("弹幕 [%s]: %s\n", chat.GetUser().GetNickname(), chat.GetContent())
+		}
+	})
+
+	dl.SubscribeMethods([]string{
+		douyinlive.WebcastGiftMessage,
+		douyinlive.WebcastLikeMessage,
+	}, func(msg *douyinlive.LiveMessage) {
+		switch msg.GetMethod() {
+		case douyinlive.WebcastGiftMessage:
+			gift := &new_douyin.Webcast_Im_GiftMessage{}
+			if err := proto.Unmarshal(msg.GetPayload(), gift); err != nil {
 				log.Println(err)
 				return
 			}
-			// chat.Content 就是弹幕内容
-			// chat.User 就是发送用户信息
-			if chat.GetContent() != "" && chat.GetUser() != nil {
-				log.Printf("弹幕 [%s]: %s\n", chat.User.GetNickname(), chat.GetContent())
+			if gift.GetUser() != nil && gift.GetGift() != nil {
+				log.Printf("礼物: %s 赠送了 %s x%d\n",
+					gift.GetUser().GetNickname(),
+					gift.GetGift().GetName(),
+					gift.GetCount(),
+				)
 			}
 
-		case "WebcastGiftMessage":
-			gift := &douyin.WebcastGiftMessage{}
-			if err := proto.Unmarshal(msg.Payload, gift); err != nil {
+		case douyinlive.WebcastLikeMessage:
+			like := &new_douyin.Webcast_Im_LikeMessage{}
+			if err := proto.Unmarshal(msg.GetPayload(), like); err != nil {
 				log.Println(err)
 				return
 			}
-			log.Printf("礼物: %s 赠送了 %s x%d\n",
-				gift.GetUser().GetNickname(),
-				gift.GetGift().GetName(),
-				gift.GetGiftCount(),
-			)
-
-		case "WebcastLikeMessage":
-			like := &douyin.WebcastLikeMessage{}
-			if err := proto.Unmarshal(msg.Payload, like); err != nil {
-				log.Println(err)
-				return
+			if like.GetUser() != nil {
+				log.Printf("%s 点赞了直播间\n", like.GetUser().GetNickname())
 			}
-			log.Printf("%s 点赞了直播间\n", like.GetUser().GetNickname())
 		}
 	})
 
@@ -580,7 +656,9 @@ func main() {
 }
 ```
 
-更多消息类型可以参考 `generated/douyin` 包下的 protobuf 生成代码。
+更多消息类型可以参考 `generated/new_douyin` 包下的 protobuf 生成代码。
+
+旧的 `Subscribe(func(raw, parsed))` 接口仍然保留，方便已有代码兼容；新代码建议优先使用 `SubscribeMessage` / `SubscribeMethod` / `SubscribeMethods`。
 
 ---
 
@@ -652,6 +730,9 @@ setInterval(() => {
 另外会额外补一个字段：
 
 - `livename`：直播间名称
+- `method`：抖音消息类型，例如 `WebcastChatMessage`
+- `title`：直播间标题
+- `avatarThumb`：主播头像缩略图地址
 
 如果直播间还没开播，则会返回系统状态消息，例如：
 

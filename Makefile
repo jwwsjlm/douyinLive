@@ -36,7 +36,7 @@ install:
 
 proto:
 	@echo "Generating Go code from .proto files..."
-	protoc --proto_path=protobuf --go_out=. protobuf/douyin.proto
+	protoc --proto_path=protobuf --go_out=. protobuf/new_douyin.proto
 
 clean:
 	@echo "Cleaning build artifacts..."

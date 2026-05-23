@@ -10,21 +10,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// CookieConfig Cookie 配置结构
-type CookieConfig struct {
+// cookieConfig is the YAML shape used internally by CookieManager.
+type cookieConfig struct {
 	Cookie struct {
-		Douyin   string `yaml:"douyin"`
-		Tiktok   string `yaml:"tiktok"`
-		Kuaishou string `yaml:"kuaishou"`
-		Huya     string `yaml:"huya"`
-		Douyu    string `yaml:"douyu"`
-		Bilibili string `yaml:"bilibili"`
+		Douyin string `yaml:"douyin"`
 	} `yaml:"cookie"`
 }
 
 // CookieManager Cookie 管理器
 type CookieManager struct {
-	config *CookieConfig
+	config *cookieConfig
 	jar    *cookiejar.Jar
 }
 
@@ -42,7 +37,7 @@ func (cm *CookieManager) LoadConfig(path string) error {
 	if err != nil {
 		return err
 	}
-	var config CookieConfig
+	var config cookieConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return err
 	}
@@ -54,12 +49,10 @@ func (cm *CookieManager) LoadConfig(path string) error {
 // LoadFromEnv 从环境变量加载 Cookie
 func (cm *CookieManager) LoadFromEnv() {
 	if cm.config == nil {
-		cm.config = &CookieConfig{}
+		cm.config = &cookieConfig{}
 	}
 
 	cm.config.Cookie.Douyin = os.Getenv("DOUYIN_COOKIE")
-	cm.config.Cookie.Tiktok = os.Getenv("TIKTOK_COOKIE")
-	cm.config.Cookie.Kuaishou = os.Getenv("KUAISHOU_COOKIE")
 }
 
 // GetDouyinCookie 获取抖音 Cookie
@@ -73,7 +66,7 @@ func (cm *CookieManager) GetDouyinCookie() string {
 // SetDouyinCookie 手动设置抖音 Cookie
 func (cm *CookieManager) SetDouyinCookie(cookie string) {
 	if cm.config == nil {
-		cm.config = &CookieConfig{}
+		cm.config = &cookieConfig{}
 	}
 	cm.config.Cookie.Douyin = cookie
 }
@@ -124,15 +117,13 @@ func (cm *CookieManager) GetCookies(rawURL string) []*http.Cookie {
 
 // UpdateCookie 更新指定名称的 Cookie 值
 func (cm *CookieManager) UpdateCookie(name, value string) {
-	if cm.config != nil {
-		switch name {
-		case "douyin":
-			cm.config.Cookie.Douyin = value
-		case "tiktok":
-			cm.config.Cookie.Tiktok = value
-		case "kuaishou":
-			cm.config.Cookie.Kuaishou = value
-		}
+	if cm.config == nil {
+		cm.config = &cookieConfig{}
+	}
+
+	switch name {
+	case "douyin":
+		cm.config.Cookie.Douyin = value
 	}
 }
 

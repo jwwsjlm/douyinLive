@@ -3,6 +3,8 @@
 .goreleaser.yaml
 .vscode
 .idea
+.gocache
+.gomodcache
 build
 dist
 release

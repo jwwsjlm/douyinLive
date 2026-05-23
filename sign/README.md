@@ -11,7 +11,7 @@
 - **参考内容**:
     - Cookie 配置文件格式（config.ini）
     - Cookie 读取和传入方式
-    - 多平台 Cookie 管理方案
+    - 抖音 Cookie 管理方案
 
 ---
 
@@ -19,17 +19,12 @@
 
 ### 1. **配置文件格式** (config/config.ini)
 
-DouyinLiveRecorder 使用 INI 格式存储各平台 Cookie：
+本项目只参考 DouyinLiveRecorder 的抖音 Cookie 读取方式：
 
 ```ini
 [Cookie]
 # 录制抖音必填
 抖音cookie = ttwid=1%7CB1qls3GdnZhUov9o2NxOMxxYS2ff6OSvEWbv0ytbES4%7C1680522049%7C280d802d6d478e3e78d0c807f7c487e7ffec0ae4e5fdd6a0fe74c3c6af149511; my_rd=1; passport_csrf_token=3ab34460fa656183fccfb904b16ff742; ...
-快手cookie =
-tiktok_cookie =
-虎牙cookie =
-斗鱼cookie =
-# ... 其他平台
 ```
 
 **代码位置**: [`config/config.ini`](https://github.com/ihmily/DouyinLiveRecorder/blob/main/config/config.ini)
@@ -41,9 +36,6 @@ tiktok_cookie =
 ```python
 # 从配置文件读取 Cookie
 dy_cookie = read_config_value(config, 'Cookie', '抖音cookie', '')
-ks_cookie = read_config_value(config, 'Cookie', '快手cookie', '')
-tiktok_cookie = read_config_value(config, 'Cookie', 'tiktok_cookie', '')
-# ... 其他平台
 ```
 
 ### 3. **Cookie 传入方式**
@@ -88,11 +80,6 @@ json_data = await get_douyin_web_stream_data(
 # config.yaml
 cookie:
   douyin: "ttwid=1%7Cxxx...; my_rd=1; passport_csrf_token=xxx..."
-  tiktok: ""
-  kuaishou: ""
-  huya: ""
-  douyu: ""
-  bilibili: ""
 ```
 
 #### 2. 在 `douyin.go` 中读取配置
@@ -313,7 +300,6 @@ func (dl *DouyinLive) fetchLiveInfo() error {
 |--------------------------|-----------------------|----------------------------------------------------------------------------------------------------------------------|
 | `sign/ab_sign.go`        | a_bogus 签名算法（SM3+RC4） | DouyinLiveRecorder 的 [`src/ab_sign.py`](https://github.com/ihmily/DouyinLiveRecorder/blob/main/src/ab_sign.py)       |
 | `sign/cookie_manager.go` | Cookie 管理器            | DouyinLiveRecorder 的 Cookie 读取逻辑                                                                                     |
-| `sign/usage_example.go`  | 使用示例代码                | -                                                                                                                    |
 | `config.example.yaml`    | 配置文件示例                | DouyinLiveRecorder 的 [`config/config.ini`](https://github.com/ihmily/DouyinLiveRecorder/blob/main/config/config.ini) |
 
 ---
@@ -336,7 +322,7 @@ func (dl *DouyinLive) fetchLiveInfo() error {
 1. Cookie 配置文件格式
 2. Cookie 读取和传入方式
 3. a_bogus 签名算法的实现逻辑
-4. 多平台 Cookie 管理方案
+4. 抖音 Cookie 管理方案
 
 ---
 

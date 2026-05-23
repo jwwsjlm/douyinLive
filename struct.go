@@ -13,9 +13,6 @@ const (
 	WebcastRoomStatsMessage   = "WebcastRoomStatsMessage"
 	WebcastRoomMessage        = "WebcastRoomMessage"
 	WebcastRoomRankMessage    = "WebcastRoomRankMessage"
-
-	Default = "Default"
 )
 
-// Types are defined in douyin.go to avoid duplication
-// See douyin.go for DouyinLive, logger, and EventHandler
+// Core runtime types are defined in douyin.go and live_message.go.

@@ -311,10 +311,48 @@ https://live.douyin.com/xxxxx
 
 ## 运行方式
 
+### CLI 完整示例（推荐先看这里）
+
+`douyinLive` 启动后是一个本地 WebSocket 服务。**直播间标识不是 CLI 启动参数**，而是客户端连接 WebSocket 时写在 URL 里。
+
+#### Linux / macOS
+
+```bash
+cp config.example.yaml config.yaml
+./douyinLive --config ./config.yaml --port 1088 --log-level info
+```
+
+然后让你的客户端连接：
+
+```text
+ws://127.0.0.1:1088/ws/516466932480
+```
+
+#### Windows PowerShell
+
+```powershell
+Copy-Item .\config.example.yaml .\config.yaml
+.\douyinLive.exe --config .\config.yaml --port 1088 --log-level info
+```
+
+然后让你的客户端连接：
+
+```text
+ws://127.0.0.1:1088/ws/516466932480
+```
+
 ### 默认启动
+
+如果不需要配置文件，也可以直接启动：
 
 ```bash
 ./douyinLive
+```
+
+Windows：
+
+```powershell
+.\douyinLive.exe
 ```
 
 默认行为：
@@ -322,11 +360,18 @@ https://live.douyin.com/xxxxx
 - 读取同目录下的 `config.yaml`（如果存在）
 - 如果没有配置文件，就使用默认值
 - 默认端口：`1088`
+- 默认日志级别：`info`
 
 ### 指定端口
 
 ```bash
 ./douyinLive --port 1088
+```
+
+Windows：
+
+```powershell
+.\douyinLive.exe --port 1088
 ```
 
 ### 指定配置文件
@@ -335,10 +380,22 @@ https://live.douyin.com/xxxxx
 ./douyinLive --config ./config.yaml
 ```
 
+Windows：
+
+```powershell
+.\douyinLive.exe --config .\config.yaml
+```
+
 ### 输出未知消息类型（调试用）
 
 ```bash
 ./douyinLive --unknown
+```
+
+Windows：
+
+```powershell
+.\douyinLive.exe --unknown
 ```
 
 ### 设置日志级别
@@ -347,12 +404,31 @@ https://live.douyin.com/xxxxx
 ./douyinLive --log-level debug
 ```
 
-支持 `debug`、`info`、`warn`、`error`，默认是 `info`。日志使用 Go `slog` 文本格式，会带上 `level`、`time` 以及 `room_id`、`live_id`、`err` 等字段，方便长时间挂机时排查连接和重连状态。
+Windows：
+
+```powershell
+.\douyinLive.exe --log-level debug
+```
+
+支持 `debug`、`info`、`warn`、`error`，默认是 `info`。也可以写进配置文件：
+
+```yaml
+log:
+  level: "debug"
+```
+
+日志使用 Go `slog` 文本格式，会带上 `level`、`time` 以及 `room_id`、`live_id`、`err` 等字段，方便长时间挂机时排查连接和重连状态。
 
 ### 查看版本和构建来源
 
 ```bash
 ./douyinLive --version
+```
+
+Windows：
+
+```powershell
+.\douyinLive.exe --version
 ```
 
 输出会包含：
@@ -361,6 +437,16 @@ https://live.douyin.com/xxxxx
 - `commit`：构建时注入的短 commit hash
 - `buildDate`：构建时间
 - `source`：构建来源，例如 GitHub Actions 或本地构建
+
+### CLI 参数速查
+
+```text
+--config string      指定配置文件路径，例如 ./config.yaml
+--port string        本地 WebSocket 服务端口，默认 1088
+--unknown            输出未知 protobuf 消息类型，调试用
+--log-level string   日志级别：debug、info、warn、error
+--version            输出版本和构建来源
+```
 
 ---
 

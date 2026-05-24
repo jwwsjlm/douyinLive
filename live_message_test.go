@@ -89,6 +89,26 @@ func TestMessageBusUnsubscribe(t *testing.T) {
 	}
 }
 
+func TestMessageBusRecoversSubscriberPanic(t *testing.T) {
+	bus := newMessageBus()
+	calls := 0
+
+	bus.subscribe(func(*LiveMessage) {
+		panic("boom")
+	})
+	bus.subscribe(func(*LiveMessage) {
+		calls++
+	})
+
+	bus.publishWithLogger(normalizeLogger(log.Default()), &LiveMessage{
+		Raw: &new_douyin.Webcast_Im_Message{Method: WebcastChatMessage},
+	})
+
+	if calls != 1 {
+		t.Fatalf("healthy subscriber was called %d times, want 1", calls)
+	}
+}
+
 func TestMessageBusRejectsEmptyMethodFilter(t *testing.T) {
 	bus := newMessageBus()
 	id := bus.subscribe(func(*LiveMessage) {}, "")
@@ -140,6 +160,46 @@ func TestDouyinLiveSubscribeRejectsNilHandlers(t *testing.T) {
 	}
 	if id := dl.SubscribeMethod(WebcastChatMessage, nil); id != "" {
 		t.Fatalf("SubscribeMethod(nil) returned %q, want empty id", id)
+	}
+}
+
+func TestNewDouyinLiveDefaultsNilLogger(t *testing.T) {
+	dl, err := NewDouyinLive("live-id", nil, "")
+	if err != nil {
+		t.Fatalf("NewDouyinLive returned error: %v", err)
+	}
+	defer dl.Dispose()
+
+	if dl.logger == nil {
+		t.Fatalf("logger was not defaulted")
+	}
+}
+
+func TestEmitEventClonesParsedMessageForSubscribers(t *testing.T) {
+	dl := &DouyinLive{
+		liveID:   "live-id",
+		roomID:   "room-id",
+		liveName: "live-name",
+		logger:   normalizeLogger(log.Default()),
+	}
+	parsed := &new_douyin.Webcast_Im_ChatMessage{Content: "hello"}
+	var got *LiveMessage
+
+	dl.SubscribeMessage(func(message *LiveMessage) {
+		got = message
+	})
+	dl.emitEvent(&new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}, parsed)
+	parsed.Content = "mutated"
+
+	if got == nil {
+		t.Fatalf("subscriber did not receive message")
+	}
+	chat, ok := got.Parsed.(*new_douyin.Webcast_Im_ChatMessage)
+	if !ok {
+		t.Fatalf("Parsed type = %T, want *new_douyin.Webcast_Im_ChatMessage", got.Parsed)
+	}
+	if chat.GetContent() != "hello" {
+		t.Fatalf("Parsed content = %q, want cloned value hello", chat.GetContent())
 	}
 }
 
@@ -218,7 +278,7 @@ func TestFetchRoomEnterDataUpdatesRoomInfoFromCache(t *testing.T) {
 	dl := &DouyinLive{
 		liveID:    "live-id",
 		liveName:  "old-name",
-		logger:    log.Default(),
+		logger:    normalizeLogger(log.Default()),
 		ristretto: cache,
 	}
 

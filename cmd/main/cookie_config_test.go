@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestRoomManagerCookieForRoomPriority(t *testing.T) {
@@ -54,4 +55,42 @@ func TestRoomManagerKeySeparatesCookie(t *testing.T) {
 	if got := roomManagerKey("1001", ""); got != "1001" {
 		t.Fatalf("empty cookie should keep legacy room key, got %q", got)
 	}
+}
+
+func TestRoomRemoveIfIdleRemovesRoomFromManager(t *testing.T) {
+	rm := NewRoomManager(nil, false, "", nil, time.Second, time.Second)
+	room := rm.GetOrCreateRoom("1001", "")
+
+	room.removeIfIdle()
+
+	rm.roomsMu.RLock()
+	_, ok := rm.rooms["1001"]
+	rm.roomsMu.RUnlock()
+	if ok {
+		t.Fatalf("idle room was not removed from manager")
+	}
+}
+
+func TestRoomRemoveIfIdleKeepsRoomWithClients(t *testing.T) {
+	removed := false
+	room := NewRoom("1001", nil, false, "", time.Second, time.Second, func() {
+		removed = true
+	})
+	room.clients["client-1"] = NewClient("client-1", nil)
+
+	room.removeIfIdle()
+
+	if removed {
+		t.Fatalf("room with clients should not be removed")
+	}
+	if room.closed {
+		t.Fatalf("room with clients should not be marked closed")
+	}
+}
+
+func TestClientCloseAllowsNilConn(t *testing.T) {
+	client := NewClient("client-1", nil)
+
+	client.close(nil)
+	client.close(nil)
 }

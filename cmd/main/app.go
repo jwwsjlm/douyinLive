@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -17,7 +16,7 @@ import (
 // App 是应用的核心结构体，封装了所有依赖
 type App struct {
 	ctx         context.Context
-	logger      *log.Logger
+	logger      *appLogger
 	config      *Config
 	roomManager *RoomManager
 	httpServer  *http.Server
@@ -26,7 +25,10 @@ type App struct {
 }
 
 // NewApp 创建并返回一个新的 App 实例
-func NewApp(ctx context.Context, config *Config, logger *log.Logger) (*App, error) {
+func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error) {
+	if logger == nil {
+		logger = newAppLogger(nil)
+	}
 
 	roomManager := NewRoomManager(logger, config.Unknown, config.Cookie.Douyin, config.Cookie.Rooms, config.Monitor.PollInterval, config.Monitor.NotifyInterval)
 	return &App{
@@ -56,7 +58,7 @@ func (a *App) Run() error {
 			a.runningPort = strconv.Itoa(port)
 
 			close(a.ready)
-			a.logger.Printf("WebSocket 服务启动成功，监听端口: %s", a.runningPort)
+			a.logger.Info("WebSocket 服务监听中", "port", a.runningPort)
 			return a.httpServer.Serve(listener)
 		}
 		port++
@@ -65,11 +67,11 @@ func (a *App) Run() error {
 
 // Shutdown 优雅地关闭应用
 func (a *App) Shutdown() error {
-	a.logger.Println("正在关闭 RoomManager...")
+	a.logger.Info("正在关闭 RoomManager")
 	a.roomManager.CloseAll()
 
 	if a.httpServer != nil {
-		a.logger.Println("正在关闭 HTTP 服务...")
+		a.logger.Info("正在关闭 HTTP 服务")
 		shutdownCtx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 		defer cancel()
 		return a.httpServer.Shutdown(shutdownCtx)
@@ -91,7 +93,7 @@ func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.logger.Printf("接收到 WebSocket 连接请求, 房间ID: %s, 客户端: %s", roomID, r.RemoteAddr)
+	a.logger.Info("接收到 WebSocket 连接请求", "room_id", roomID, "remote_addr", r.RemoteAddr)
 
 	room := a.roomManager.GetOrCreateRoom(roomID, cookieOverride)
 	handler := NewWsHandler(room)
@@ -104,7 +106,7 @@ func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	socket, err := upgrader.Upgrade(w, r)
 	if err != nil {
-		a.logger.Printf("升级 WebSocket 失败: %v", err)
+		a.logger.Warn("升级 WebSocket 失败", "room_id", roomID, "remote_addr", r.RemoteAddr, "err", err)
 		return
 	}
 

@@ -136,6 +136,10 @@ func (b *messageBus) unsubscribe(id string) {
 }
 
 func (b *messageBus) publish(message *LiveMessage) {
+	b.publishWithLogger(nil, message)
+}
+
+func (b *messageBus) publishWithLogger(logger logSink, message *LiveMessage) {
 	if message == nil {
 		return
 	}
@@ -148,7 +152,14 @@ func (b *messageBus) publish(message *LiveMessage) {
 		if !subscriber.accepts(message.GetMethod()) {
 			continue
 		}
-		subscriber.handler(message)
+		func(s messageSubscriber) {
+			defer func() {
+				if recovered := recover(); recovered != nil && logger != nil {
+					logger.Error("消息订阅处理器发生 panic", "method", message.GetMethod(), "panic", recovered)
+				}
+			}()
+			s.handler(message)
+		}(subscriber)
 	}
 }
 

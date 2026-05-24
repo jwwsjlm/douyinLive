@@ -7,6 +7,11 @@ port: "1088"
 # 是否输出未知消息类型（调试用）
 unknown: false
 
+# 日志配置
+log:
+  # 可选: debug, info, warn, error
+  level: "info"
+
 # 未开播监控配置
 monitor:
   # 检查是否开播的时间间隔

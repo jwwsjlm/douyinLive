@@ -14,6 +14,13 @@ import (
 
 var showVersion bool
 
+var validLogLevels = map[string]struct{}{
+	"debug": {},
+	"info":  {},
+	"warn":  {},
+	"error": {},
+}
+
 // CookieConfig 存储 Cookie 配置
 type CookieConfig struct {
 	Douyin string            // 抖音默认 Cookie
@@ -26,12 +33,18 @@ type MonitorConfig struct {
 	NotifyInterval time.Duration
 }
 
+// LogConfig 存储日志配置
+type LogConfig struct {
+	Level string
+}
+
 // Config 存储应用的所有配置
 type Config struct {
 	Port    string
 	Unknown bool
 	Cookie  CookieConfig
 	Monitor MonitorConfig
+	Log     LogConfig
 }
 
 func firstNonEmpty(values ...string) string {
@@ -48,6 +61,7 @@ func NewConfig() (*Config, error) {
 	// 绑定命令行参数
 	pflag.String("port", "1088", "WebSocket 服务端口")
 	pflag.Bool("unknown", false, "是否输出未知源的 pb 消息")
+	pflag.String("log-level", "info", "日志级别: debug, info, warn, error")
 	configFile := pflag.String("config", "", "指定配置文件路径")
 	pflag.BoolVar(&showVersion, "version", false, "Print version information")
 	pflag.Parse()
@@ -92,6 +106,7 @@ func NewConfig() (*Config, error) {
 	viper.SetDefault("cookie.rooms", map[string]string{})
 	viper.SetDefault("monitor.poll_interval", "15s")
 	viper.SetDefault("monitor.notify_interval", "30s")
+	viper.SetDefault("log.level", "info")
 	// 读取配置
 	if err := viper.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
@@ -121,6 +136,15 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("monitor.notify_interval 必须大于 0")
 	}
 
+	logLevel := viper.GetString("log.level")
+	if flag := pflag.Lookup("log-level"); flag != nil && flag.Changed {
+		logLevel = flag.Value.String()
+	}
+	logLevel = strings.ToLower(firstNonEmpty(logLevel, "info"))
+	if _, ok := validLogLevels[logLevel]; !ok {
+		return nil, fmt.Errorf("log.level 配置无效: %s", logLevel)
+	}
+
 	// 填充 Config 结构体
 	cfg := &Config{
 		Port:    viper.GetString("port"),
@@ -132,6 +156,9 @@ func NewConfig() (*Config, error) {
 		Monitor: MonitorConfig{
 			PollInterval:   pollInterval,
 			NotifyInterval: notifyInterval,
+		},
+		Log: LogConfig{
+			Level: logLevel,
 		},
 	}
 

@@ -341,6 +341,14 @@ https://live.douyin.com/xxxxx
 ./douyinLive --unknown
 ```
 
+### 设置日志级别
+
+```bash
+./douyinLive --log-level debug
+```
+
+支持 `debug`、`info`、`warn`、`error`，默认是 `info`。日志使用 Go `slog` 文本格式，会带上 `level`、`time` 以及 `room_id`、`live_id`、`err` 等字段，方便长时间挂机时排查连接和重连状态。
+
 ### 查看版本和构建来源
 
 ```bash
@@ -365,6 +373,8 @@ https://live.douyin.com/xxxxx
 ```yaml
 port: "1088"
 unknown: false
+log:
+  level: "info"
 monitor:
   poll_interval: "15s"
   notify_interval: "30s"
@@ -396,6 +406,17 @@ port: "1088"
 
 ```yaml
 unknown: false
+```
+
+#### `log.level`
+
+日志级别。默认输出 `info` 及以上级别，排查连接、心跳、重连问题时可以临时调整为 `debug`。
+
+默认值：
+
+```yaml
+log:
+  level: "info"
 ```
 
 #### `monitor.poll_interval`
@@ -453,6 +474,8 @@ cookie:
 ```yaml
 port: "1088"
 unknown: false
+log:
+  level: "info"
 monitor:
   poll_interval: "15s"
   notify_interval: "30s"
@@ -551,6 +574,12 @@ type LiveMessage struct {
 
 - `msg.GetMethod()`：获取消息类型
 - `msg.GetPayload()`：获取 protobuf 原始 payload
+
+如果你的项目使用 `log/slog`，可以直接用 `NewDouyinLiveWithSlog` 创建实例，日志会保留结构化级别和字段：
+
+```go
+dl, err := douyinlive.NewDouyinLiveWithSlog(roomID, slog.Default(), cookie)
+```
 
 ### 最简使用示例
 

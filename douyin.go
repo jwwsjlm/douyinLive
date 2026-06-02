@@ -16,8 +16,8 @@ import (
 
 	"github.com/tidwall/gjson"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/gorilla/websocket"
-	"github.com/imroc/req/v3"
 	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 	"github.com/jwwsjlm/douyinLive/v2/jsScript"
 	"github.com/jwwsjlm/douyinLive/v2/sign"
@@ -64,7 +64,7 @@ type DouyinLive struct {
 	liveName            string
 	ttwid               string
 	userAgent           string
-	client              *req.Client
+	client              *resty.Client
 	conn                *websocket.Conn
 	headers             http.Header
 	bufferPool          *sync.Pool
@@ -120,7 +120,7 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string) (*DouyinLive
 		liveID:    liveID,
 		liveName:  liveID,
 		userAgent: userAgent,
-		client:    req.C().SetUserAgent(userAgent).SetTimeout(httpRequestTimeout),
+		client:    newHTTPClient(userAgent),
 		bufferPool: &sync.Pool{
 			New: func() interface{} {
 				return bytes.NewBuffer(make([]byte, 0, gzipBufferSize))
@@ -142,6 +142,13 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string) (*DouyinLive
 
 	return dl, nil
 }
+
+func newHTTPClient(userAgent string) *resty.Client {
+	return resty.New().
+		SetHeader("User-Agent", userAgent).
+		SetTimeout(httpRequestTimeout)
+}
+
 func (dl *DouyinLive) GetName() string {
 	return dl.roomInfoSnapshot().liveName
 }
@@ -244,7 +251,7 @@ func (dl *DouyinLive) releaseCache() {
 }
 
 func (dl *DouyinLive) rebuildHTTPClientAndHeaders() {
-	dl.client = req.C().SetUserAgent(dl.userAgent).SetTimeout(httpRequestTimeout)
+	dl.client = newHTTPClient(dl.userAgent)
 	dl.headers = make(http.Header)
 	dl.headers.Set("User-Agent", dl.userAgent)
 }
@@ -405,7 +412,7 @@ func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP b
 	if rebuildHTTP || dl.client == nil || dl.headers == nil {
 		dl.rebuildHTTPClientAndHeaders()
 	} else {
-		dl.client.SetUserAgent(dl.userAgent)
+		dl.client.SetHeader("User-Agent", dl.userAgent)
 		dl.headers.Set("User-Agent", dl.userAgent)
 	}
 

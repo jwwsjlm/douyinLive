@@ -16,12 +16,12 @@ import (
 
 	"github.com/tidwall/gjson"
 
-	"github.com/go-resty/resty/v2"
 	"github.com/gorilla/websocket"
 	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 	"github.com/jwwsjlm/douyinLive/v2/jsScript"
 	"github.com/jwwsjlm/douyinLive/v2/sign"
 	"github.com/jwwsjlm/douyinLive/v2/utils"
+	"github.com/jwwsjlm/req/v3"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -39,6 +39,7 @@ const (
 	heartbeatInterval       = 20 * time.Second
 	liveStatusPollInterval  = 30 * time.Second
 	controlActionLiveEnd    = 3
+	impersonatedUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 	wssURLTemplate          = "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/" +
 		"?app_name=douyin_web&version_code=180800&webcast_sdk_version=1.0.14-beta.0" +
 		"&update_version_code=1.0.14-beta.0&compress=gzip&device_platform=web" +
@@ -64,7 +65,7 @@ type DouyinLive struct {
 	liveName            string
 	ttwid               string
 	userAgent           string
-	client              *resty.Client
+	client              *req.Client
 	conn                *websocket.Conn
 	headers             http.Header
 	bufferPool          *sync.Pool
@@ -106,7 +107,7 @@ func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, er
 }
 
 func newDouyinLive(liveID string, baseLogger logger, cookie string) (*DouyinLive, error) {
-	userAgent := utils.RandomUserAgent()
+	userAgent := newHTTPUserAgent()
 	cache, err := ristretto.NewCache(&ristretto.Config[string, string]{
 		NumCounters: 500,
 		MaxCost:     500,
@@ -143,9 +144,16 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string) (*DouyinLive
 	return dl, nil
 }
 
-func newHTTPClient(userAgent string) *resty.Client {
-	return resty.New().
-		SetHeader("User-Agent", userAgent).
+func newHTTPUserAgent() string {
+	return impersonatedUserAgent
+}
+
+func newHTTPClient(userAgent string) *req.Client {
+	return req.C().
+		ImpersonateChromeWithOS(req.BrowserOSWindows).
+		EnableHTTP3().
+		EnableHTTP3FallbackOnError().
+		SetUserAgent(userAgent).
 		SetTimeout(httpRequestTimeout)
 }
 
@@ -400,7 +408,7 @@ func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP b
 	if changeUA {
 		now := time.Now()
 		if now.Sub(dl.lastUserAgentChange) >= minUAChangeInterval {
-			newUserAgent := utils.RandomUserAgent()
+			newUserAgent := newHTTPUserAgent()
 			dl.userAgent = newUserAgent
 			dl.lastUserAgentChange = now
 			dl.logger.Info("重连前刷新 UA", "live_id", dl.liveID, "old_user_agent", oldUserAgent, "new_user_agent", newUserAgent)
@@ -412,7 +420,7 @@ func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP b
 	if rebuildHTTP || dl.client == nil || dl.headers == nil {
 		dl.rebuildHTTPClientAndHeaders()
 	} else {
-		dl.client.SetHeader("User-Agent", dl.userAgent)
+		dl.client.SetUserAgent(dl.userAgent)
 		dl.headers.Set("User-Agent", dl.userAgent)
 	}
 

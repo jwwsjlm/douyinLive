@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -39,7 +41,6 @@ const (
 	heartbeatInterval       = 20 * time.Second
 	liveStatusPollInterval  = 30 * time.Second
 	controlActionLiveEnd    = 3
-	impersonatedUserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 	wssURLTemplate          = "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/" +
 		"?app_name=douyin_web&version_code=180800&webcast_sdk_version=1.0.14-beta.0" +
 		"&update_version_code=1.0.14-beta.0&compress=gzip&device_platform=web" +
@@ -56,6 +57,12 @@ const (
 var (
 	ErrLiveNotStarted = errors.New("直播间未开播")
 )
+
+var impersonatedUserAgents = []string{
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+}
 
 // DouyinLive 结构体定义
 type DouyinLive struct {
@@ -145,7 +152,14 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string) (*DouyinLive
 }
 
 func newHTTPUserAgent() string {
-	return impersonatedUserAgent
+	if len(impersonatedUserAgents) == 0 {
+		return ""
+	}
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(impersonatedUserAgents))))
+	if err != nil {
+		return impersonatedUserAgents[0]
+	}
+	return impersonatedUserAgents[n.Int64()]
 }
 
 func newHTTPClient(userAgent string) *req.Client {

@@ -65,6 +65,7 @@ func TestNormalizeTikHubSignature(t *testing.T) {
 		{name: "query signature", in: "signature=XB_QUERY", want: "XB_QUERY"},
 		{name: "query x bogus", in: "X-Bogus=XB_BOGUS", want: "XB_BOGUS"},
 		{name: "url", in: "https://example.com/path?signature=XB_URL", want: "XB_URL"},
+		{name: "raw plus", in: "XB+RAW/VALUE", want: "XB+RAW/VALUE"},
 		{name: "escaped raw", in: "XB%2BVALUE", want: "XB+VALUE"},
 	}
 

@@ -1,11 +1,11 @@
 version: 2
 
-project_name: douyinLive
+project_name: douyinLive-tikhub
 
 builds:
-  - id: douyinLive
+  - id: douyinLive-tikhub
     main: ./cmd/main
-    binary: douyinLive
+    binary: douyinLive-tikhub
     env:
       - CGO_ENABLED=0
     goos:
@@ -24,9 +24,9 @@ builds:
       - -s -w -X main.buildTag={{ .Tag }} -X main.buildCommit={{ .Env.BUILD_COMMIT }} -X main.buildDate={{ .Env.BUILD_DATE }} -X main.buildSource={{ .Env.BUILD_SOURCE }}
 
 archives:
-  - id: douyinLive
+  - id: douyinLive-tikhub
     ids:
-      - douyinLive
+      - douyinLive-tikhub
     formats:
       - tar.gz
     format_overrides:

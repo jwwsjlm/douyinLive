@@ -5,6 +5,8 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -162,8 +164,30 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string, tikHubToken 
 	if cookie != "" {
 		dl.cookieManager.SetDouyinCookie(cookie)
 	}
+	dl.logTikHubTokenStatus()
 
 	return dl, nil
+}
+
+func (dl *DouyinLive) logTikHubTokenStatus() {
+	token := strings.TrimSpace(dl.tikHubToken)
+	if token == "" {
+		dl.logger.Warn("TikHub API Key 未配置", "live_id", dl.liveID)
+		return
+	}
+	hash := sha256.Sum256([]byte(token))
+	dl.logger.Info("TikHub API Key 已加载", "live_id", dl.liveID, "key_len", len(token), "key_mask", maskSecret(token), "key_sha256_8", hex.EncodeToString(hash[:])[:8])
+}
+
+func maskSecret(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 8 {
+		return "***"
+	}
+	return value[:4] + "***" + value[len(value)-4:]
 }
 
 func newHTTPUserAgent() string {
@@ -224,21 +248,33 @@ func (dl *DouyinLive) updateRoomInfo(roomID, pushID, liveName, title, avatarThum
 func parseRoomInfo(body string) (roomInfoSnapshot, error) {
 	roomID := firstNonEmptyGJSON(body,
 		"data.data.0.id_str",
+		"data.data.0.id",
+		"data.room.id_str",
+		"data.room.id",
 		"data.enter_room_id",
 	)
 	pushID := firstNonEmptyGJSON(body,
 		"data.user.id_str",
+		"data.user.id",
 		"data.data.0.owner_user_id_str",
+		"data.data.0.owner.id_str",
+		"data.data.0.owner.id",
+		"data.room.owner_user_id_str",
+		"data.room.owner.id_str",
+		"data.room.owner.id",
 	)
 	liveName := firstNonEmptyGJSON(body,
 		"data.user.nickname",
 		"data.data.0.owner.nickname",
+		"data.room.owner.nickname",
 	)
 	avatarThumb := firstNonEmptyGJSON(body,
 		"data.user.avatar_thumb.url_list.2",
 		"data.user.avatar_thumb.url_list.0",
 		"data.data.0.owner.avatar_thumb.url_list.2",
 		"data.data.0.owner.avatar_thumb.url_list.0",
+		"data.room.owner.avatar_thumb.url_list.2",
+		"data.room.owner.avatar_thumb.url_list.0",
 	)
 
 	if roomID == "" || pushID == "" {
@@ -249,7 +285,7 @@ func parseRoomInfo(body string) (roomInfoSnapshot, error) {
 		roomID:      roomID,
 		pushID:      pushID,
 		liveName:    liveName,
-		title:       gjson.Get(body, "data.data.0.title").String(),
+		title:       firstNonEmptyGJSON(body, "data.data.0.title", "data.room.title"),
 		avatarThumb: avatarThumb,
 	}, nil
 }
@@ -396,6 +432,8 @@ func (dl *DouyinLive) prepareRequestContextLocked() error {
 	}
 
 	dl.headers.Set("User-Agent", dl.userAgent)
+	dl.headers.Set("Origin", "https://live.douyin.com")
+	dl.headers.Set("Referer", "https://live.douyin.com/"+dl.liveID)
 	dl.setupCookies()
 	return nil
 }
@@ -585,6 +623,7 @@ func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 
 	roomInfo, err := parseRoomInfo(body)
 	if err != nil {
+		dl.logRoomInfoResponseSummary(body)
 		return "", err
 	}
 
@@ -610,9 +649,10 @@ func (dl *DouyinLive) doRequest() (string, error) {
 	)
 	// 参考代码 https://github.com/ihmily/DouyinLiveRecorder
 	headers := map[string]string{
-		"Cookie":     "ttwid=1%7C2iDIYVmjzMcpZ20fcaFde0VghXAA3NaNXE_SLR68IyE%7C1761045455%7Cab35197d5cfb21df6cbb2fa7ef1c9262206b062c315b9d04da746d0b37dfbc7d",
-		"Referer":    "https://live.douyin.com/" + dl.liveID,
-		"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36 Core/1.116.567.400 QQBrowser/19.7.6764.400",
+		"Accept-Encoding": "identity",
+		"Cookie":          "ttwid=1%7C2iDIYVmjzMcpZ20fcaFde0VghXAA3NaNXE_SLR68IyE%7C1761045455%7Cab35197d5cfb21df6cbb2fa7ef1c9262206b062c315b9d04da746d0b37dfbc7d",
+		"Referer":         "https://live.douyin.com/" + dl.liveID,
+		"User-Agent":      "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36 Core/1.116.567.400 QQBrowser/19.7.6764.400",
 	}
 	aBogus := sign.AbSign(params, headers["User-Agent"])
 	url := fmt.Sprintf("https://live.douyin.com/webcast/room/web/enter/?%s&a_bogus=%s", params, aBogus)
@@ -644,11 +684,22 @@ func (dl *DouyinLive) doRequest() (string, error) {
 		return "", fmt.Errorf("直播间信息接口返回异常 status_code=%d", statusCode)
 	}
 
-	if !gjson.Get(body, "data.data.0").Exists() {
-		return "", errors.New("直播间信息缺少房间数据")
-	}
-
 	return body, nil
+}
+
+func (dl *DouyinLive) logRoomInfoResponseSummary(body string) {
+	if dl.logger == nil {
+		return
+	}
+	dl.logger.Warn("直播间信息响应无法提取房间参数",
+		"live_id", dl.liveID,
+		"body_len", len(body),
+		"status_code", gjson.Get(body, "status_code").Int(),
+		"message", firstNonEmptyGJSON(body, "message", "prompts", "extra.log_pb.impr_id"),
+		"has_data_data_0", gjson.Get(body, "data.data.0").Exists(),
+		"has_enter_room_id", gjson.Get(body, "data.enter_room_id").Exists(),
+		"has_user", gjson.Get(body, "data.user").Exists(),
+	)
 }
 
 // refreshLiveStatusFromAPI 通过房间接口刷新当前直播状态。
@@ -789,15 +840,16 @@ func (dl *DouyinLive) buildWebsocketURL() (string, error) {
 	fetchTime := time.Now().UnixNano() / int64(time.Millisecond)
 	roomInfo := dl.roomInfoSnapshot()
 	browserInfo := dl.userAgent
-	if parts := strings.SplitN(dl.userAgent, "Mozilla", 2); len(parts) == 2 {
+	if parts := strings.SplitN(dl.userAgent, "Mozilla/", 2); len(parts) == 2 {
 		browserInfo = parts[1]
 	}
-	parsedBrowser := strings.ReplaceAll(browserInfo, " ", "%20")
+	parsedBrowser := strings.ReplaceAll(url.QueryEscape(browserInfo), "+", "%20")
 
 	signature, err := dl.generateTikHubXBSignature(roomInfo.roomID, roomInfo.pushID)
 	if err != nil {
 		return "", err
 	}
+	encodedSignature := url.QueryEscape(signature)
 	return fmt.Sprintf(wssURLTemplate,
 		parsedBrowser,
 		roomInfo.roomID,
@@ -807,7 +859,7 @@ func (dl *DouyinLive) buildWebsocketURL() (string, error) {
 		fetchTime,
 		roomInfo.pushID,
 		roomInfo.roomID,
-		signature,
+		encodedSignature,
 	), nil
 }
 
@@ -953,8 +1005,10 @@ func normalizeTikHubSignature(value string) string {
 			}
 		}
 	}
-	if decoded, err := url.QueryUnescape(value); err == nil {
-		return strings.TrimSpace(decoded)
+	if strings.Contains(value, "%") {
+		if decoded, err := url.PathUnescape(value); err == nil {
+			return strings.TrimSpace(decoded)
+		}
 	}
 	return value
 }

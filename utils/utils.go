@@ -4,18 +4,17 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/md5"
+	cryptorand "crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"math/rand"
-	"strconv"
+	"math/big"
 	"strings"
+	"time"
 
 	"github.com/elliotchance/orderedmap"
-	"github.com/jwwsjlm/douyinLive/generated"
-	"github.com/jwwsjlm/douyinLive/generated/new_douyin"
-	"google.golang.org/protobuf/reflect/protoreflect"
+	"github.com/google/uuid"
+	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 )
 
 // HasGzipEncoding 判断消息头中是否包含gzip编码
@@ -44,12 +43,35 @@ func GetxMSStub(params *orderedmap.OrderedMap) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// getUserID 生成随机用户ID
-func getUserID() string {
-	// 生成7300000000000000000到7999999999999999999之间的随机数
-	randomNumber := rand.Int63n(7000000000000000000 + 1)
-	// 将整数转换为字符串
-	return strconv.FormatInt(randomNumber, 10)
+func randomIndex(max int) int {
+	if max <= 1 {
+		return 0
+	}
+
+	n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(int64(max)))
+	if err != nil {
+		return 0
+	}
+	return int(n.Int64())
+}
+
+func randomInt64(max int64) int64 {
+	if max <= 1 {
+		return 0
+	}
+
+	n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(max))
+	if err != nil {
+		return 0
+	}
+	return n.Int64()
+}
+
+func GenerateJitterNanos(maxDuration time.Duration) int64 {
+	if maxDuration <= 0 {
+		return 0
+	}
+	return randomInt64(int64(maxDuration))
 }
 
 // GenerateMsToken 生成随机的msToken
@@ -57,17 +79,9 @@ func GenerateMsToken(length int) string {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+="
 	b := make([]byte, length)
 	for i := range b {
-		b[i] = charset[rand.Intn(len(charset))]
+		b[i] = charset[randomIndex(len(charset))]
 	}
 	return string(b) + "=_"
-}
-
-// MatchMethod 根据方法名匹配并返回对应的ProtoMessage
-func MatchMethod(method string) (protoreflect.ProtoMessage, error) {
-	if createMessage, ok := generated.NewMessage[method]; ok {
-		return createMessage(), nil
-	}
-	return nil, errors.New("未知消息: " + method)
 }
 
 // GzipCompressAndBase64Encode 将数据进行gzip压缩并进行Base64编码
@@ -119,8 +133,13 @@ func RandomUserAgent() string {
 		"108.0.5359.22", "98.0.4758.48", "97.0.4692.71",
 	}
 
-	os := osList[rand.Intn(len(osList))]
-	chromeVersion := chromeVersionList[rand.Intn(len(chromeVersionList))]
+	os := osList[randomIndex(len(osList))]
+	chromeVersion := chromeVersionList[randomIndex(len(chromeVersionList))]
 
 	return fmt.Sprintf("Mozilla/5.0 %s AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", os, chromeVersion)
+}
+
+// GenerateUniqueID 生成唯一标识符
+func GenerateUniqueID() string {
+	return uuid.New().String()
 }

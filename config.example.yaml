@@ -1,0 +1,36 @@
+# 抖音直播配置文件
+# 复制此文件为 config.yaml 即可使用
+
+# WebSocket 服务端口
+port: "1088"
+
+# 是否输出未知消息类型（调试用）
+unknown: false
+
+# 日志配置
+log:
+  # 可选: debug, info, warn, error
+  level: "info"
+
+# TikHub 配置
+# 用于通过 TikHub 在线 API 生成 WebSocket xb 签名
+# 也可以通过命令行 --tikhub-key 或环境变量 APP_TIKHUB_KEY 覆盖
+tikhub:
+  key: ""
+
+# 未开播监控配置
+monitor:
+  # 检查是否开播的时间间隔
+  poll_interval: "15s"
+  # 未开播期间，向本地 WebSocket 客户端重复推送状态通知的时间间隔
+  notify_interval: "30s"
+
+# Cookie 配置（可选，不配置则自动获取）
+cookie:
+  # 默认 Cookie：没有单独配置房间 Cookie 时，会回退使用它
+  douyin: ""
+  # 按直播间 ID 单独配置 Cookie
+  # 适合多个直播间分别使用不同账号登录态的场景
+  rooms:
+    # "516466932480": "ttwid=...; sessionid=..."
+    # "123456789": "ttwid=...; sessionid=..."

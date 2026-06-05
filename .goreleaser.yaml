@@ -1,0 +1,52 @@
+version: 2
+
+project_name: douyinLive
+
+builds:
+  - id: douyinLive
+    main: ./cmd/main
+    binary: douyinLive
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.buildTag={{ .Tag }} -X main.buildCommit={{ .Env.BUILD_COMMIT }} -X main.buildDate={{ .Env.BUILD_DATE }} -X main.buildSource={{ .Env.BUILD_SOURCE }}
+
+archives:
+  - id: douyinLive
+    ids:
+      - douyinLive
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}-{{ .Tag }}-{{ .Env.BUILD_COMMIT }}-{{ .Os }}-{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE
+      - config.example.yaml
+      - compose.yaml
+      - compose.data.yaml
+
+checksum:
+  name_template: "{{ .ProjectName }}-{{ .Tag }}-{{ .Env.BUILD_COMMIT }}-checksums.txt"
+
+release:
+  name_template: "{{ .Tag }}"
+  prerelease: auto
+  mode: keep-existing
+  replace_existing_artifacts: true

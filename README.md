@@ -50,26 +50,31 @@
 
 ## 快速开始
 
-### 方式一：直接下载可执行文件
+> **tikhub 分支说明**
+>
+> 这个分支使用 TikHub 在线 API 生成抖音直播 WebSocket `xb` 签名。监听直播间消息前必须配置 `tikhub.key`。
+> 仓库正式 Releases 只用于 `main` 分支；本分支请从源码编译，或在本地构建 Docker 镜像。
 
-1. 打开 [Releases](https://github.com/jwwsjlm/douyinLive/releases)
-2. 下载对应平台的程序
-3. 准备 `config.yaml`，填入 TikHub API Key
-4. 运行程序
+### 获取 TikHub API Key
 
-发布包名称会带上版本号和构建 commit，格式类似：
+1. 打开 [TikHub 注册页](https://user.tikhub.io/register) 注册账号
+2. 登录 [TikHub 用户中心](https://user.tikhub.io/)
+3. 在用户中心创建 API Key / API Token
+4. 复制生成的 Key，填入本项目的 `config.yaml`
 
-```text
-douyinLive-v2.0.3-abcdef123456-linux-amd64.tar.gz
-douyinLive-v2.0.3-abcdef123456-windows-amd64.zip
-```
+TikHub API Key 属于敏感信息，不要提交到 Git 仓库，也不要写进 `config.example.yaml`。本项目运行时只会在日志里输出脱敏后的 Key 长度、前后片段和 hash 前缀，用来确认配置已经传入。
 
-压缩包里的可执行文件名仍然固定为 `douyinLive`，所以脚本和 Docker 启动命令不需要因为 hash 变化而每次修改。
+本分支使用的是 TikHub 的抖音 Web WSS `xb` 签名接口，可参考 [TikHub 文档](https://docs.tikhub.io/291633603e0)。
+
+### 方式一：源码编译
 
 ```bash
+git clone -b tikhub https://github.com/jwwsjlm/douyinLive.git
+cd douyinLive
 cp config.example.yaml config.yaml
 # 编辑 config.yaml，填写 tikhub.key
-./douyinLive --config ./config.yaml
+go build -o douyinLive-tikhub ./cmd/main
+./douyinLive-tikhub --config ./config.yaml
 ```
 
 程序启动后会在本地启动一个 WebSocket 服务，默认端口是 `1088`。
@@ -86,55 +91,42 @@ ws://127.0.0.1:1088/ws/直播间标识
 ws://127.0.0.1:1088/ws/516466932480
 ```
 
-### 方式二：源码编译
-
-```bash
-git clone https://github.com/jwwsjlm/douyinLive.git
-cd douyinLive
-cp config.example.yaml config.yaml
-# 编辑 config.yaml，填写 tikhub.key
-go build -o douyinLive ./cmd/main
-./douyinLive --config ./config.yaml
-```
+### 方式二：查看构建信息
 
 查看当前二进制的构建信息：
 
 ```bash
-./douyinLive --version
+./douyinLive-tikhub --version
 ```
 
 输出示例：
 
 ```text
-tag=v2.0.3 commit=abcdef123456 buildDate=2026-05-24T00:00:00Z source=github-actions/release#123.1
+tag=dev commit=unknown buildDate=unknown source=local
 ```
 
-### 方式三：Docker 运行
+### 方式三：本地 Docker 构建运行
 
-Docker 运行同样需要提供 `config.yaml` 并填写 `tikhub.key`。如果只是直接启动镜像但没有配置 TikHub API Key，程序可以启动本地服务，但连接直播间 WebSocket 时会因为无法生成在线签名而失败。
+Docker 运行同样需要提供 `config.yaml` 并填写 `tikhub.key`。本分支不使用仓库正式 Release 镜像，建议在本地从 `tikhub` 分支源码构建镜像。
 
-#### 1. 直接启动最新版镜像
+#### 1. 本地构建镜像
 
 ```bash
-docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:latest
+docker build -t douyinlive-tikhub:local .
+```
+
+启动时挂载配置文件：
+
+```bash
+docker run --rm -p 1088:1088 \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
+  douyinlive-tikhub:local --config /app/config.yaml
 ```
 
 程序启动后，对外提供的 WebSocket 地址仍然是：
 
 ```text
 ws://127.0.0.1:1088/ws/直播间标识
-```
-
-如果你需要固定版本，也可以直接拉指定 tag：
-
-```bash
-docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:v2.0.3
-```
-
-Docker 镜像也支持查看构建信息：
-
-```bash
-docker run --rm ghcr.io/jwwsjlm/douyinlive:v2.0.3 --version
 ```
 
 #### 2. 通过 Docker 挂载 `config.yaml`
@@ -144,7 +136,7 @@ docker run --rm ghcr.io/jwwsjlm/douyinlive:v2.0.3 --version
 ```bash
 docker run --rm -p 1088:1088 \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
-  ghcr.io/jwwsjlm/douyinlive:latest --config /app/config.yaml
+  douyinlive-tikhub:local --config /app/config.yaml
 ```
 
 说明：
@@ -159,11 +151,11 @@ docker run --rm -p 1088:1088 \
 
 ```bash
 docker run -d \
-  --name douyinlive \
+  --name douyinlive-tikhub \
   --restart unless-stopped \
   -p 1088:1088 \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
-  ghcr.io/jwwsjlm/douyinlive:latest --config /app/config.yaml
+  douyinlive-tikhub:local --config /app/config.yaml
 ```
 
 这样即使容器被删除或重建，宿主机上的 `config.yaml` 仍然保留，达到配置持久化的效果。
@@ -177,11 +169,11 @@ mkdir -p ./data
 cp config.example.yaml ./data/config.yaml
 
 docker run -d \
-  --name douyinlive \
+  --name douyinlive-tikhub \
   --restart unless-stopped \
   -p 1088:1088 \
   -v $(pwd)/data:/app/data \
-  ghcr.io/jwwsjlm/douyinlive:latest --config /app/data/config.yaml
+  douyinlive-tikhub:local --config /app/data/config.yaml
 ```
 
 这种方式更适合统一管理容器运行时使用到的文件。
@@ -214,8 +206,11 @@ docker compose down
 ```yaml
 services:
   douyinlive:
-    image: ghcr.io/jwwsjlm/douyinlive:latest
-    container_name: douyinlive
+    image: douyinlive-tikhub:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: douyinlive-tikhub
     restart: unless-stopped
     ports:
       - "1088:1088"
@@ -246,8 +241,11 @@ docker compose -f compose.data.yaml down
 ```yaml
 services:
   douyinlive:
-    image: ghcr.io/jwwsjlm/douyinlive:latest
-    container_name: douyinlive
+    image: douyinlive-tikhub:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: douyinlive-tikhub
     restart: unless-stopped
     ports:
       - "1088:1088"
@@ -320,14 +318,14 @@ https://live.douyin.com/xxxxx
 
 ### CLI 完整示例（推荐先看这里）
 
-`douyinLive` 启动后是一个本地 WebSocket 服务。**直播间标识不是 CLI 启动参数**，而是客户端连接 WebSocket 时写在 URL 里。
+`douyinLive-tikhub` 启动后是一个本地 WebSocket 服务。**直播间标识不是 CLI 启动参数**，而是客户端连接 WebSocket 时写在 URL 里。
 
 #### Linux / macOS
 
 ```bash
 cp config.example.yaml config.yaml
 # 编辑 config.yaml，填写 tikhub.key
-./douyinLive --config ./config.yaml --port 1088 --log-level info
+./douyinLive-tikhub --config ./config.yaml --port 1088 --log-level info
 ```
 
 然后让你的客户端连接：
@@ -341,7 +339,7 @@ ws://127.0.0.1:1088/ws/516466932480
 ```powershell
 Copy-Item .\config.example.yaml .\config.yaml
 # 编辑 config.yaml，填写 tikhub.key
-.\douyinLive.exe --config .\config.yaml --port 1088 --log-level info
+.\douyinLive-tikhub.exe --config .\config.yaml --port 1088 --log-level info
 ```
 
 然后让你的客户端连接：
@@ -352,16 +350,16 @@ ws://127.0.0.1:1088/ws/516466932480
 
 ### 默认启动
 
-如果不需要配置文件，也可以直接启动：
+如果只是想先启动本地 WebSocket 服务，可以不带配置文件直接启动：
 
 ```bash
-./douyinLive
+./douyinLive-tikhub
 ```
 
 Windows：
 
 ```powershell
-.\douyinLive.exe
+.\douyinLive-tikhub.exe
 ```
 
 默认行为：
@@ -370,53 +368,54 @@ Windows：
 - 如果没有配置文件，就使用默认值
 - 默认端口：`1088`
 - 默认日志级别：`info`
+- 但没有 `tikhub.key` 时，连接具体直播间会因为无法生成在线签名而失败
 
 ### 指定端口
 
 ```bash
-./douyinLive --port 1088
+./douyinLive-tikhub --port 1088
 ```
 
 Windows：
 
 ```powershell
-.\douyinLive.exe --port 1088
+.\douyinLive-tikhub.exe --port 1088
 ```
 
 ### 指定配置文件
 
 ```bash
-./douyinLive --config ./config.yaml
+./douyinLive-tikhub --config ./config.yaml
 ```
 
 Windows：
 
 ```powershell
-.\douyinLive.exe --config .\config.yaml
+.\douyinLive-tikhub.exe --config .\config.yaml
 ```
 
 ### 输出未知消息类型（调试用）
 
 ```bash
-./douyinLive --unknown
+./douyinLive-tikhub --unknown
 ```
 
 Windows：
 
 ```powershell
-.\douyinLive.exe --unknown
+.\douyinLive-tikhub.exe --unknown
 ```
 
 ### 设置日志级别
 
 ```bash
-./douyinLive --log-level debug
+./douyinLive-tikhub --log-level debug
 ```
 
 Windows：
 
 ```powershell
-.\douyinLive.exe --log-level debug
+.\douyinLive-tikhub.exe --log-level debug
 ```
 
 支持 `debug`、`info`、`warn`、`error`，默认是 `info`。也可以写进配置文件：
@@ -431,13 +430,13 @@ log:
 ### 查看版本和构建来源
 
 ```bash
-./douyinLive --version
+./douyinLive-tikhub --version
 ```
 
 Windows：
 
 ```powershell
-.\douyinLive.exe --version
+.\douyinLive-tikhub.exe --version
 ```
 
 输出会包含：
@@ -521,6 +520,20 @@ log:
 
 TikHub API Key，用于通过 TikHub 在线接口生成直播间 WebSocket `xb` 签名。当前版本不再使用本地 JS 计算 WebSocket 签名，因此监听直播间消息时必须配置它。
 
+获取方式：
+
+1. 打开 [TikHub 注册页](https://user.tikhub.io/register) 注册账号
+2. 登录 [TikHub 用户中心](https://user.tikhub.io/)
+3. 在用户中心创建 API Key / API Token
+4. 复制 Key，并保存到本地 `config.yaml`
+
+注意：
+
+- API Key 只应该保存在你自己的运行环境里，不要提交到仓库
+- 如果通过 Docker 运行，必须挂载包含 `tikhub.key` 的 `config.yaml`
+- 如果没有配置 Key，程序可以启动本地 WebSocket 服务，但连接直播间时会因为无法生成在线签名而失败
+- 启动监听时日志会输出脱敏 Key，例如 `key_len`、`key_mask`、`key_sha256_8`，用来确认配置已传入
+
 配置文件写法：
 
 ```yaml
@@ -531,8 +544,8 @@ tikhub:
 也可以通过命令行或环境变量临时覆盖：
 
 ```bash
-./douyinLive --tikhub-key YOUR_TIKHUB_KEY
-APP_TIKHUB_KEY=YOUR_TIKHUB_KEY ./douyinLive
+./douyinLive-tikhub --tikhub-key YOUR_TIKHUB_KEY
+APP_TIKHUB_KEY=YOUR_TIKHUB_KEY ./douyinLive-tikhub
 ```
 
 #### `monitor.poll_interval`

@@ -1,7 +1,10 @@
 services:
   douyinlive:
-    image: ghcr.io/jwwsjlm/douyinlive:latest
-    container_name: douyinlive
+    image: douyinlive-tikhub:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: douyinlive-tikhub
     restart: unless-stopped
     ports:
       - "1088:1088"

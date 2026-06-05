@@ -14,6 +14,7 @@ log:
 
 # TikHub 配置
 # 用于通过 TikHub 在线 API 生成 WebSocket xb 签名
+# 注册和创建 API Key: https://user.tikhub.io/register
 # 也可以通过命令行 --tikhub-key 或环境变量 APP_TIKHUB_KEY 覆盖
 tikhub:
   key: ""

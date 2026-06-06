@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -24,6 +23,7 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/gorilla/websocket"
+	tikhub "github.com/jwwsjlm/Tikhub"
 	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 	"github.com/jwwsjlm/douyinLive/v2/sign"
 	"github.com/jwwsjlm/douyinLive/v2/utils"
@@ -45,7 +45,6 @@ const (
 	heartbeatInterval       = 20 * time.Second
 	liveStatusPollInterval  = 30 * time.Second
 	controlActionLiveEnd    = 3
-	tikHubXBSignatureURL    = "https://api.tikhub.io/api/v1/douyin/web/generate_wss_xb_signature"
 	wssURLTemplate          = "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/" +
 		"?app_name=douyin_web&version_code=180800&webcast_sdk_version=1.0.14-beta.0" +
 		"&update_version_code=1.0.14-beta.0&compress=gzip&device_platform=web" +
@@ -80,7 +79,7 @@ type DouyinLive struct {
 	ttwid               string
 	userAgent           string
 	tikHubToken         string
-	tikHubClient        *http.Client
+	tikHubClient        *tikhub.Client
 	client              *req.Client
 	conn                *websocket.Conn
 	headers             http.Header
@@ -138,14 +137,12 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string, tikHubToken 
 		return nil, fmt.Errorf("初始化缓存失败: %w", err)
 	}
 	dl := &DouyinLive{
-		liveID:      liveID,
-		liveName:    liveID,
-		userAgent:   userAgent,
-		tikHubToken: strings.TrimSpace(tikHubToken),
-		tikHubClient: &http.Client{
-			Timeout: httpRequestTimeout,
-		},
-		client: newHTTPClient(userAgent),
+		liveID:       liveID,
+		liveName:     liveID,
+		userAgent:    userAgent,
+		tikHubToken:  strings.TrimSpace(tikHubToken),
+		tikHubClient: newTikHubClient(tikHubToken, userAgent),
+		client:       newHTTPClient(userAgent),
 		bufferPool: &sync.Pool{
 			New: func() interface{} {
 				return bytes.NewBuffer(make([]byte, 0, gzipBufferSize))
@@ -208,6 +205,13 @@ func newHTTPClient(userAgent string) *req.Client {
 		EnableHTTP3FallbackOnError().
 		SetUserAgent(userAgent).
 		SetTimeout(httpRequestTimeout)
+}
+
+func newTikHubClient(token, userAgent string) *tikhub.Client {
+	return tikhub.NewClient(strings.TrimSpace(token),
+		tikhub.WithTimeout(httpRequestTimeout),
+		tikhub.WithUserAgent(userAgent),
+	)
 }
 
 func (dl *DouyinLive) GetName() string {
@@ -327,6 +331,18 @@ func (dl *DouyinLive) rebuildHTTPClientAndHeaders() {
 	dl.client = newHTTPClient(dl.userAgent)
 	dl.headers = make(http.Header)
 	dl.headers.Set("User-Agent", dl.userAgent)
+	dl.refreshTikHubClientUserAgent()
+}
+
+func (dl *DouyinLive) refreshTikHubClientUserAgent() {
+	if dl.tikHubClient == nil {
+		return
+	}
+	client := dl.tikHubClient.ReqClient()
+	if client == nil {
+		return
+	}
+	client.SetUserAgent(dl.userAgent)
 }
 
 func (dl *DouyinLive) resetReconnectTracking() {
@@ -485,6 +501,7 @@ func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP b
 	} else {
 		dl.client.SetUserAgent(dl.userAgent)
 		dl.headers.Set("User-Agent", dl.userAgent)
+		dl.refreshTikHubClientUserAgent()
 	}
 
 	if err := dl.prepareWebSocketContextLocked(); err != nil {
@@ -875,49 +892,36 @@ func (dl *DouyinLive) generateTikHubXBSignature(roomID, userUniqueID string) (st
 	ctx, cancel := dl.requestContext()
 	defer cancel()
 
-	endpoint, err := url.Parse(tikHubXBSignatureURL)
-	if err != nil {
-		return "", err
-	}
-	query := endpoint.Query()
-	query.Set("user_agent", dl.userAgent)
-	query.Set("room_id", roomID)
-	query.Set("user_unique_id", userUniqueID)
-	endpoint.RawQuery = query.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", dl.userAgent)
-
 	client := dl.tikHubClient
 	if client == nil {
-		client = &http.Client{Timeout: httpRequestTimeout}
+		client = newTikHubClient(token, dl.userAgent)
+		dl.tikHubClient = client
 	}
-	resp, err := client.Do(req)
+	resp, err := client.DouyinWeb.GenerateWssXbSignature(ctx, tikhub.DouyinWebGenerateWssXbSignatureRequest{
+		UserAgent:    dl.userAgent,
+		RoomID:       roomID,
+		UserUniqueID: userUniqueID,
+	})
 	if err != nil {
 		return "", fmt.Errorf("请求 tikhub 签名失败: %w", err)
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", fmt.Errorf("读取 tikhub 签名响应失败: %w", err)
+	if resp == nil {
+		return "", fmt.Errorf("%w: nil response", ErrTikHubSignInvalid)
 	}
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("tikhub 签名接口返回异常 status=%d body=%s", resp.StatusCode, string(body))
+	if resp.StatusCode != 0 && (resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices) {
+		return "", fmt.Errorf("tikhub 签名接口返回异常 status=%d body=%s", resp.StatusCode, string(resp.Raw))
 	}
 
-	signature := extractTikHubSignature(body)
+	signature := extractTikHubSignature(resp.Raw)
+	if signature == "" && len(resp.Data) > 0 {
+		signature = extractTikHubSignature(resp.Data)
+	}
 	if signature == "" {
-		return "", fmt.Errorf("%w: body=%s", ErrTikHubSignInvalid, string(body))
+		return "", fmt.Errorf("%w: body=%s", ErrTikHubSignInvalid, string(resp.Raw))
 	}
 	signature = normalizeTikHubSignature(signature)
 	if signature == "" {
-		return "", fmt.Errorf("%w: body=%s", ErrTikHubSignInvalid, string(body))
+		return "", fmt.Errorf("%w: body=%s", ErrTikHubSignInvalid, string(resp.Raw))
 	}
 	dl.logger.Debug("TikHub 在线签名生成成功", "live_id", dl.liveID, "room_id", roomID, "user_unique_id", userUniqueID)
 	return signature, nil

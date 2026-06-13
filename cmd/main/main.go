@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,15 +14,12 @@ import (
 func main() {
 	// 加载配置
 	cfg, err := NewConfig()
-	logger := newAppLogger(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slogLevel("info"),
-	})))
 	if err != nil {
-		logger.Error("加载配置失败", "err", err)
-		logger.Info("解决方法: 在同目录下创建 config.yaml，或使用命令行参数 douyinLive.exe --port 1088")
+		fmt.Fprintln(os.Stderr, "加载配置失败:", err)
+		fmt.Fprintln(os.Stderr, "解决方法: 在同目录下创建 config.yaml，或使用命令行参数 douyinLive-tikhub --port 1088")
 		os.Exit(1)
 	}
-	logger = newAppLogger(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	logger := newAppLogger(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slogLevel(cfg.Log.Level),
 	})))
 

@@ -73,6 +73,7 @@ type DouyinLive struct {
 	liveName            string
 	ttwid               string
 	userAgent           string
+	signer              websocketSigner
 	client              *req.Client
 	conn                *websocket.Conn
 	headers             http.Header
@@ -113,11 +114,19 @@ type roomInfoSnapshot struct {
 // NewDouyinLive 创建一个新的 DouyinLive 实例
 // cookie 参数：可选的手动传入 Cookie，用于需要登录态的请求
 func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, error) {
-	return newDouyinLive(liveID, logger, cookie)
+	return newDouyinLive(liveID, logger, cookie, newLocalWebsocketSigner())
 }
 
-func newDouyinLive(liveID string, baseLogger logger, cookie string) (*DouyinLive, error) {
+func NewDouyinLiveWithTikHub(liveID string, logger logger, cookie string, tikHubToken string) (*DouyinLive, error) {
+	return newDouyinLive(liveID, logger, cookie, newTikHubWebsocketSigner(tikHubToken, ""))
+}
+
+func newDouyinLive(liveID string, baseLogger logger, cookie string, signer websocketSigner) (*DouyinLive, error) {
 	userAgent := newHTTPUserAgent()
+	if signer == nil {
+		signer = newLocalWebsocketSigner()
+	}
+	signer.UpdateUserAgent(userAgent)
 	cache, err := ristretto.NewCache(&ristretto.Config[string, string]{
 		NumCounters: 500,
 		MaxCost:     500,
@@ -132,6 +141,7 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string) (*DouyinLive
 		liveID:    liveID,
 		liveName:  liveID,
 		userAgent: userAgent,
+		signer:    signer,
 		client:    newHTTPClient(userAgent),
 		bufferPool: &sync.Pool{
 			New: func() interface{} {
@@ -152,6 +162,11 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string) (*DouyinLive
 	dl.cookieManager = sign.NewCookieManager()
 	if cookie != "" {
 		dl.cookieManager.SetDouyinCookie(cookie)
+	}
+	if statusLogger, ok := signer.(interface {
+		LogStatus(logSink, string)
+	}); ok {
+		statusLogger.LogStatus(dl.logger, dl.liveID)
 	}
 
 	return dl, nil
@@ -298,6 +313,13 @@ func (dl *DouyinLive) rebuildHTTPClientAndHeaders() {
 	dl.client = newHTTPClient(dl.userAgent)
 	dl.headers = make(http.Header)
 	dl.headers.Set("User-Agent", dl.userAgent)
+	dl.refreshSignerUserAgent()
+}
+
+func (dl *DouyinLive) refreshSignerUserAgent() {
+	if dl.signer != nil {
+		dl.signer.UpdateUserAgent(dl.userAgent)
+	}
 }
 
 func (dl *DouyinLive) resetReconnectTracking() {
@@ -437,8 +459,11 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() error {
 		return err
 	}
 
-	if err := jsScript.LoadGoja(dl.userAgent); err != nil {
-		return fmt.Errorf("加载JavaScript脚本失败: %w", err)
+	if dl.signer == nil || dl.signer.Name() == SignProviderLocal {
+		if err := jsScript.LoadGoja(dl.userAgent); err != nil {
+			return fmt.Errorf("加载JavaScript脚本失败: %w", err)
+		}
+
 	}
 
 	return nil
@@ -471,6 +496,7 @@ func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP b
 	} else {
 		dl.client.SetUserAgent(dl.userAgent)
 		dl.headers.Set("User-Agent", dl.userAgent)
+		dl.refreshSignerUserAgent()
 	}
 
 	if err := dl.prepareWebSocketContextLocked(); err != nil {
@@ -822,7 +848,7 @@ func (dl *DouyinLive) configureWebSocket(conn *websocket.Conn) {
 }
 
 // buildWebsocketURL 基于当前上下文构建 WebSocket URL
-func (dl *DouyinLive) buildWebsocketURL() string {
+func (dl *DouyinLive) buildWebsocketURL() (string, error) {
 	fetchTime := time.Now().UnixNano() / int64(time.Millisecond)
 	roomInfo := dl.roomInfoSnapshot()
 	browserInfo := dl.userAgent
@@ -831,12 +857,19 @@ func (dl *DouyinLive) buildWebsocketURL() string {
 	}
 	parsedBrowser := queryEscapeValue(browserInfo)
 
-	// 使用纯算 a_bogus 签名
-	//params := fmt.Sprintf("aid=6383&app_name=douyin_web&live_id=1&device_platform=web&language=zh-CN&web_rid=%s", dl.roomID)
-	//signature := sign.AbSign(params, dl.userAgent)
-	signature := jsScript.ExecuteJS(utils.GetxMSStub(
-		utils.NewOrderedMap(roomInfo.roomID, roomInfo.pushID),
-	))
+	signer := dl.signer
+	if signer == nil {
+		signer = newLocalWebsocketSigner()
+		dl.signer = signer
+		signer.UpdateUserAgent(dl.userAgent)
+	}
+	ctx, cancel := dl.requestContext()
+	defer cancel()
+	signature, err := signer.Sign(ctx, roomInfo.roomID, roomInfo.pushID, dl.userAgent)
+	if err != nil {
+		return "", err
+	}
+
 	encodedSignature := queryEscapeValue(signature)
 	return fmt.Sprintf(wssURLTemplate,
 		parsedBrowser,
@@ -848,7 +881,7 @@ func (dl *DouyinLive) buildWebsocketURL() string {
 		roomInfo.pushID,
 		roomInfo.roomID,
 		encodedSignature,
-	)
+	), nil
 }
 
 // makeURL 初始化 WebSocket 所需上下文后构建连接 URL。
@@ -864,7 +897,11 @@ func (dl *DouyinLive) websocketDialContext() (string, http.Header, error) {
 	if err := dl.prepareWebSocketContextLocked(); err != nil {
 		return "", nil, fmt.Errorf("初始化失败: %w", err)
 	}
-	return dl.buildWebsocketURL(), dl.headers.Clone(), nil
+	url, err := dl.buildWebsocketURL()
+	if err != nil {
+		return "", nil, err
+	}
+	return url, dl.headers.Clone(), nil
 }
 
 func (dl *DouyinLive) reconnectDialContext(changeUA bool, rebuildHTTP bool) (string, http.Header, error) {
@@ -874,7 +911,11 @@ func (dl *DouyinLive) reconnectDialContext(changeUA bool, rebuildHTTP bool) (str
 	if err := dl.refreshReconnectContextLocked(changeUA, rebuildHTTP); err != nil {
 		return "", nil, err
 	}
-	return dl.buildWebsocketURL(), dl.headers.Clone(), nil
+	url, err := dl.buildWebsocketURL()
+	if err != nil {
+		return "", nil, err
+	}
+	return url, dl.headers.Clone(), nil
 }
 
 // processMessages 处理消息

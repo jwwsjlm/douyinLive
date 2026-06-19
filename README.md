@@ -63,6 +63,11 @@ douyinLive-v2.0.3-abcdef123456-linux-amd64.tar.gz
 douyinLive-v2.0.3-abcdef123456-windows-amd64.zip
 ```
 
+当前只发布一个主版本：
+
+- 默认使用本地 JS 计算 WebSocket 签名，普通用户不需要额外配置。
+- 如果要使用 TikHub 在线 API 生成 WebSocket 签名，通过 `sign.provider`、`APP_SIGN_PROVIDER` 或 `--sign-provider` 在运行时切换，不需要下载单独版本。
+
 压缩包里的可执行文件名仍然固定为 `douyinLive`，所以脚本和 Docker 启动命令不需要因为 hash 变化而每次修改。
 
 ```bash
@@ -101,7 +106,7 @@ go build -o douyinLive ./cmd/main
 输出示例：
 
 ```text
-tag=v2.0.3 commit=abcdef123456 buildDate=2026-05-24T00:00:00Z source=github-actions/release#123.1
+tag=v2.0.3 commit=abcdef123456 buildDate=2026-05-24T00:00:00Z source=github-actions/release#123.1 signProvider=local
 ```
 
 ### 方式三：Docker 运行
@@ -128,6 +133,15 @@ Docker 镜像也支持查看构建信息：
 
 ```bash
 docker run --rm ghcr.io/jwwsjlm/douyinlive:v2.0.3 --version
+```
+
+如果要使用 TikHub 在线签名，仍然使用同一个镜像，只需要在配置文件、环境变量或命令行里指定签名来源并提供 TikHub API Key：
+
+```bash
+docker run --rm -p 1088:1088 \
+  -e APP_SIGN_PROVIDER=tikhub \
+  -e APP_TIKHUB_KEY=YOUR_TIKHUB_KEY \
+  ghcr.io/jwwsjlm/douyinlive:v2.0.3
 ```
 
 #### 2. 通过 Docker 挂载 `config.yaml`
@@ -361,6 +375,7 @@ Windows：
 - 如果没有配置文件，就使用默认值
 - 默认端口：`1088`
 - 默认日志级别：`info`
+- 默认使用 `local` 本地签名；需要 TikHub 时在运行时切换为 `tikhub`
 
 ### 指定端口
 
@@ -437,6 +452,28 @@ Windows：
 - `commit`：构建时注入的短 commit hash
 - `buildDate`：构建时间
 - `source`：构建来源，例如 GitHub Actions 或本地构建
+- `signProvider`：当前二进制默认签名来源，`local` 或 `tikhub`
+
+### 设置签名来源
+
+程序默认使用 `local`。需要 TikHub 在线签名时，可以通过配置文件、命令行或环境变量切换：
+
+```bash
+./douyinLive --sign-provider local
+./douyinLive --sign-provider tikhub --tikhub-key YOUR_TIKHUB_KEY
+APP_SIGN_PROVIDER=tikhub APP_TIKHUB_KEY=YOUR_TIKHUB_KEY ./douyinLive
+```
+
+三种方式任选一种即可，不需要下载单独的 TikHub 版本，也不会和本地签名版本冲突。配置优先级从高到低是：
+
+1. 命令行参数：`--sign-provider`、`--tikhub-key`
+2. 环境变量：`APP_SIGN_PROVIDER`、`APP_TIKHUB_KEY`
+3. 配置文件：`sign.provider`、`tikhub.key`
+4. 程序默认值：`local`
+
+如果多个地方同时配置，以优先级最高的为准。`sign.provider=local` 时会使用内置本地 JS 签名，`tikhub.key` 即使存在也不会被使用；只有 `sign.provider=tikhub` 时才会调用 TikHub 在线 API，并且必须提供 `tikhub.key`。
+
+TikHub API Key 可以在 [TikHub 注册页](https://user.tikhub.io/register) 注册账号后，到 [TikHub 用户中心](https://user.tikhub.io/) 创建 API Key / API Token。Key 属于敏感信息，不要提交到仓库。
 
 ### CLI 参数速查
 
@@ -445,6 +482,8 @@ Windows：
 --port string        本地 WebSocket 服务端口，默认 1088
 --unknown            输出未知 protobuf 消息类型，调试用
 --log-level string   日志级别：debug、info、warn、error
+--sign-provider      WebSocket 签名来源：local、tikhub
+--tikhub-key string  TikHub API Key，仅 sign-provider=tikhub 时需要
 --version            输出版本和构建来源
 ```
 
@@ -461,6 +500,10 @@ port: "1088"
 unknown: false
 log:
   level: "info"
+sign:
+  provider: ""
+tikhub:
+  key: ""
 monitor:
   poll_interval: "15s"
   notify_interval: "30s"
@@ -503,6 +546,48 @@ unknown: false
 ```yaml
 log:
   level: "info"
+```
+
+#### `sign.provider`
+
+WebSocket 签名来源。可选值：
+
+- `local`：使用内置本地 JS 签名，默认推荐。
+- `tikhub`：使用 TikHub 在线 API 生成签名，需要配置 `tikhub.key`。
+
+默认值：
+
+```yaml
+sign:
+  provider: ""
+```
+
+留空表示使用当前二进制默认值，也就是 `local`。如果你想强制指定，也可以写成 `local` 或 `tikhub`。
+
+#### `tikhub.key`
+
+TikHub API Key，仅当 `sign.provider` 为 `tikhub` 时需要。
+
+获取方式：
+
+1. 打开 [TikHub 注册页](https://user.tikhub.io/register) 注册账号
+2. 登录 [TikHub 用户中心](https://user.tikhub.io/)
+3. 创建 API Key / API Token
+4. 把 Key 保存到本地 `config.yaml`
+
+配置写法：
+
+```yaml
+sign:
+  provider: "tikhub"
+tikhub:
+  key: "YOUR_TIKHUB_KEY"
+```
+
+也可以通过环境变量传入，适合 Docker、systemd、CI 等不想把 Key 写进配置文件的场景：
+
+```bash
+APP_SIGN_PROVIDER=tikhub APP_TIKHUB_KEY=YOUR_TIKHUB_KEY ./douyinLive
 ```
 
 #### `monitor.poll_interval`
@@ -665,6 +750,18 @@ type LiveMessage struct {
 
 ```go
 dl, err := douyinlive.NewDouyinLiveWithSlog(roomID, slog.Default(), cookie)
+```
+
+如果你想在库模式下使用 TikHub 在线签名，可以改用 TikHub 构造器：
+
+```go
+dl, err := douyinlive.NewDouyinLiveWithTikHub(roomID, log.Default(), cookie, tikHubKey)
+```
+
+对应的 slog 构造器是：
+
+```go
+dl, err := douyinlive.NewDouyinLiveWithSlogAndTikHub(roomID, slog.Default(), cookie, tikHubKey)
 ```
 
 ### 最简使用示例

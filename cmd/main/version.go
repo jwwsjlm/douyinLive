@@ -7,8 +7,10 @@ var (
 	buildCommit = "unknown"
 	buildDate   = "unknown"
 	buildSource = "local"
+
+	defaultSignProvider = "local"
 )
 
 func VersionString() string {
-	return fmt.Sprintf("tag=%s commit=%s buildDate=%s source=%s", buildTag, buildCommit, buildDate, buildSource)
+	return fmt.Sprintf("tag=%s commit=%s buildDate=%s source=%s signProvider=%s", buildTag, buildCommit, buildDate, buildSource, defaultSignProvider)
 }

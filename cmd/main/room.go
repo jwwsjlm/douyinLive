@@ -37,15 +37,21 @@ type RoomManager struct {
 	unknown        bool
 	cookie         string            // 抖音默认 Cookie
 	roomCookies    map[string]string // 按直播间 ID 配置的 Cookie
+	signProvider   string
+	tikHubKey      string
 	pollInterval   time.Duration
 	notifyInterval time.Duration
 }
 
 // NewRoomManager 创建一个新的 RoomManager
 // cookie 参数：可选的抖音默认 Cookie
-func NewRoomManager(logger *appLogger, unknown bool, cookie string, roomCookies map[string]string, pollInterval time.Duration, notifyInterval time.Duration) *RoomManager {
+func NewRoomManager(logger *appLogger, unknown bool, cookie string, roomCookies map[string]string, signProvider string, tikHubKey string, pollInterval time.Duration, notifyInterval time.Duration) *RoomManager {
 	if logger == nil {
 		logger = newAppLogger(nil)
+	}
+	normalizedProvider, err := normalizeSignProvider(signProvider)
+	if err != nil {
+		normalizedProvider = signProviderLocal
 	}
 	return &RoomManager{
 		rooms:          make(map[string]*Room),
@@ -53,6 +59,8 @@ func NewRoomManager(logger *appLogger, unknown bool, cookie string, roomCookies 
 		unknown:        unknown,
 		cookie:         cookie,
 		roomCookies:    roomCookies,
+		signProvider:   normalizedProvider,
+		tikHubKey:      strings.TrimSpace(tikHubKey),
 		pollInterval:   pollInterval,
 		notifyInterval: notifyInterval,
 	}
@@ -100,7 +108,7 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string, cookieOverride string) *Ro
 		return room
 	}
 
-	room = NewRoom(roomID, rm.logger, rm.unknown, cookie, rm.pollInterval, rm.notifyInterval, func() {
+	room = NewRoom(roomID, rm.logger, rm.unknown, cookie, rm.signProvider, rm.tikHubKey, rm.pollInterval, rm.notifyInterval, func() {
 		rm.roomsMu.Lock()
 		delete(rm.rooms, key)
 		rm.roomsMu.Unlock()
@@ -229,6 +237,8 @@ type Room struct {
 	onClose        func()
 	unknown        bool
 	cookie         string
+	signProvider   string
+	tikHubKey      string
 	pollInterval   time.Duration
 	notifyInterval time.Duration
 	starting       bool
@@ -239,9 +249,13 @@ type Room struct {
 
 // NewRoom 创建一个新的房间实例
 // cookie 参数：可选的抖音 Cookie
-func NewRoom(id string, logger *appLogger, unknown bool, cookie string, pollInterval time.Duration, notifyInterval time.Duration, onClose func()) *Room {
+func NewRoom(id string, logger *appLogger, unknown bool, cookie string, signProvider string, tikHubKey string, pollInterval time.Duration, notifyInterval time.Duration, onClose func()) *Room {
 	if logger == nil {
 		logger = newAppLogger(nil)
+	}
+	normalizedProvider, err := normalizeSignProvider(signProvider)
+	if err != nil {
+		normalizedProvider = signProviderLocal
 	}
 	return &Room{
 		id:             id,
@@ -250,6 +264,8 @@ func NewRoom(id string, logger *appLogger, unknown bool, cookie string, pollInte
 		onClose:        onClose,
 		unknown:        unknown,
 		cookie:         cookie,
+		signProvider:   normalizedProvider,
+		tikHubKey:      strings.TrimSpace(tikHubKey),
 		pollInterval:   pollInterval,
 		notifyInterval: notifyInterval,
 	}
@@ -566,7 +582,16 @@ func (r *Room) stopMonitorLoop() {
 // startLiveSession 启动抖音直播监听和事件处理。
 // 该方法负责创建 DouyinLive、显式判定开播状态，并在确认开播后启动后台 WS 会话。
 func (r *Room) startLiveSession() error {
-	d, err := douyinLive.NewDouyinLiveWithSlog(r.id, r.logger.base, r.cookie)
+	var (
+		d   *douyinLive.DouyinLive
+		err error
+	)
+	switch r.signProvider {
+	case signProviderTikHub:
+		d, err = douyinLive.NewDouyinLiveWithSlogAndTikHub(r.id, r.logger.base, r.cookie, r.tikHubKey)
+	default:
+		d, err = douyinLive.NewDouyinLiveWithSlog(r.id, r.logger.base, r.cookie)
+	}
 	if err != nil {
 		return err
 	}

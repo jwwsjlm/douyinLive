@@ -97,7 +97,13 @@ func NewSlogLogger(base *slog.Logger) *SlogLogger {
 
 // NewDouyinLiveWithSlog creates a DouyinLive instance backed by slog.
 func NewDouyinLiveWithSlog(liveID string, logger *slog.Logger, cookie string) (*DouyinLive, error) {
-	return newDouyinLive(liveID, NewSlogLogger(logger), cookie)
+	return newDouyinLive(liveID, NewSlogLogger(logger), cookie, newLocalWebsocketSigner())
+}
+
+// NewDouyinLiveWithSlogAndTikHub creates a DouyinLive instance backed by slog
+// and uses TikHub's online API to generate the WebSocket signature.
+func NewDouyinLiveWithSlogAndTikHub(liveID string, logger *slog.Logger, cookie string, tikHubToken string) (*DouyinLive, error) {
+	return newDouyinLive(liveID, NewSlogLogger(logger), cookie, newTikHubWebsocketSigner(tikHubToken, ""))
 }
 
 func (l *SlogLogger) Print(v ...interface{}) {

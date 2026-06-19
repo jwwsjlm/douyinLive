@@ -112,6 +112,7 @@ jobs:
             BUILD_COMMIT=${{ needs.release-meta.outputs.short_sha }}
             BUILD_DATE=${{ needs.release-meta.outputs.build_date }}
             BUILD_SOURCE=${{ needs.release-meta.outputs.build_source }}
+            DEFAULT_SIGN_PROVIDER=local
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: ${{ steps.docker_meta.outputs.tags }}
@@ -127,6 +128,7 @@ jobs:
             echo "- Tag: \`${{ needs.release-meta.outputs.release_tag }}\`"
             echo "- Digest: \`${{ steps.docker_build.outputs.digest }}\`"
             echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
+            echo "- Default sign provider: \`local\`"
             echo "- Build source: \`${{ needs.release-meta.outputs.build_source }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 

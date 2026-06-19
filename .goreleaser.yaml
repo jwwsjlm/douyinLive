@@ -21,7 +21,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.buildTag={{ .Tag }} -X main.buildCommit={{ .Env.BUILD_COMMIT }} -X main.buildDate={{ .Env.BUILD_DATE }} -X main.buildSource={{ .Env.BUILD_SOURCE }}
+      - -s -w -X main.buildTag={{ .Tag }} -X main.buildCommit={{ envOrDefault "BUILD_COMMIT" .ShortCommit }} -X main.buildDate={{ envOrDefault "BUILD_DATE" .Date }} -X main.buildSource={{ envOrDefault "BUILD_SOURCE" "local" }} -X main.defaultSignProvider=local
 
 archives:
   - id: douyinLive
@@ -34,7 +34,7 @@ archives:
         formats:
           - zip
     name_template: >-
-      {{ .ProjectName }}-{{ .Tag }}-{{ .Env.BUILD_COMMIT }}-{{ .Os }}-{{ .Arch }}
+      {{ .ProjectName }}-{{ .Tag }}-{{ envOrDefault "BUILD_COMMIT" .ShortCommit }}-{{ .Os }}-{{ .Arch }}
     files:
       - README.md
       - LICENSE
@@ -43,7 +43,7 @@ archives:
       - compose.data.yaml
 
 checksum:
-  name_template: "{{ .ProjectName }}-{{ .Tag }}-{{ .Env.BUILD_COMMIT }}-checksums.txt"
+  name_template: '{{ .ProjectName }}-{{ .Tag }}-{{ envOrDefault "BUILD_COMMIT" .ShortCommit }}-checksums.txt'
 
 release:
   name_template: "{{ .Tag }}"

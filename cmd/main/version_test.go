@@ -12,6 +12,7 @@ func TestVersionStringIncludesBuildMetadata(t *testing.T) {
 		"commit=" + buildCommit,
 		"buildDate=" + buildDate,
 		"source=" + buildSource,
+		"signProvider=" + defaultSignProvider,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("VersionString() = %q, want it to include %q", got, want)

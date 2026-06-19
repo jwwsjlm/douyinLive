@@ -21,6 +21,11 @@ var validLogLevels = map[string]struct{}{
 	"error": {},
 }
 
+const (
+	signProviderLocal  = "local"
+	signProviderTikHub = "tikhub"
+)
+
 // CookieConfig 存储 Cookie 配置
 type CookieConfig struct {
 	Douyin string            // 抖音默认 Cookie
@@ -38,6 +43,16 @@ type LogConfig struct {
 	Level string
 }
 
+// SignConfig 存储 WebSocket 签名来源配置
+type SignConfig struct {
+	Provider string
+}
+
+// TikHubConfig 存储 TikHub API 配置
+type TikHubConfig struct {
+	Key string
+}
+
 // Config 存储应用的所有配置
 type Config struct {
 	Port    string
@@ -45,6 +60,8 @@ type Config struct {
 	Cookie  CookieConfig
 	Monitor MonitorConfig
 	Log     LogConfig
+	Sign    SignConfig
+	TikHub  TikHubConfig
 }
 
 func firstNonEmpty(values ...string) string {
@@ -56,12 +73,30 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func normalizeSignProvider(provider string) (string, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		provider = defaultSignProvider
+	}
+
+	switch provider {
+	case "local", "js", "javascript":
+		return signProviderLocal, nil
+	case "tikhub", "tik-hub", "tik_hub":
+		return signProviderTikHub, nil
+	default:
+		return "", fmt.Errorf("sign.provider 配置无效: %s，可选值: local, tikhub", provider)
+	}
+}
+
 // NewConfig 创建并加载应用配置
 func NewConfig() (*Config, error) {
 	// 绑定命令行参数
 	pflag.String("port", "1088", "WebSocket 服务端口")
 	pflag.Bool("unknown", false, "是否输出未知源的 pb 消息")
 	pflag.String("log-level", "info", "日志级别: debug, info, warn, error")
+	pflag.String("sign-provider", defaultSignProvider, "WebSocket 签名来源: local, tikhub")
+	pflag.String("tikhub-key", "", "TikHub API Key，用于在线生成 WebSocket xb 签名")
 	configFile := pflag.String("config", "", "指定配置文件路径")
 	pflag.BoolVar(&showVersion, "version", false, "Print version information")
 	pflag.Parse()
@@ -107,6 +142,8 @@ func NewConfig() (*Config, error) {
 	viper.SetDefault("monitor.poll_interval", "15s")
 	viper.SetDefault("monitor.notify_interval", "30s")
 	viper.SetDefault("log.level", "info")
+	viper.SetDefault("sign.provider", defaultSignProvider)
+	viper.SetDefault("tikhub.key", "")
 	// 读取配置
 	if err := viper.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
@@ -145,6 +182,20 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("log.level 配置无效: %s", logLevel)
 	}
 
+	signProvider := viper.GetString("sign.provider")
+	if flag := pflag.Lookup("sign-provider"); flag != nil && flag.Changed {
+		signProvider = flag.Value.String()
+	}
+	signProvider, err = normalizeSignProvider(signProvider)
+	if err != nil {
+		return nil, err
+	}
+
+	tikHubKey := viper.GetString("tikhub.key")
+	if flag := pflag.Lookup("tikhub-key"); flag != nil && flag.Changed {
+		tikHubKey = flag.Value.String()
+	}
+
 	// 填充 Config 结构体
 	cfg := &Config{
 		Port:    viper.GetString("port"),
@@ -159,6 +210,12 @@ func NewConfig() (*Config, error) {
 		},
 		Log: LogConfig{
 			Level: logLevel,
+		},
+		Sign: SignConfig{
+			Provider: signProvider,
+		},
+		TikHub: TikHubConfig{
+			Key: strings.TrimSpace(tikHubKey),
 		},
 	}
 

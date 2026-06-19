@@ -10,7 +10,7 @@ import (
 func TestRoomManagerCookieForRoomPriority(t *testing.T) {
 	rm := NewRoomManager(nil, false, "global-cookie", map[string]string{
 		"1001": "room-cookie",
-	}, 0, 0)
+	}, signProviderLocal, "", 0, 0)
 
 	if got := rm.cookieForRoom("1001", "override-cookie"); got != "override-cookie" {
 		t.Fatalf("override cookie should win, got %q", got)
@@ -58,7 +58,7 @@ func TestRoomManagerKeySeparatesCookie(t *testing.T) {
 }
 
 func TestRoomRemoveIfIdleRemovesRoomFromManager(t *testing.T) {
-	rm := NewRoomManager(nil, false, "", nil, time.Second, time.Second)
+	rm := NewRoomManager(nil, false, "", nil, signProviderLocal, "", time.Second, time.Second)
 	room := rm.GetOrCreateRoom("1001", "")
 
 	room.removeIfIdle()
@@ -73,7 +73,7 @@ func TestRoomRemoveIfIdleRemovesRoomFromManager(t *testing.T) {
 
 func TestRoomRemoveIfIdleKeepsRoomWithClients(t *testing.T) {
 	removed := false
-	room := NewRoom("1001", nil, false, "", time.Second, time.Second, func() {
+	room := NewRoom("1001", nil, false, "", signProviderLocal, "", time.Second, time.Second, func() {
 		removed = true
 	})
 	room.clients["client-1"] = NewClient("client-1", nil)
@@ -93,4 +93,16 @@ func TestClientCloseAllowsNilConn(t *testing.T) {
 
 	client.close(nil)
 	client.close(nil)
+}
+
+func TestRoomManagerPassesSignConfigToRoom(t *testing.T) {
+	rm := NewRoomManager(nil, false, "", nil, signProviderTikHub, " api-key ", time.Second, time.Second)
+	room := rm.GetOrCreateRoom("1001", "")
+
+	if room.signProvider != signProviderTikHub {
+		t.Fatalf("room.signProvider = %q, want %q", room.signProvider, signProviderTikHub)
+	}
+	if room.tikHubKey != "api-key" {
+		t.Fatalf("room.tikHubKey = %q, want trimmed key", room.tikHubKey)
+	}
 }

@@ -30,7 +30,16 @@ func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error
 		logger = newAppLogger(nil)
 	}
 
-	roomManager := NewRoomManager(logger, config.Unknown, config.Cookie.Douyin, config.Cookie.Rooms, config.Monitor.PollInterval, config.Monitor.NotifyInterval)
+	roomManager := NewRoomManager(
+		logger,
+		config.Unknown,
+		config.Cookie.Douyin,
+		config.Cookie.Rooms,
+		config.Sign.Provider,
+		config.TikHub.Key,
+		config.Monitor.PollInterval,
+		config.Monitor.NotifyInterval,
+	)
 	return &App{
 		ctx:         ctx,
 		logger:      logger,

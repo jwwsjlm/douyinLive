@@ -12,6 +12,16 @@ log:
   # 可选: debug, info, warn, error
   level: "info"
 
+# WebSocket 签名配置
+sign:
+  # 留空表示使用默认值 local，也可以显式填写 local 或 tikhub。
+  provider: ""
+
+# TikHub 在线签名配置
+tikhub:
+  # 当 sign.provider 为 tikhub 时必填，也可用 APP_TIKHUB_KEY 或 --tikhub-key 覆盖
+  key: ""
+
 # 未开播监控配置
 monitor:
   # 检查是否开播的时间间隔

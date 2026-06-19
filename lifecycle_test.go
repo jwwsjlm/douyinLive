@@ -3,6 +3,7 @@ package douyinLive
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -41,5 +42,47 @@ func TestContextWithCloseSignalCancels(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("context was not canceled")
+	}
+}
+
+func TestRequestContextDoesNotStartPerRequestGoroutine(t *testing.T) {
+	dl := &DouyinLive{}
+	const requests = 50
+
+	before := runtime.NumGoroutine()
+	cancels := make([]context.CancelFunc, 0, requests)
+	defer func() {
+		for _, cancel := range cancels {
+			cancel()
+		}
+		dl.Close()
+	}()
+
+	for i := 0; i < requests; i++ {
+		_, cancel := dl.requestContext()
+		cancels = append(cancels, cancel)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	after := runtime.NumGoroutine()
+	if delta := after - before; delta > 10 {
+		t.Fatalf("requestContext started too many goroutines: before=%d after=%d delta=%d", before, after, delta)
+	}
+}
+
+func TestRequestContextAfterCloseIsCanceled(t *testing.T) {
+	var dl DouyinLive
+	dl.Close()
+
+	ctx, cancel := dl.requestContext()
+	defer cancel()
+
+	select {
+	case <-ctx.Done():
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Fatalf("ctx.Err() = %v, want context.Canceled", ctx.Err())
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("context was not canceled after Close")
 	}
 }

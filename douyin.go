@@ -97,6 +97,8 @@ type DouyinLive struct {
 	releaseOnce         sync.Once
 	closeCh             chan struct{}
 	closeSignalClosed   bool
+	closeCtx            context.Context
+	closeCancel         context.CancelFunc
 }
 
 type roomInfoSnapshot struct {
@@ -125,6 +127,7 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string) (*DouyinLive
 	if err != nil {
 		return nil, fmt.Errorf("初始化缓存失败: %w", err)
 	}
+	closeCtx, closeCancel := context.WithCancel(context.Background())
 	dl := &DouyinLive{
 		liveID:    liveID,
 		liveName:  liveID,
@@ -142,6 +145,8 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string) (*DouyinLive
 		logger:              normalizeLogger(baseLogger),
 		lastUserAgentChange: time.Now(),
 		closeCh:             make(chan struct{}),
+		closeCtx:            closeCtx,
+		closeCancel:         closeCancel,
 	}
 
 	dl.cookieManager = sign.NewCookieManager()
@@ -308,14 +313,26 @@ func (dl *DouyinLive) recordReconnectFailure(reason string) int {
 	return dl.consecutiveFailures
 }
 
+func (dl *DouyinLive) ensureCloseContextLocked() {
+	if dl.closeCtx != nil && dl.closeCancel != nil {
+		return
+	}
+	dl.closeCtx, dl.closeCancel = context.WithCancel(context.Background())
+	if dl.closeSignalClosed {
+		dl.closeCancel()
+	}
+}
+
 func (dl *DouyinLive) signalClose() {
 	dl.mu.Lock()
 	if dl.closeCh == nil {
 		dl.closeCh = make(chan struct{})
 	}
+	dl.ensureCloseContextLocked()
 	if !dl.closeSignalClosed {
 		close(dl.closeCh)
 		dl.closeSignalClosed = true
+		dl.closeCancel()
 	}
 	dl.mu.Unlock()
 }
@@ -325,6 +342,9 @@ func (dl *DouyinLive) resetCloseSignal() {
 	if dl.closeCh == nil || dl.closeSignalClosed {
 		dl.closeCh = make(chan struct{})
 		dl.closeSignalClosed = false
+	}
+	if dl.closeCtx == nil || dl.closeCtx.Err() != nil {
+		dl.closeCtx, dl.closeCancel = context.WithCancel(context.Background())
 	}
 	dl.mu.Unlock()
 }
@@ -360,16 +380,12 @@ func (dl *DouyinLive) waitForReconnectDelay(delay time.Duration) bool {
 }
 
 func (dl *DouyinLive) requestContext() (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), httpRequestTimeout)
-	closeCh := dl.closeSignal()
-	go func() {
-		select {
-		case <-closeCh:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-	return ctx, cancel
+	dl.mu.Lock()
+	dl.ensureCloseContextLocked()
+	parent := dl.closeCtx
+	dl.mu.Unlock()
+
+	return context.WithTimeout(parent, httpRequestTimeout)
 }
 
 func contextWithCloseSignal(closeCh <-chan struct{}) (context.Context, context.CancelFunc) {

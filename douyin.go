@@ -91,6 +91,7 @@ type DouyinLive struct {
 	cookieManager       *sign.CookieManager
 	heartbeatStopCh     chan struct{}
 	heartbeatDoneCh     chan struct{}
+	liveStatusGuard     liveStatusGuard
 	writeMu             sync.Mutex
 	title               string
 	avatarThumb         string
@@ -100,6 +101,23 @@ type DouyinLive struct {
 	closeSignalClosed   bool
 	closeCtx            context.Context
 	closeCancel         context.CancelFunc
+}
+
+type liveStatusGuard struct {
+	offlineConfirmations int
+}
+
+func (g *liveStatusGuard) Record(isLive bool) bool {
+	if isLive {
+		g.offlineConfirmations = 0
+		return false
+	}
+	g.offlineConfirmations++
+	return g.offlineConfirmations >= 2
+}
+
+func (g *liveStatusGuard) Reset() {
+	g.offlineConfirmations = 0
 }
 
 type roomInfoSnapshot struct {
@@ -1016,6 +1034,7 @@ func (dl *DouyinLive) startHeartbeatLoop() {
 	dl.mu.Lock()
 	dl.heartbeatStopCh = stopCh
 	dl.heartbeatDoneCh = doneCh
+	dl.liveStatusGuard.Reset()
 	dl.mu.Unlock()
 
 	go func() {
@@ -1046,16 +1065,25 @@ func (dl *DouyinLive) startHeartbeatLoop() {
 					dl.logger.Warn("HTTP 兜底检测直播状态失败", "live_id", dl.liveID, "err", err)
 					continue
 				}
-				if !isLive {
+				if dl.shouldCloseAfterStatusCheck(isLive) {
 					dl.logger.Info("HTTP 兜底检测到直播已下播，关闭当前 WS 连接", "live_id", dl.liveID, "live_name", dl.GetName())
 					dl.closeCurrentConnection(websocket.CloseNormalClosure, "live ended by api")
 					return
+				}
+				if !isLive {
+					dl.logger.Warn("HTTP 兜底检测到一次未开播状态，等待二次确认", "live_id", dl.liveID, "live_name", dl.GetName())
 				}
 			case <-stopCh:
 				return
 			}
 		}
 	}()
+}
+
+func (dl *DouyinLive) shouldCloseAfterStatusCheck(isLive bool) bool {
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+	return dl.liveStatusGuard.Record(isLive)
 }
 
 func (dl *DouyinLive) stopHeartbeatLoop() {

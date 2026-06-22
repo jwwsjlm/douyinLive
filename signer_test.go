@@ -160,3 +160,43 @@ func TestTikHubAPIResponseSuccessCode(t *testing.T) {
 		})
 	}
 }
+
+func TestLiveStatusGuardRequiresConsecutiveOfflineConfirmations(t *testing.T) {
+	guard := liveStatusGuard{}
+
+	if guard.Record(true) {
+		t.Fatalf("Record(true) closed connection")
+	}
+	if guard.Record(false) {
+		t.Fatalf("first offline confirmation closed connection")
+	}
+	if !guard.Record(false) {
+		t.Fatalf("second consecutive offline confirmation did not close connection")
+	}
+}
+
+func TestLiveStatusGuardResetsAfterOnlineConfirmation(t *testing.T) {
+	guard := liveStatusGuard{}
+
+	if guard.Record(false) {
+		t.Fatalf("first offline confirmation closed connection")
+	}
+	if guard.Record(true) {
+		t.Fatalf("online confirmation closed connection")
+	}
+	if guard.Record(false) {
+		t.Fatalf("offline confirmation after reset closed connection")
+	}
+}
+
+func TestLiveStatusGuardCanResetForNewConnection(t *testing.T) {
+	guard := liveStatusGuard{}
+
+	if guard.Record(false) {
+		t.Fatalf("first offline confirmation closed connection")
+	}
+	guard.Reset()
+	if guard.Record(false) {
+		t.Fatalf("offline confirmation after connection reset closed connection")
+	}
+}

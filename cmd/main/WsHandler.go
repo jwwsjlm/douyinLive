@@ -23,6 +23,11 @@ func (c *WsHandler) OnClose(socket *gws.Conn, err error) {
 	c.room.RemoveClient(socket.RemoteAddr().String())
 }
 
+// OnPing 按 WebSocket 规范使用相同 payload 回复 pong。
+func (c *WsHandler) OnPing(socket *gws.Conn, payload []byte) {
+	_ = socket.WritePong(payload)
+}
+
 // OnMessage 当收到消息时调用
 func (c *WsHandler) OnMessage(socket *gws.Conn, message *gws.Message) {
 	defer message.Close()

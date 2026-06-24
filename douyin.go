@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -36,6 +37,7 @@ const (
 	maxReconnectJitter      = 1200 * time.Millisecond
 	minUAChangeInterval     = 8 * time.Second
 	gzipBufferSize          = 1024 * 4
+	maxGzipPayloadSize      = 32 << 20
 	httpRequestTimeout      = 15 * time.Second
 	wsWriteTimeout          = 5 * time.Second
 	wsReadTimeout           = 70 * time.Second
@@ -440,14 +442,6 @@ func contextWithCloseSignal(closeCh <-chan struct{}) (context.Context, context.C
 	return ctx, cancel
 }
 
-// prepareRequestContext 初始化 HTTP 请求上下文
-func (dl *DouyinLive) prepareRequestContext() error {
-	dl.contextMu.Lock()
-	defer dl.contextMu.Unlock()
-
-	return dl.prepareRequestContextLocked()
-}
-
 func (dl *DouyinLive) prepareRequestContextLocked() error {
 	if err := dl.fetchTTWID(); err != nil {
 		return err
@@ -458,14 +452,6 @@ func (dl *DouyinLive) prepareRequestContextLocked() error {
 	dl.headers.Set("Referer", "https://live.douyin.com/"+dl.liveID)
 	dl.setupCookies()
 	return nil
-}
-
-// prepareWebSocketContext 初始化 WebSocket 连接上下文
-func (dl *DouyinLive) prepareWebSocketContext() error {
-	dl.contextMu.Lock()
-	defer dl.contextMu.Unlock()
-
-	return dl.prepareWebSocketContextLocked()
 }
 
 func (dl *DouyinLive) prepareWebSocketContextLocked() error {
@@ -485,14 +471,6 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() error {
 	}
 
 	return nil
-}
-
-// refreshReconnectContext 重连前刷新上下文；可选是否切换 UA 和是否全量重建 HTTP 上下文
-func (dl *DouyinLive) refreshReconnectContext(changeUA bool, rebuildHTTP bool) error {
-	dl.contextMu.Lock()
-	defer dl.contextMu.Unlock()
-
-	return dl.refreshReconnectContextLocked(changeUA, rebuildHTTP)
 }
 
 func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP bool) error {
@@ -541,15 +519,6 @@ func (dl *DouyinLive) getCookieParts() []string {
 		parts = append(parts, fmt.Sprintf("%s=%s", name, value))
 	}
 	return parts
-}
-
-// getCookies 获取 Cookie 列表（统一方法）
-func (dl *DouyinLive) getCookies() []*http.Cookie {
-	parts := dl.getCookieParts()
-	if len(parts) == 0 {
-		return nil
-	}
-	return dl.cookieManager.ParseCookies(strings.Join(parts, "; "))
 }
 
 // getCookieString 获取 Cookie 字符串（用于 headers）
@@ -605,8 +574,6 @@ func (dl *DouyinLive) fetchTTWID() error {
 
 // fetchRoomEnterData 获取直播间接口数据（对齐 DouyinLiveRecorder 的 web/enter 逻辑）
 func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
-	var body string
-
 	V, found := dl.ristretto.Get(dl.liveID)
 	if found {
 		dl.logger.Debug("从缓存获取直播间信息", "live_id", dl.liveID)
@@ -624,7 +591,13 @@ func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 		return V, nil
 	}
 
-	dl.logger.Debug("缓存未命中，开始请求直播间信息", "live_id", dl.liveID)
+	return dl.refreshRoomEnterData()
+}
+
+func (dl *DouyinLive) refreshRoomEnterData() (string, error) {
+	var body string
+
+	dl.logger.Debug("开始请求直播间信息", "live_id", dl.liveID)
 	err := retry.Do(
 		func() error {
 			// 核心请求逻辑
@@ -734,6 +707,15 @@ func (dl *DouyinLive) logRoomInfoResponseSummary(body string) {
 
 // refreshLiveStatusFromAPI 通过房间接口刷新当前直播状态。
 func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
+	isLive, err := dl.fetchLiveStatusFromAPI()
+	if err != nil {
+		return false, err
+	}
+	dl.setLiveStatus(isLive)
+	return isLive, nil
+}
+
+func (dl *DouyinLive) fetchLiveStatusFromAPI() (bool, error) {
 	dl.contextMu.Lock()
 	defer dl.contextMu.Unlock()
 
@@ -741,15 +723,13 @@ func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
 		return false, err
 	}
 
-	body, err := dl.fetchRoomEnterData()
+	body, err := dl.refreshRoomEnterData()
 	if err != nil {
 		return false, err
 	}
 
 	status := gjson.Get(body, "data.data.0.status").Int()
-	isLive := status == 2
-	dl.setLiveStatus(isLive)
-	return isLive, nil
+	return status == 2, nil
 }
 
 // IsLive 检查直播间是否开播，并返回判活过程中的错误。
@@ -767,6 +747,9 @@ func (dl *DouyinLive) setLiveStatus(status bool) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
 	dl.isLiveClosed = status
+	if status {
+		dl.liveStatusGuard.Reset()
+	}
 }
 
 // isLiveStatus 获取直播间状态（线程安全）
@@ -900,12 +883,6 @@ func (dl *DouyinLive) buildWebsocketURL() (string, error) {
 		roomInfo.roomID,
 		encodedSignature,
 	), nil
-}
-
-// makeURL 初始化 WebSocket 所需上下文后构建连接 URL。
-func (dl *DouyinLive) makeURL() (string, error) {
-	url, _, err := dl.websocketDialContext()
-	return url, err
 }
 
 func (dl *DouyinLive) websocketDialContext() (string, http.Header, error) {
@@ -1060,7 +1037,7 @@ func (dl *DouyinLive) startHeartbeatLoop() {
 				if dl.isManualClose() || !dl.isLiveStatus() {
 					return
 				}
-				isLive, err := dl.refreshLiveStatusFromAPI()
+				isLive, err := dl.fetchLiveStatusFromAPI()
 				if err != nil {
 					dl.logger.Warn("HTTP 兜底检测直播状态失败", "live_id", dl.liveID, "err", err)
 					continue
@@ -1083,7 +1060,13 @@ func (dl *DouyinLive) startHeartbeatLoop() {
 func (dl *DouyinLive) shouldCloseAfterStatusCheck(isLive bool) bool {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
-	return dl.liveStatusGuard.Record(isLive)
+	shouldClose := dl.liveStatusGuard.Record(isLive)
+	if shouldClose {
+		dl.isLiveClosed = false
+	} else if isLive {
+		dl.isLiveClosed = true
+	}
+	return shouldClose
 }
 
 func (dl *DouyinLive) stopHeartbeatLoop() {
@@ -1153,6 +1136,9 @@ func (dl *DouyinLive) decodeResponse(data []byte, pushFrame *new_douyin.Webcast_
 	}
 
 	for _, msg := range response.Messages {
+		if dl.isManualClose() || !dl.isLiveStatus() {
+			break
+		}
 		dl.handleSingleMessage(msg, controlMsg)
 	}
 	return nil
@@ -1162,6 +1148,9 @@ func (dl *DouyinLive) decodeGzipResponse(data []byte, pushFrame *new_douyin.Webc
 	buf := dl.bufferPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer func() {
+		if buf.Cap() > maxGzipPayloadSize {
+			return
+		}
 		buf.Reset()
 		dl.bufferPool.Put(buf)
 	}()
@@ -1172,8 +1161,11 @@ func (dl *DouyinLive) decodeGzipResponse(data []byte, pushFrame *new_douyin.Webc
 	}
 	defer gz.Close()
 
-	if _, err = buf.ReadFrom(gz); err != nil {
+	if _, err = buf.ReadFrom(io.LimitReader(gz, maxGzipPayloadSize+1)); err != nil {
 		return err
+	}
+	if buf.Len() > maxGzipPayloadSize {
+		return fmt.Errorf("gzip payload too large: %d bytes", buf.Len())
 	}
 
 	return dl.decodeResponse(buf.Bytes(), pushFrame, response, controlMsg)
@@ -1207,6 +1199,10 @@ func (dl *DouyinLive) sendAck(logID uint64, internalExt string) {
 // handleSingleMessage 处理单条消息
 func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 	controlMsg *new_douyin.Webcast_Im_ControlMessage) {
+	if dl.isManualClose() || !dl.isLiveStatus() {
+		return
+	}
+
 	if msg.Method == "WebcastControlMessage" {
 		if err := proto.Unmarshal(msg.Payload, controlMsg); err != nil {
 			dl.logger.Warn("解析控制消息失败", "live_id", dl.liveID, "payload_len", len(msg.Payload), "err", err)
@@ -1319,13 +1315,15 @@ func (dl *DouyinLive) handleReadError(err error) bool {
 		return false
 	}
 
-	isLive, statusErr := dl.refreshLiveStatusFromAPI()
+	isLive, statusErr := dl.fetchLiveStatusFromAPI()
 
 	if statusErr != nil {
 		dl.logger.Warn("WS 读错后 HTTP 兜底检测失败，继续按重连流程处理", "live_id", dl.liveID, "err", statusErr)
-	} else if !isLive {
+	} else if dl.shouldCloseAfterStatusCheck(isLive) {
 		dl.logger.Info("WS 读错后 HTTP 兜底确认直播已下播，不再重连", "live_id", dl.liveID, "live_name", dl.GetName())
 		return false
+	} else if !isLive {
+		dl.logger.Warn("WS 读错后 HTTP 兜底检测到一次未开播状态，继续重连等待二次确认", "live_id", dl.liveID, "live_name", dl.GetName())
 	}
 
 	reason, shouldRetry, baseDelay, allowUARefresh := dl.reconnectDecision(err)
@@ -1469,6 +1467,9 @@ func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto
 	}
 
 	for _, handler := range handlers {
+		if dl.isManualClose() {
+			return
+		}
 		func(h eventHandler) {
 			defer func() {
 				if recovered := recover(); recovered != nil && dl.logger != nil {
@@ -1480,7 +1481,7 @@ func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto
 	}
 
 	roomInfo := dl.roomInfoSnapshot()
-	dl.eventBus().publishWithLogger(dl.logger, &LiveMessage{
+	dl.eventBus().publishWithLoggerUntil(dl.logger, &LiveMessage{
 		LiveID:      roomInfo.liveID,
 		RoomID:      roomInfo.roomID,
 		LiveName:    roomInfo.liveName,
@@ -1489,6 +1490,8 @@ func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto
 		Raw:         msg,
 		Parsed:      parsedSnapshot,
 		ReceivedAt:  time.Now(),
+	}, func() bool {
+		return dl.isManualClose()
 	})
 }
 

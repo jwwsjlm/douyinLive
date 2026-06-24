@@ -98,19 +98,21 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string, cookieOverride string) *Ro
 	rm.roomsMu.RLock()
 	room, ok := rm.rooms[key]
 	rm.roomsMu.RUnlock()
-	if ok {
+	if ok && !room.isClosed() {
 		return room
 	}
 
 	rm.roomsMu.Lock()
 	defer rm.roomsMu.Unlock()
-	if room, ok = rm.rooms[key]; ok {
+	if room, ok = rm.rooms[key]; ok && !room.isClosed() {
 		return room
 	}
 
 	room = NewRoom(roomID, rm.logger, rm.unknown, cookie, rm.signProvider, rm.tikHubKey, rm.pollInterval, rm.notifyInterval, func() {
 		rm.roomsMu.Lock()
-		delete(rm.rooms, key)
+		if rm.rooms[key] == room {
+			delete(rm.rooms, key)
+		}
 		rm.roomsMu.Unlock()
 		rm.logger.Info("房间已从管理器中移除", "room_id", roomID)
 	})
@@ -178,7 +180,8 @@ func (c *Client) writeLoop(onWriteError func()) {
 			if !ok {
 				return
 			}
-			if nc := c.conn.NetConn(); nc != nil {
+			nc := c.conn.NetConn()
+			if nc != nil {
 				_ = nc.SetWriteDeadline(time.Now().Add(clientWriteTimeout))
 			}
 			if err := c.conn.WriteMessage(msg.opcode, msg.payload); err != nil {
@@ -187,6 +190,9 @@ func (c *Client) writeLoop(onWriteError func()) {
 					onWriteError()
 				}
 				return
+			}
+			if nc != nil {
+				_ = nc.SetWriteDeadline(time.Time{})
 			}
 		}
 	}
@@ -300,6 +306,12 @@ func (r *Room) clientCount() int {
 	r.clientsMu.RLock()
 	defer r.clientsMu.RUnlock()
 	return len(r.clients)
+}
+
+func (r *Room) isClosed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
 }
 
 func (r *Room) snapshotClients() []*Client {
@@ -742,6 +754,10 @@ func (r *Room) Broadcast(message []byte) {
 // Close 关闭房间，停止监听并清理资源（优雅退出）
 func (r *Room) Close() {
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
 	r.closed = true
 	d := r.douyinLive
 	r.douyinLive = nil

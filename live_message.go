@@ -140,6 +140,10 @@ func (b *messageBus) publish(message *LiveMessage) {
 }
 
 func (b *messageBus) publishWithLogger(logger logSink, message *LiveMessage) {
+	b.publishWithLoggerUntil(logger, message, nil)
+}
+
+func (b *messageBus) publishWithLoggerUntil(logger logSink, message *LiveMessage, stop func() bool) {
 	if message == nil {
 		return
 	}
@@ -149,6 +153,9 @@ func (b *messageBus) publishWithLogger(logger logSink, message *LiveMessage) {
 	b.mu.RUnlock()
 
 	for _, subscriber := range subscribers {
+		if stop != nil && stop() {
+			return
+		}
 		if !subscriber.accepts(message.GetMethod()) {
 			continue
 		}

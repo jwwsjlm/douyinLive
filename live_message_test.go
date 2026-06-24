@@ -7,6 +7,7 @@ import (
 
 	"github.com/dgraph-io/ristretto/v2"
 	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestMessageBusSubscribeAll(t *testing.T) {
@@ -200,6 +201,99 @@ func TestEmitEventClonesParsedMessageForSubscribers(t *testing.T) {
 	}
 	if chat.GetContent() != "hello" {
 		t.Fatalf("Parsed content = %q, want cloned value hello", chat.GetContent())
+	}
+}
+
+func TestDecodeResponseStopsDispatchingAfterClose(t *testing.T) {
+	dl := &DouyinLive{
+		liveID:   "live-id",
+		roomID:   "room-id",
+		liveName: "live-name",
+		logger:   normalizeLogger(log.Default()),
+	}
+	dl.setLiveStatus(true)
+
+	var got []string
+	dl.SubscribeMessage(func(message *LiveMessage) {
+		got = append(got, message.GetMethod())
+		dl.Close()
+	})
+
+	responseBytes, err := proto.Marshal(&new_douyin.Webcast_Im_Response{
+		Messages: []*new_douyin.Webcast_Im_Message{
+			{Method: WebcastChatMessage},
+			{Method: WebcastGiftMessage},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	err = dl.decodeResponse(
+		responseBytes,
+		&new_douyin.Webcast_Im_PushFrame{},
+		&new_douyin.Webcast_Im_Response{},
+		&new_douyin.Webcast_Im_ControlMessage{},
+	)
+	if err != nil {
+		t.Fatalf("decodeResponse() returned error: %v", err)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("got %d callbacks after Close, want 1: %#v", len(got), got)
+	}
+	if got[0] != WebcastChatMessage {
+		t.Fatalf("first callback method = %q, want %q", got[0], WebcastChatMessage)
+	}
+}
+
+func TestEmitEventStopsLegacyHandlersAfterClose(t *testing.T) {
+	dl := &DouyinLive{
+		liveID:   "live-id",
+		roomID:   "room-id",
+		liveName: "live-name",
+		logger:   normalizeLogger(log.Default()),
+	}
+	dl.setLiveStatus(true)
+
+	var got []string
+	dl.Subscribe(func(*new_douyin.Webcast_Im_Message, proto.Message) {
+		got = append(got, "first")
+		dl.Close()
+	})
+	dl.Subscribe(func(*new_douyin.Webcast_Im_Message, proto.Message) {
+		got = append(got, "second")
+	})
+
+	dl.emitEvent(&new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}, nil)
+
+	if len(got) != 1 || got[0] != "first" {
+		t.Fatalf("legacy handlers after Close = %#v, want only first", got)
+	}
+}
+
+func TestEmitEventStopsMessageSubscribersAfterClose(t *testing.T) {
+	dl := &DouyinLive{
+		liveID:   "live-id",
+		roomID:   "room-id",
+		liveName: "live-name",
+		logger:   normalizeLogger(log.Default()),
+	}
+	dl.setLiveStatus(true)
+
+	var got []string
+	dl.SubscribeMessage(func(*LiveMessage) {
+		got = append(got, "first")
+		dl.Close()
+	})
+	dl.SubscribeMessage(func(*LiveMessage) {
+		got = append(got, "second")
+	})
+
+	dl.emitEvent(&new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}, nil)
+
+	if len(got) != 1 || got[0] != "first" {
+		t.Fatalf("message subscribers after Close = %#v, want only first", got)
 	}
 }
 

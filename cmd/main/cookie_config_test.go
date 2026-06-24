@@ -88,6 +88,54 @@ func TestRoomRemoveIfIdleKeepsRoomWithClients(t *testing.T) {
 	}
 }
 
+func TestRoomManagerReplacesClosedRoom(t *testing.T) {
+	rm := NewRoomManager(nil, false, "", nil, signProviderLocal, "", time.Second, time.Second)
+	oldRoom := rm.GetOrCreateRoom("1001", "")
+	oldRoom.mu.Lock()
+	oldRoom.closed = true
+	oldRoom.mu.Unlock()
+
+	newRoom := rm.GetOrCreateRoom("1001", "")
+	if newRoom == oldRoom {
+		t.Fatalf("GetOrCreateRoom returned a closed room")
+	}
+	if newRoom.closed {
+		t.Fatalf("new room is closed")
+	}
+}
+
+func TestOldRoomOnCloseDoesNotRemoveReplacementRoom(t *testing.T) {
+	rm := NewRoomManager(nil, false, "", nil, signProviderLocal, "", time.Second, time.Second)
+	oldRoom := rm.GetOrCreateRoom("1001", "")
+	oldRoom.mu.Lock()
+	oldRoom.closed = true
+	oldRoom.mu.Unlock()
+
+	newRoom := rm.GetOrCreateRoom("1001", "")
+	oldRoom.onClose()
+
+	rm.roomsMu.RLock()
+	got := rm.rooms["1001"]
+	rm.roomsMu.RUnlock()
+	if got != newRoom {
+		t.Fatalf("old room onClose removed replacement room")
+	}
+}
+
+func TestRoomCloseIsIdempotent(t *testing.T) {
+	closeCalls := 0
+	room := NewRoom("1001", nil, false, "", signProviderLocal, "", time.Second, time.Second, func() {
+		closeCalls++
+	})
+
+	room.Close()
+	room.Close()
+
+	if closeCalls != 1 {
+		t.Fatalf("onClose called %d times, want 1", closeCalls)
+	}
+}
+
 func TestClientCloseAllowsNilConn(t *testing.T) {
 	client := NewClient("client-1", nil)
 

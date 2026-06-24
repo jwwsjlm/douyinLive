@@ -13,6 +13,12 @@ import (
 	"github.com/lxzan/gws"
 )
 
+const (
+	httpReadHeaderTimeout = 5 * time.Second
+	httpIdleTimeout       = 2 * time.Minute
+	httpMaxHeaderBytes    = 16 << 10
+)
+
 // App 是应用的核心结构体，封装了所有依赖
 type App struct {
 	ctx         context.Context
@@ -63,7 +69,7 @@ func (a *App) Run() error {
 		addr := ":" + strconv.Itoa(port)
 		listener, err := net.Listen("tcp", addr)
 		if err == nil {
-			a.httpServer = &http.Server{Addr: addr, Handler: mux}
+			a.httpServer = newHTTPServer(addr, mux)
 			a.runningPort = strconv.Itoa(port)
 
 			close(a.ready)
@@ -71,6 +77,16 @@ func (a *App) Run() error {
 			return a.httpServer.Serve(listener)
 		}
 		port++
+	}
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: httpReadHeaderTimeout,
+		IdleTimeout:       httpIdleTimeout,
+		MaxHeaderBytes:    httpMaxHeaderBytes,
 	}
 }
 

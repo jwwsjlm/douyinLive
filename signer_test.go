@@ -200,3 +200,58 @@ func TestLiveStatusGuardCanResetForNewConnection(t *testing.T) {
 		t.Fatalf("offline confirmation after connection reset closed connection")
 	}
 }
+
+func TestStatusCheckKeepsLiveStateUntilSecondOfflineConfirmation(t *testing.T) {
+	dl := &DouyinLive{}
+	dl.setLiveStatus(true)
+
+	if dl.shouldCloseAfterStatusCheck(false) {
+		t.Fatalf("first offline confirmation closed connection")
+	}
+	if !dl.isLiveStatus() {
+		t.Fatalf("first offline confirmation changed live state")
+	}
+	if !dl.shouldCloseAfterStatusCheck(false) {
+		t.Fatalf("second offline confirmation did not close connection")
+	}
+	if dl.isLiveStatus() {
+		t.Fatalf("second offline confirmation did not change live state")
+	}
+}
+
+func TestStatusCheckOnlineConfirmationResetsOfflineGuard(t *testing.T) {
+	dl := &DouyinLive{}
+	dl.setLiveStatus(true)
+
+	if dl.shouldCloseAfterStatusCheck(false) {
+		t.Fatalf("first offline confirmation closed connection")
+	}
+	if dl.shouldCloseAfterStatusCheck(true) {
+		t.Fatalf("online confirmation closed connection")
+	}
+	if !dl.isLiveStatus() {
+		t.Fatalf("online confirmation changed live state")
+	}
+	if dl.shouldCloseAfterStatusCheck(false) {
+		t.Fatalf("offline confirmation after online reset closed connection")
+	}
+	if !dl.isLiveStatus() {
+		t.Fatalf("offline confirmation after online reset changed live state")
+	}
+}
+
+func TestSetLiveStatusOnlineResetsOfflineGuard(t *testing.T) {
+	dl := &DouyinLive{}
+	dl.setLiveStatus(true)
+
+	if dl.shouldCloseAfterStatusCheck(false) {
+		t.Fatalf("first offline confirmation closed connection")
+	}
+	dl.setLiveStatus(true)
+	if dl.shouldCloseAfterStatusCheck(false) {
+		t.Fatalf("offline confirmation after setLiveStatus(true) closed connection")
+	}
+	if !dl.isLiveStatus() {
+		t.Fatalf("offline confirmation after setLiveStatus(true) changed live state")
+	}
+}

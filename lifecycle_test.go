@@ -86,3 +86,24 @@ func TestRequestContextAfterCloseIsCanceled(t *testing.T) {
 		t.Fatalf("context was not canceled after Close")
 	}
 }
+
+func TestStartAfterCloseDoesNotResetCloseSignal(t *testing.T) {
+	var dl DouyinLive
+	dl.Close()
+
+	err := dl.Start()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Start() after Close err = %v, want context.Canceled", err)
+	}
+
+	ctx, cancel := dl.requestContext()
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Fatalf("ctx.Err() = %v, want context.Canceled", ctx.Err())
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("request context was reopened after Start on a closed instance")
+	}
+}

@@ -90,6 +90,25 @@ func TestMessageBusUnsubscribe(t *testing.T) {
 	}
 }
 
+func TestMessageBusSkipsSubscriberUnsubscribedDuringPublish(t *testing.T) {
+	bus := newMessageBus()
+	calls := 0
+	var secondID string
+
+	bus.subscribe(func(*LiveMessage) {
+		bus.unsubscribe(secondID)
+	})
+	secondID = bus.subscribe(func(*LiveMessage) {
+		calls++
+	})
+
+	bus.publish(&LiveMessage{})
+
+	if calls != 0 {
+		t.Fatalf("subscriber removed during publish was called %d times", calls)
+	}
+}
+
 func TestMessageBusRecoversSubscriberPanic(t *testing.T) {
 	bus := newMessageBus()
 	calls := 0
@@ -161,6 +180,29 @@ func TestDouyinLiveSubscribeRejectsNilHandlers(t *testing.T) {
 	}
 	if id := dl.SubscribeMethod(WebcastChatMessage, nil); id != "" {
 		t.Fatalf("SubscribeMethod(nil) returned %q, want empty id", id)
+	}
+}
+
+func TestDouyinLiveSkipsLegacyHandlerUnsubscribedDuringEmit(t *testing.T) {
+	dl := &DouyinLive{
+		liveID:   "live-id",
+		roomID:   "room-id",
+		liveName: "live-name",
+	}
+	calls := 0
+	var secondID string
+
+	dl.Subscribe(func(*new_douyin.Webcast_Im_Message, proto.Message) {
+		dl.Unsubscribe(secondID)
+	})
+	secondID = dl.Subscribe(func(*new_douyin.Webcast_Im_Message, proto.Message) {
+		calls++
+	})
+
+	dl.emitEvent(&new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}, nil)
+
+	if calls != 0 {
+		t.Fatalf("legacy handler removed during emit was called %d times", calls)
 	}
 }
 

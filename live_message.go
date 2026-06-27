@@ -135,6 +135,22 @@ func (b *messageBus) unsubscribe(id string) {
 	}
 }
 
+func (b *messageBus) hasSubscriber(id string) bool {
+	if id == "" {
+		return false
+	}
+
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	for _, subscriber := range b.subscribers {
+		if subscriber.id == id {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *messageBus) publish(message *LiveMessage) {
 	b.publishWithLogger(nil, message)
 }
@@ -155,6 +171,9 @@ func (b *messageBus) publishWithLoggerUntil(logger logSink, message *LiveMessage
 	for _, subscriber := range subscribers {
 		if stop != nil && stop() {
 			return
+		}
+		if !b.hasSubscriber(subscriber.id) {
+			continue
 		}
 		if !subscriber.accepts(message.GetMethod()) {
 			continue

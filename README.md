@@ -70,6 +70,11 @@ douyinLive-v2.0.3-abcdef123456-windows-amd64.zip
 
 压缩包里的可执行文件名仍然固定为 `douyinLive`，所以脚本和 Docker 启动命令不需要因为 hash 变化而每次修改。
 
+也就是说，发布包文件名用于区分版本和构建来源；解压后的程序名保持固定：
+
+- Linux / macOS：`douyinLive`
+- Windows：`douyinLive.exe`
+
 ```bash
 ./douyinLive
 ```
@@ -327,6 +332,8 @@ https://live.douyin.com/xxxxx
 - 服务端会先返回一条“直播间未开播”的状态通知
 - 然后按配置的时间间隔持续推送未开播状态
 - 一旦检测到开播，就自动切回正常消息流
+
+`live_status` 里的 `live=false` 不是网络错误，也不代表本地服务已经失效。客户端收到这个状态后建议保持连接，等待后续 `live=true` 通知；只有 WebSocket 本身断开时，客户端才需要按自己的策略重连。
 
 ---
 
@@ -654,6 +661,10 @@ port: "1088"
 unknown: false
 log:
   level: "info"
+sign:
+  provider: ""
+tikhub:
+  key: ""
 monitor:
   poll_interval: "15s"
   notify_interval: "30s"
@@ -771,6 +782,23 @@ dl, err := douyinlive.NewDouyinLiveWithTikHub(roomID, log.Default(), cookie, tik
 dl, err := douyinlive.NewDouyinLiveWithSlogAndTikHub(roomID, slog.Default(), cookie, tikHubKey)
 ```
 
+### 生命周期和关闭方式
+
+`Start()` 会阻塞当前 goroutine，直到直播连接结束、主动 `Close()` 或发生不可恢复错误。如果你的程序需要自己控制停止时机，建议把 `Start()` 放到 goroutine 里运行，然后在退出时调用 `Close()`。
+
+`Close()` 表示主动停止当前实例。调用后不要再对同一个 `DouyinLive` 实例重新 `Start()`；如果要重新连接同一个直播间，重新创建一个新的 `DouyinLive` 实例即可。
+
+`Dispose()` 适合“创建了实例但不再进入 `Start()`”的场景，比如只调用 `IsLive()` 做状态检查后就结束。已经正常进入 `Start()` 的实例，退出时内部会自动清理连接和缓存，通常只需要 `Close()`。
+
+推荐的停止流程：
+
+1. 业务层先标记自己的 `stopped` 状态，避免 handler 继续处理耗时任务
+2. 调用 `Unsubscribe(id)` 取消订阅
+3. 调用 `Close()` 停止直播连接
+4. 等待 `Start()` 所在 goroutine 返回
+
+`Unsubscribe()` 会阻止后续还没开始执行的回调继续触发；如果某个 handler 已经正在运行，Go 无法从外部强行中断它，所以 handler 里不要做长时间阻塞操作。确实需要耗时处理时，建议在 handler 内检查业务层的停止标记，或者把任务投递到你自己的队列里异步处理。
+
 ### 最简使用示例
 
 ```go
@@ -805,7 +833,9 @@ func main() {
 	})
 
 	// 启动监听，会阻塞直到连接关闭
-	dl.Start()
+	if err := dl.Start(); err != nil {
+		log.Printf("监听结束: %v", err)
+	}
 }
 ```
 
@@ -871,13 +901,64 @@ func main() {
 		}
 	})
 
-	dl.Start()
+	if err := dl.Start(); err != nil {
+		log.Printf("监听结束: %v", err)
+	}
 }
 ```
 
 更多消息类型可以参考 `generated/new_douyin` 包下的 protobuf 生成代码。
 
 旧的 `Subscribe(func(raw, parsed))` 接口仍然保留，方便已有代码兼容；新代码建议优先使用 `SubscribeMessage` / `SubscribeMethod` / `SubscribeMethods`。
+
+### 可主动停止的库模式示例
+
+如果你的程序要在收到信号、用户退出或业务结束时主动停止监听，可以按下面这种方式组织：
+
+```go
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"sync/atomic"
+	"time"
+
+	douyinlive "github.com/jwwsjlm/douyinLive/v2"
+)
+
+func main() {
+	dl, err := douyinlive.NewDouyinLive("516466932480", log.Default(), "")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var stopped atomic.Bool
+	subID := dl.SubscribeMessage(func(msg *douyinlive.LiveMessage) {
+		if stopped.Load() {
+			return
+		}
+		log.Printf("收到消息 method=%s\n", msg.GetMethod())
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- dl.Start()
+	}()
+
+	time.Sleep(30 * time.Second)
+	stopped.Store(true)
+	dl.Unsubscribe(subID)
+	dl.Close()
+
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+		log.Printf("监听异常退出: %v", err)
+	}
+}
+```
+
+这里的关键点是：`Close()` 用来结束当前实例，`Unsubscribe()` 用来取消后续回调，`done` 用来等待 `Start()` 真正退出。不要在 `Close()` 后复用同一个实例重新 `Start()`。
 
 ---
 
@@ -932,13 +1013,15 @@ ws.onerror = (err) => {
   console.error('WebSocket 错误:', err);
 };
 
-// 可选：给本地服务发 ping，服务会回 pong
+// 可选：给本地服务发文本 ping，服务会回文本 pong
 setInterval(() => {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send('ping');
   }
 }, 30000);
 ```
+
+浏览器端不能直接发送 WebSocket ping 控制帧，所以示例里使用文本 `"ping"`。如果你的客户端库支持 WebSocket ping frame，也可以发送标准 ping 控制帧，服务端会按规范用相同 payload 回复 pong。
 
 ### 服务端返回什么格式
 
@@ -958,6 +1041,8 @@ setInterval(() => {
 ```json
 {"type":"system","event":"live_status","live":false,"room_id":"516466932480","message":"直播间未开播","retry_interval_seconds":30}
 ```
+
+这条消息表示服务端正在后台监控开播状态，客户端不需要把它当成 fatal error，也不要因为 `live=false` 立刻断开连接。保持当前 WebSocket 连接即可。
 
 检测到开播时，也会先返回一条状态消息：
 

@@ -776,6 +776,9 @@ func (dl *DouyinLive) isManualClose() bool {
 // Start 启动直播间连接。
 // 方法内部会先刷新直播状态，确保作为库直接调用时也能进入消息处理循环。
 func (dl *DouyinLive) Start() error {
+	if dl.isManualClose() {
+		return context.Canceled
+	}
 	dl.resetCloseSignal()
 	dl.setManualClose(false)
 	defer dl.cleanup()
@@ -1470,6 +1473,9 @@ func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto
 		if dl.isManualClose() {
 			return
 		}
+		if !dl.hasEventHandler(handler.id) {
+			continue
+		}
 		func(h eventHandler) {
 			defer func() {
 				if recovered := recover(); recovered != nil && dl.logger != nil {
@@ -1493,6 +1499,22 @@ func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto
 	}, func() bool {
 		return dl.isManualClose()
 	})
+}
+
+func (dl *DouyinLive) hasEventHandler(id string) bool {
+	if id == "" {
+		return false
+	}
+
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+
+	for _, h := range dl.eventHandlers {
+		if h.id == id {
+			return true
+		}
+	}
+	return false
 }
 
 // Subscribe 订阅事件，生成唯一ID

@@ -1,0 +1,2081 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>抖音直播数据大屏</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --dy-red: #fe2c55;
+            --dy-blue: #24d8eb;
+            --dy-dark: #161823;
+            --bg-main: #f2f4f8;
+            --card-bg: #ffffff;
+            --text-main: #333333;
+            --text-sub: #888888;
+            --border-color: #ebedf0;
+            --shadow-sm: 0 2px 8px rgba(0,0,0,0.04);
+            --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+            --radius-md: 12px;
+            --radius-lg: 16px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 顶部导航栏 */
+        .header {
+            background: var(--card-bg);
+            height: 70px;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: var(--shadow-sm);
+            z-index: 10;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--dy-dark);
+        }
+        .brand i { color: var(--dy-red); font-size: 24px; }
+
+        .control-panel {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex: 1;
+            max-width: 600px;
+            margin: 0 40px;
+        }
+
+        .input-group {
+            display: flex;
+            flex: 1;
+            background: var(--bg-main);
+            border-radius: 30px;
+            padding: 4px 6px;
+            border: 1px solid transparent;
+            transition: all 0.3s;
+        }
+        .input-group:focus-within { border-color: var(--dy-red); background: #fff; }
+        
+        .input-group i {
+            padding: 10px 14px;
+            color: var(--text-sub);
+        }
+
+        #roomID {
+            border: none;
+            background: transparent;
+            flex: 1;
+            outline: none;
+            font-size: 15px;
+            color: var(--text-main);
+        }
+
+        .btn-connect {
+            background: linear-gradient(135deg, #ff406c, var(--dy-red));
+            color: white;
+            border: none;
+            padding: 10px 28px;
+            border-radius: 24px;
+            font-weight: 600;
+            font-size: 15px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 4px 12px rgba(254,44,85,0.3);
+        }
+        .btn-connect:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(254,44,85,0.4); }
+        .btn-connect.connected { background: linear-gradient(135deg, #52c41a, #389e0d); box-shadow: 0 4px 12px rgba(82,196,26,0.3); }
+
+        .btn-export {
+            background: linear-gradient(135deg, #1890ff, #096dd9);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 24px;
+            font-weight: 600;
+            font-size: 15px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 4px 12px rgba(24,144,255,0.3);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-export:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(24,144,255,0.4); }
+        .btn-export:active { transform: translateY(0); }
+
+        /* 设置模态框样式 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(4px);
+        }
+        .settings-modal {
+            background: #fff;
+            width: 90%;
+            max-width: 500px;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            animation: modalScale 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        @keyframes modalScale {
+            from { transform: scale(0.9); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .modal-body {
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .setting-item {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .setting-label {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--dy-dark);
+        }
+        .setting-input {
+            padding: 10px 14px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .setting-input:focus { border-color: var(--dy-red); }
+        .setting-textarea {
+            height: 120px;
+            resize: vertical;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            background: #fafafa;
+        }
+        .btn-ghost {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            padding: 8px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-primary {
+            background: var(--dy-red);
+            color: white;
+            border: none;
+            padding: 8px 24px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        /* 状态指示器样式 */
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 8px 16px;
+            border-radius: 20px;
+            background: #fff1f0;
+            color: #f5222d;
+            cursor: default;
+            transition: all 0.2s;
+        }
+
+        /* 一键打码开关样式 */
+        .mask-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 20px;
+            background: #f0f2f5;
+            color: #595959;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+            border: 1px solid #d9d9d9;
+            user-select: none;
+        }
+        .mask-toggle.active {
+            background: #e6f7ff;
+            color: #1890ff;
+            border-color: #91d5ff;
+        }
+        .mask-toggle i { font-size: 14px; }
+
+        /* 自定义音浪图标 */
+        .coin-icon {
+            width: 16px;
+            height: 16px;
+            vertical-align: middle;
+            margin-top: -2px;
+            object-fit: contain;
+        }
+        .stat-card .coin-icon {
+            width: 24px;
+            height: 24px;
+        }
+
+        /* 打码效果 */
+        .is-masked .masked-value {
+            filter: blur(8px);
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .status-indicator.active { 
+            background: #f6ffed; 
+            color: #52c41a; 
+            cursor: pointer;
+            border: 1px solid #b7eb8f;
+        }
+        .status-indicator.active:hover {
+            background: #fff1f0;
+            color: #f5222d;
+            border-color: #ffa39e;
+        }
+        .status-indicator.active:hover .status-dot {
+            background: #f5222d;
+        }
+        .status-indicator.active:hover #statusText::after {
+            content: " (点击停止)";
+            font-size: 12px;
+            opacity: 0.8;
+        }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+        .active .status-dot { animation: pulse 2s infinite; }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(82,196,26,0.4); }
+            70% { box-shadow: 0 0 0 6px rgba(82,196,26,0); }
+            100% { box-shadow: 0 0 0 0 rgba(82,196,26,0); }
+        }
+
+        /* 主体布局 */
+        .main-container {
+            display: flex;
+            flex: 1;
+            padding: 15px;
+            gap: 15px;
+            overflow: hidden;
+        }
+
+        /* 左侧：实时弹幕区 (缩小) */
+        .chat-section {
+            flex: 1;
+            min-width: 290px;
+            background: var(--card-bg);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .section-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .chat-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            scroll-behavior: smooth;
+        }
+        .chat-list::-webkit-scrollbar { width: 4px; }
+        .chat-list::-webkit-scrollbar-thumb { background: #eee; border-radius: 2px; }
+
+        /* 右侧：统计与高价值信息区 (扩大) */
+        .side-section {
+            flex: 3.5;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+            padding-right: 5px;
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE/Edge */
+        }
+        .side-section::-webkit-scrollbar { display: none; } /* Chrome/Safari */
+
+        /* 数据看板 */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            padding-bottom: 5px;
+        }
+        .stat-card {
+            background: var(--card-bg);
+            border-radius: var(--radius-md);
+            padding: 12px 15px;
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-height: 70px;
+            transition: transform 0.2s;
+        }
+        .stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .stat-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+        .stat-icon.blue { background: #e6f7ff; color: #1890ff; }
+        .stat-icon.pink { background: #fff0f6; color: #eb2f96; }
+        .stat-icon.green { background: #f6ffed; color: #52c41a; }
+        .stat-icon.orange { background: #fff7e6; color: #fa8c16; }
+        .stat-icon.purple { background: #f9f0ff; color: #722ed1; }
+        .stat-icon.cyan { background: #e6fffb; color: #13c2c2; }
+        
+        .stat-info { display: flex; flex-direction: column; gap: 2px; }
+        .stat-value { font-size: 20px; font-weight: 800; color: var(--dy-dark); line-height: 1; }
+        .stat-label { font-size: 12px; color: var(--text-sub); font-weight: 500; }
+
+        /* 底部双列榜单 */
+        .boards-container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            flex: 1;
+            min-height: 500px;
+        }
+
+        /* 榜单通用样式 */
+        .board-card {
+            background: var(--card-bg);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .board-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        .board-list::-webkit-scrollbar { display: none; }
+
+        /* 徽章体系 */
+        .user-tags { display: flex; gap: 4px; margin-bottom: 4px; flex-wrap: wrap; align-items: center; }
+        .tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; display: inline-flex; align-items: center; gap: 2px; height: 16px; }
+        .tag-level-img { height: 14px; width: auto; vertical-align: middle; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.1)); }
+        .tag-fans-badge { 
+            height: 14px; 
+            display: inline-flex; 
+            align-items: center; 
+            background: #ff406c; 
+            color: white; 
+            border-radius: 2px; 
+            padding: 0 4px; 
+            font-size: 9px; 
+            font-weight: bold; 
+            position: relative; 
+            overflow: hidden;
+            text-shadow: 0 1px 1px rgba(0,0,0,0.3);
+        }
+        .tag-fans-badge::after { content: ''; position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent); animation: shine 3s infinite; }
+        @keyframes shine { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+        
+        .tag-level { background: #f0f5ff; color: #1d39c4; border: 1px solid #adc6ff; }
+        .tag-fans { background: #fff0f6; color: #c41d7f; border: 1px solid #ffadd2; }
+        .tag-admin { background: #fffb8f; color: #d46b08; border: 1px solid #ffe58f; }
+
+        .nickname { font-size: 11px; font-weight: 700; color: #333; text-decoration: none; margin-right: 4px; display: flex; align-items: center; gap: 2px; }
+        .nickname:hover { color: var(--dy-red); }
+
+        .msg-body { font-size: 12px; color: #111; line-height: 1.4; margin-top: 2px; word-break: break-all; }
+        
+        /* 特殊消息样式 */
+        .msg-item {
+            display: flex;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            border-bottom: 1px solid #f8f8f8;
+            animation: slideInLeft 0.2s ease-out;
+        }
+        .item-gift { background: linear-gradient(90deg, #fff0f6 0%, #fff 100%); border-left: 3px solid #eb2f96; }
+        .item-gift .msg-body { color: #eb2f96; font-weight: 600; }
+        
+        .avatar { width: 28px; height: 28px; border-radius: 50%; border: 1px solid #f0f0f0; }
+        .gift-img { height: 16px; vertical-align: middle; margin: 0 4px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.1)); }
+        .diamond-badge { display: inline-flex; align-items: center; gap: 4px; background: #fff7e6; color: #d46b08; font-size: 11px; padding: 1px 8px; border-radius: 12px; border: 1px solid #ffd591; font-weight: 800; }
+
+        /* 排行榜单项样式 */
+        .rank-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            background: #fafafa;
+            border-radius: 8px;
+            transition: transform 0.2s;
+        }
+        .rank-item:hover { transform: scale(1.01); background: #f0f0f0; }
+        .rank-num { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-style: italic; font-size: 16px; color: #999; }
+        .rank-num.top1 { color: #ff4d4f; font-size: 20px; }
+        .rank-num.top2 { color: #ffa940; font-size: 18px; }
+        .rank-num.top3 { color: #ffec3d; font-size: 18px; }
+        .rank-avatar { width: 28px; height: 28px; border-radius: 50%; border: 1px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .rank-info { flex: 1; overflow: hidden; }
+        .rank-name { font-size: 12px; font-weight: 600; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .rank-val { font-size: 11px; color: #eb2f96; font-weight: 700; display: flex; align-items: center; gap: 2px; }
+
+        .system-msg { text-align: center; padding: 12px; color: #888; font-size: 13px; background: #f9f9f9; border-radius: 8px; margin: 8px 0; }
+        .error-msg { text-align: center; padding: 12px; color: #f5222d; background: #fff1f0; border-radius: 8px; margin: 8px 0; border: 1px solid #ffa39e; }
+
+        /* 新增：底部收纳栏样式 */
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .chat-footer-bars {
+            background: #fff;
+            border-top: 1px solid var(--border-color);
+            padding: 6px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            z-index: 5;
+        }
+
+        .footer-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            height: 30px;
+        }
+
+        .bar-label {
+            font-size: 11px;
+            color: var(--text-sub);
+            font-weight: 700;
+            white-space: nowrap;
+            width: 32px;
+        }
+
+        .bar-content {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            overflow: hidden;
+            height: 100%;
+        }
+
+        .overlap-avatar {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: 2px solid #fff;
+            margin-left: -10px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+            transition: transform 0.2s, z-index 0.2s;
+            background: #eee;
+            flex-shrink: 0;
+        }
+        .overlap-avatar:first-child { margin-left: 0; }
+        .overlap-avatar:hover { transform: translateY(-3px); z-index: 10; cursor: help; }
+
+        /* 新增：新消息提示 */
+        .new-msg-tip {
+            position: absolute;
+            bottom: 85px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--dy-red);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(254,44,85,0.4);
+            z-index: 100;
+            display: none;
+            animation: tipBounce 2s infinite;
+        }
+
+        /* 居中连接层 */
+        .connection-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            padding: 30px;
+            backdrop-filter: blur(5px);
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+        
+        .overlay-card {
+            background: white;
+            padding: 32px;
+            border-radius: 20px;
+            box-shadow: var(--shadow-md);
+            width: 100%;
+            max-width: 360px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        .overlay-title {
+            font-size: 18px;
+            font-weight: 800;
+            text-align: center;
+            color: var(--dy-dark);
+        }
+
+        .history-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            margin-top: 5px;
+            scrollbar-width: thin;
+        }
+        .history-container::-webkit-scrollbar { width: 4px; }
+        .history-container::-webkit-scrollbar-thumb { background: #eee; border-radius: 2px; }
+
+        .history-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #f8f8f8;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+        }
+        .history-item:hover {
+            background: #fff0f3;
+            border-color: #ffd6e7;
+            transform: translateX(4px);
+        }
+        .history-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            overflow: hidden;
+        }
+        .history-id {
+            font-size: 13px;
+            font-weight: 600;
+            color: #333;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .history-time {
+            font-size: 10px;
+            color: #999;
+        }
+        .btn-delete-history {
+            padding: 4px 8px;
+            color: #ccc;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .btn-delete-history:hover {
+            color: var(--dy-red);
+        }
+        
+        @keyframes tipBounce {
+            0%, 20%, 50%, 80%, 100% {transform: translateX(-50%) translateY(0);}
+            40% {transform: translateX(-50%) translateY(-6px);}
+            60% {transform: translateX(-50%) translateY(-3px);}
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- 顶部导航 -->
+    <header class="header">
+        <div class="brand">
+            <i class="fa-brands fa-tiktok"></i>
+            抖音直播数据大屏
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div id="maskToggle" class="mask-toggle" title="隐藏敏感数据">
+                <i class="fa-solid fa-eye-slash"></i> <span>一键打码</span>
+            </div>
+            <div id="statusIndicator" class="status-indicator" title="点击停止监听">
+                <div class="status-dot"></div>
+                <span id="statusText">未连接</span>
+                <span id="stat-duration-top" style="margin-left: 4px; font-weight: 800; display: none;">00:00</span>
+            </div>
+            <button id="exportBtn" class="btn-export">
+                <i class="fa-solid fa-file-export"></i> 导出战报
+            </button>
+            <button id="settingsBtn" class="btn-ghost" style="padding: 10px; border-radius: 50%; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; font-size: 18px;">
+                <i class="fa-solid fa-gear"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- 主体内容 -->
+    <div class="main-container">
+        
+        <!-- 左侧：弹幕列表 -->
+        <section class="chat-section">
+            <div class="section-header">
+                <span><i class="fa-regular fa-comments"></i> 实时弹幕</span>
+                <span style="font-size: 13px; color: var(--text-sub); font-weight: normal;" id="chatCount">已接收 0 条消息</span>
+            </div>
+            <div class="chat-container">
+                <!-- 居中连接层 -->
+                <div id="connectionOverlay" class="connection-overlay">
+                    <div class="overlay-card">
+                        <div class="overlay-title"><i class="fa-solid fa-tower-broadcast" style="color: var(--dy-red); margin-right: 8px;"></i>开始监听直播间</div>
+                        <div class="input-group" style="background: #f8f8f8;">
+                            <i class="fa-solid fa-link"></i>
+                            <input type="text" id="roomID" placeholder="输入房间ID或粘贴链接" autocomplete="off" style="padding: 12px 0;">
+                        </div>
+                        <button id="connectBtn" class="btn-connect" style="width: 100%; padding: 14px;">
+                            <i class="fa-solid fa-play"></i> 开始监听
+                        </button>
+                        
+                        <!-- 历史记录 -->
+                        <div id="historySection" style="display: none;">
+                            <div style="font-size: 12px; font-weight: 700; color: #888; margin-bottom: 8px; display: flex; align-items: center; gap: 5px;">
+                                <i class="fa-solid fa-clock-rotate-left"></i> 最近监听
+                            </div>
+                            <div id="historyList" class="history-container"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chat-list" id="chatList">
+                    <div class="system-msg"><i class="fa-solid fa-bolt"></i> 准备就绪，请输入房间号并点击开始。</div>
+                </div>
+                
+                <!-- 新消息提示 -->
+                <div id="newMsgTip" class="new-msg-tip">
+                    <i class="fa-solid fa-circle-arrow-down"></i> <span id="newMsgCount">0</span> 条新弹幕
+                </div>
+
+                <!-- 底部收纳栏 -->
+                <div class="chat-footer-bars">
+                    <div class="footer-bar">
+                        <div class="bar-label"><i class="fa-solid fa-door-open" style="font-size: 10px;"></i> 进入</div>
+                        <div class="bar-content" id="enterBar"></div>
+                    </div>
+                    <div class="footer-bar">
+                        <div class="bar-label"><i class="fa-solid fa-heart" style="font-size: 10px;"></i> 点赞</div>
+                        <div class="bar-content" id="likeBar"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 右侧：统计与高价值信息区 (扩大) -->
+        <section class="side-section">
+            <!-- 榜单容器 -->
+            <div class="boards-container">
+                <!-- 礼物价值榜 -->
+                <div class="board-card">
+                    <div class="section-header">
+                        <span><i class="fa-solid fa-crown" style="color: #fa8c16;"></i> 礼物价值榜</span>
+                    </div>
+                    <div class="board-list" id="giftList">
+                        <div class="system-msg" style="background: transparent; border: none;">等待礼物...</div>
+                    </div>
+                </div>
+
+                <!-- 本场送礼排行 -->
+                <div class="board-card">
+                    <div class="section-header">
+                        <span><i class="fa-solid fa-star" style="color: #722ed1; margin-right: 4px;"></i>本场送礼排行</span>
+                    </div>
+                    <div class="board-list" id="rankList">
+                        <div class="system-msg" style="background: transparent; border: none;">暂无排名数据</div>
+                    </div>
+                </div>
+
+                <!-- 本场点赞排行 -->
+                <div class="board-card">
+                    <div class="section-header">
+                        <span><i class="fa-solid fa-heart" style="color: #ff4d4f;"></i> 本场点赞排行</span>
+                    </div>
+                    <div class="board-list" id="likeRankList">
+                        <div class="system-msg" style="background: transparent; border: none;">暂无点赞数据</div>
+                    </div>
+                </div>
+
+                <!-- 高等级排行榜 -->
+                <div class="board-card">
+                    <div class="section-header">
+                        <span><i class="fa-solid fa-bolt" style="color: #1890ff;"></i> 高等级排行榜 (Lv.30+)</span>
+                    </div>
+                    <div class="board-list" id="highLevelList">
+                        <div class="system-msg" style="background: transparent; border: none;">等待高等级用户...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 12宫格统计 (移动到下方并扩大) -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon blue"><i class="fa-solid fa-users"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-viewer">0</div>
+                        <div class="stat-label">当前在线</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon blue"><i class="fa-solid fa-arrow-trend-up"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-peak-online">0</div>
+                        <div class="stat-label">最高在线</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon blue"><i class="fa-solid fa-chart-line"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-avg-online">0</div>
+                        <div class="stat-label">平均在线</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon green"><i class="fa-solid fa-thumbs-up"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-like">0</div>
+                        <div class="stat-label">本场点赞</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon pink"><i class="fa-solid fa-gift"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-gift-count">0</div>
+                        <div class="stat-label">送礼人数</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon orange"><img src="https://1911.aiwl.cc/zs.png" class="coin-icon"></div>
+                    <div class="stat-info">
+                        <div class="stat-value masked-value" id="stat-diamond">0</div>
+                        <div class="stat-label">音浪收入</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon purple"><i class="fa-solid fa-heart"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-follow">0</div>
+                        <div class="stat-label">新增关注</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon cyan"><i class="fa-solid fa-share-nodes"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-share">0</div>
+                        <div class="stat-label">直播分享</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon blue"><i class="fa-solid fa-door-open"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-total-enter">0</div>
+                        <div class="stat-label">累计进场</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon orange"><i class="fa-solid fa-message"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-msg-total">0</div>
+                        <div class="stat-label">累计弹幕</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon orange"><i class="fa-solid fa-user-pen"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-danmaku-users">0</div>
+                        <div class="stat-label">弹幕人数</div>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon purple"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-fans-light">0</div>
+                        <div class="stat-label">新增入团</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- 设置模态框 -->
+    <div id="settingsModal" class="modal-overlay">
+        <div class="settings-modal">
+            <div class="section-header">
+                <span><i class="fa-solid fa-gear"></i> 服务配置 (config.yaml)</span>
+                <i class="fa-solid fa-xmark" style="cursor: pointer;" id="closeSettings"></i>
+            </div>
+            <div class="modal-body">
+                <div class="system-msg" style="text-align: left; font-size: 11px;">
+                    <i class="fa-solid fa-circle-info"></i> 在线修改后需下载并替换目录下的 config.yaml，然后重启服务生效。
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">WebSocket 端口</label>
+                    <input type="text" id="conf-port" class="setting-input" placeholder="默认: 1088">
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">监控间隔 (Poll Interval)</label>
+                    <input type="text" id="conf-poll" class="setting-input" placeholder="例如: 15s">
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">通知间隔 (Notify Interval)</label>
+                    <input type="text" id="conf-notify" class="setting-input" placeholder="例如: 30s">
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">抖音 Cookie (全局)</label>
+                    <textarea id="conf-cookie" class="setting-input setting-textarea" placeholder="粘贴你的抖音 Cookie..."></textarea>
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">关联本地配置文件 (支持直接保存)</label>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-ghost" id="linkFile" style="flex: 1; font-size: 12px; padding: 6px;">
+                            <i class="fa-solid fa-file-signature"></i> 关联 config.yaml
+                        </button>
+                        <span id="linkStatus" style="font-size: 11px; color: #888; display: flex; align-items: center;">未关联</span>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">导入现有配置 (仅读取)</label>
+                    <input type="file" id="importFile" accept=".yaml,.yml" style="font-size: 12px;">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-ghost" id="copyYaml">复制 YAML</button>
+                <button class="btn-primary" id="saveYaml">下载 config.yaml</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM 元素
+        const roomInput = document.getElementById('roomID');
+        const connectBtn = document.getElementById('connectBtn');
+        const maskToggle = document.getElementById('maskToggle');
+        const connectionOverlay = document.getElementById('connectionOverlay');
+        const historySection = document.getElementById('historySection');
+        const historyList = document.getElementById('historyList');
+        const exportBtn = document.getElementById('exportBtn');
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsModal = document.getElementById('settingsModal');
+        const closeSettings = document.getElementById('closeSettings');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const chatList = document.getElementById('chatList');
+        const giftList = document.getElementById('giftList');
+        const rankList = document.getElementById('rankList');
+        const likeRankList = document.getElementById('likeRankList');
+        const highLevelList = document.getElementById('highLevelList');
+        const enterBar = document.getElementById('enterBar');
+        const likeBar = document.getElementById('likeBar');
+        const newMsgTip = document.getElementById('newMsgTip');
+        const newMsgCountSpan = document.getElementById('newMsgCount');
+        
+        // 统计数据 DOM
+        const uiStats = {
+            viewer: document.getElementById('stat-viewer'),
+            peakOnline: document.getElementById('stat-peak-online'),
+            avgOnline: document.getElementById('stat-avg-online'),
+            like: document.getElementById('stat-like'),
+            giftCount: document.getElementById('stat-gift-count'),
+            diamond: document.getElementById('stat-diamond'),
+            follow: document.getElementById('stat-follow'),
+            share: document.getElementById('stat-share'),
+            enter: document.getElementById('stat-total-enter'),
+            msgTotal: document.getElementById('stat-msg-total'),
+            danmakuUsers: document.getElementById('stat-danmaku-users'),
+            fansLight: document.getElementById('stat-fans-light'),
+            duration: document.getElementById('stat-duration-top'),
+            msgCount: document.getElementById('chatCount')
+        };
+
+        // 全局状态
+        let ws = null;
+        let isAutoScroll = true; // 重新引入自动滚动状态
+        let unreadCount = 0;
+        let stats = { 
+            viewer: 0, 
+            peakOnline: 0,
+            avgOnline: 0,
+            like: 0, 
+            giftCount: 0, 
+            diamond: 0, 
+            follow: 0, 
+            share: 0, 
+            enter: 0, 
+            msgTotal: 0,
+            danmakuUsers: 0,
+            fansLight: 0,
+            msgCount: 0 
+        };
+        
+        // 记录历史在线人数，用于计算平均值
+        let onlineHistory = [];
+        let danmakuUserSet = new Set();
+        let gifterUserSet = new Set();
+        let startTime = null;
+        let durationTimer = null;
+        let samplerTimer = null;
+        
+        // 送礼排行数据: { secUid: { nickname, avatar, totalDiamond } }
+        let giftRanking = new Map();
+        // 连送礼物追踪: { comboKey: lastCount }
+        let giftComboMap = new Map();
+        // 点赞排行数据: { secUid: { nickname, avatar, count } }
+        let likeRanking = new Map();
+        // 礼物价值榜数据 (单次送礼排行)
+        let giftValueList = [];
+        // 弹幕频率统计: { content: count }
+        let chatFrequencyMap = new Map();
+        // 高等级进场记录: [ { nickname, avatar, level, time } ]
+        let highLevelRecords = [];
+        // 文件句柄 (用于直接保存)
+        let configFileHandle = null;
+
+        const MAX_CHAT_ITEMS = 300;
+        const MAX_GIFT_ITEMS = 50;
+
+        function updateStats() {
+            uiStats.viewer.textContent = (stats.viewer || 0).toLocaleString();
+            uiStats.peakOnline.textContent = (stats.peakOnline || 0).toLocaleString();
+            uiStats.avgOnline.textContent = (stats.avgOnline || 0).toLocaleString();
+            uiStats.like.textContent = (stats.like || 0).toLocaleString();
+            uiStats.giftCount.textContent = (stats.giftCount || 0).toLocaleString();
+            uiStats.diamond.textContent = (stats.diamond || 0).toLocaleString();
+            uiStats.follow.textContent = (stats.follow || 0).toLocaleString();
+            uiStats.share.textContent = (stats.share || 0).toLocaleString();
+            uiStats.enter.textContent = (stats.enter || 0).toLocaleString();
+            uiStats.msgTotal.textContent = (stats.msgTotal || 0).toLocaleString();
+            uiStats.danmakuUsers.textContent = (stats.danmakuUsers || 0).toLocaleString();
+            uiStats.fansLight.textContent = (stats.fansLight || 0).toLocaleString();
+            uiStats.msgCount.textContent = `已接收 ${(stats.msgCount || 0).toLocaleString()} 条消息`;
+        }
+
+        // 工具函数：提取房间ID
+        function extractRoomID(input) {
+            input = input.trim();
+            const urlMatch = input.match(/live\.douyin\.com\/([a-zA-Z0-9_]+)/);
+            return urlMatch ? urlMatch[1] : input;
+        }
+
+        // 工具函数：生成主页链接
+        function getUserUrl(secUid) {
+            return secUid ? `https://www.douyin.com/user/${secUid}` : 'javascript:void(0)';
+        }
+
+        // 工具函数：渲染重叠头像
+        function renderOverlapAvatar(container, avatarUrl, nickname) {
+            const img = document.createElement('img');
+            img.src = avatarUrl;
+            img.className = 'overlap-avatar';
+            img.title = nickname;
+            
+            // 插入到最前面
+            container.insertBefore(img, container.firstChild);
+            
+            // 限制显示数量，防止 DOM 过多
+            if (container.children.length > 30) {
+                container.removeChild(container.lastChild);
+            }
+        }
+
+        // 工具函数：安全获取图片 URL
+        function getDyImage(imageObj) {
+            if (!imageObj) return null;
+            if (typeof imageObj === 'string') return imageObj;
+            
+            // 兼容多种字段名和格式
+            const list = imageObj.url_list || imageObj.urlList || imageObj.UrlList;
+            if (list && Array.isArray(list) && list.length > 0) {
+                return list[0];
+            }
+            
+            const url = imageObj.url || imageObj.Url;
+            if (url && typeof url === 'string') {
+                return url;
+            }
+            
+            return null;
+        }
+
+        // 工具函数：安全获取头像
+        function getAvatar(user) {
+            if (!user) return 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2NjYyI+PHBhdGggZD0iTTEyIDJDMi42OSAyIDEwIDEwIDEwMTJzOC04IDgtMTAgOC0xMC0yLjY5LTEwLTEwem0wIDE4Yy0zLjMzIDAtNi4zMS0xLjI4LTguNi0zLjM4QzMuNTYgMTUuMzEgOCAxNCAxMiAxNHM4LjQ0IDEuMzEgOC42IDMuNjJDMTguMzEgMTguNzIgMTUuMzMgMjAgMTIgMjB6bTAtMTRjLTEuNjYgMC0zIDEuMzQtMyAzczEuMzQgMyAzIDMgMy0xLjM0IDMtMy0xLjM0LTMtMy0zeiIvPjwvc3ZnPg==';
+            
+            // 兼容 avatar_thumb, avatarThumb, AvatarThumb
+            const thumb = user.avatar_thumb || user.avatarThumb || user.AvatarThumb;
+            const url = getDyImage(thumb);
+            return url || 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2NjYyI+PHBhdGggZD0iTTEyIDJDMi42OSAyIDEwIDEwIDEwMTJzOC04IDgtMTAgOC0xMC0yLjY5LTEwLTEwem0wIDE4Yy0zLjMzIDAtNi4zMS0xLjI4LTguNi0zLjM4QzMuNTYgMTUuMzEgOCAxNCAxMiAxNHM4LjQ0IDEuMzEgOC42IDMuNjJDMTguMzEgMTguNzIgMTUuMzMgMjAgMTIgMjB6bTAtMTRjLTEuNjYgMC0zIDEuMzQtMyAzczEuMzQgMyAzIDMgMy0xLjM0IDMtMy0xLjM0LTMtMy0zeiIvPjwvc3ZnPg==';
+        }
+
+        // 工具函数：构建用户标签 (真实抖音等级、灯牌图标)
+        function buildUserTags(user, data) {
+            let html = '';
+            if (!user) return html;
+
+            // 用于去重图标 URL 和 识别冲突
+            const addedUrls = new Set();
+            const badgeKeys = new Set(); // 用于存储去后缀后的标识，防止重复
+
+            // 内部函数：获取标识符，用于识别是否是同一个勋章的不同版本 (如 _xmp)
+            const getBadgeKey = (url) => {
+                if (!url) return '';
+                const parts = url.split('~')[0].split('/');
+                let filename = parts[parts.length - 1] || '';
+                return filename.replace(/_xmp\.png$|_xmp\.jpg$|\.png$|\.jpg$/, '').replace(/_xmp$/, '');
+            };
+
+            // --- 1. 预扫描逻辑：判定是否存在“高级灯牌” ---
+            const fansClub = user.fans_club || user.fansClub || user.fansclub || user.FansClub || {};
+            const clubData = fansClub.data || fansClub.Data || {};
+            const isLighted = clubData.is_lighted || clubData.isLighted || false;
+            
+            // 获取所有可能的徽章 URL
+            const allBadges = [];
+            const badgeIcons = (clubData.badge && (clubData.badge.icons || clubData.badge.Icons)) || {};
+            Object.values(badgeIcons).forEach(icon => {
+                const url = getDyImage(icon);
+                if (url) allBadges.push(url.toLowerCase());
+            });
+            const badgeListV2 = user.badge_image_list_v2 || user.badgeImageListV2 || user.BadgeImageListV2 || [];
+            badgeListV2.forEach(badge => {
+                const url = getDyImage(badge);
+                if (url) allBadges.push(url.toLowerCase());
+            });
+
+            // 核心判定：是否存在高级灯牌
+            const hasAdvancedBadge = allBadges.some(url => 
+                url.includes('advanced') || 
+                url.includes('new_advanced') || 
+                url.includes('pop_super') || 
+                url.includes('pop_badge')
+            );
+
+            // --- 2. 开始渲染 ---
+
+            // A. 消费等级图标
+            const payGrade = user.pay_grade || user.payGrade || user.PayGrade || {};
+            const levelIcon = getDyImage(payGrade.new_im_icon_with_level || payGrade.newImIconWithLevel || payGrade.NewImIconWithLevel);
+            const hasLevelIcon = !!levelIcon;
+
+            if (levelIcon) {
+                addedUrls.add(levelIcon);
+                badgeKeys.add(getBadgeKey(levelIcon));
+                html += `<img src="${levelIcon}" class="tag-level-img" title="消费等级: ${payGrade.level || payGrade.Level || ''}">`;
+            }
+
+            // B. 粉丝团灯牌渲染 (优先渲染并记录标识)
+            const clubLevel = clubData.level || clubData.Level || 0;
+            const clubName = clubData.club_name || clubData.clubName || clubData.clubName || '';
+            
+            if (clubLevel > 0) {
+                // 优先寻找带 _xmp 的图标
+                let selectedIcon = null;
+                const iconValues = Object.values(badgeIcons);
+                
+                // 1. 优先找 _xmp
+                for (let icon of iconValues) {
+                    const url = getDyImage(icon);
+                    if (url && url.toLowerCase().includes('_xmp')) {
+                        selectedIcon = url;
+                        break;
+                    }
+                }
+                // 2. 兜底找图标 1 (正方形)
+                if (!selectedIcon) {
+                    selectedIcon = getDyImage(badgeIcons[1] || badgeIcons["1"]);
+                }
+                
+                if (selectedIcon) {
+                    addedUrls.add(selectedIcon);
+                    badgeKeys.add(getBadgeKey(selectedIcon));
+                    html += `<img src="${selectedIcon}" class="tag-level-img" title="${clubName} ${clubLevel}">`;
+                }
+            }
+
+            // C. 徽章列表渲染 (应用严格过滤)
+            badgeListV2.forEach(badge => {
+                const badgeUrl = getDyImage(badge);
+                if (!badgeUrl || addedUrls.has(badgeUrl)) return;
+
+                const lowerUrl = badgeUrl.toLowerCase();
+                const bKey = getBadgeKey(lowerUrl);
+                
+                // 1. 如果已经存在相同标识的勋章，直接跳过 (解决 _xmp 冲突)
+                if (bKey && badgeKeys.has(bKey)) return;
+
+                // 2. 严格过滤逻辑：
+                if (lowerUrl.includes('fansclub_level') || lowerUrl.includes('fans_club_bar')) return;
+
+                if (hasAdvancedBadge && (lowerUrl.includes('pop_super') || lowerUrl.includes('pop_badge'))) {
+                     if (addedUrls.size > (hasLevelIcon ? 1 : 0)) return;
+                }
+
+                // 3. 基础过滤
+                if (hasLevelIcon && lowerUrl.includes('level')) return;
+                if (lowerUrl.includes('combine') || lowerUrl.includes('long') || lowerUrl.includes('rect') || lowerUrl.includes('banner')) return;
+
+                addedUrls.add(badgeUrl);
+                badgeKeys.add(bKey);
+                html += `<img src="${badgeUrl}" class="tag-level-img">`;
+            });
+
+            // D. 管理员标识
+            if (user.user_role === 1 || user.userRole === 1 || user.UserRole === 1) {
+                html += `<span class="tag tag-admin">管理员</span>`;
+            }
+
+            return html;
+        }
+
+        // 核心渲染：创建消息DOM
+        function renderMessage(data, type) {
+            stats.msgCount++;
+            if (stats.msgCount % 5 === 0) updateStats();
+
+            const user = data.user || data.User || {};
+            const nickname = user.nickname || user.NickName || '未知用户';
+            const secUid = user.sec_uid || user.secUid || user.SecUid || '';
+            const userUrl = getUserUrl(secUid);
+            const avatarUrl = getAvatar(user);
+            const tagsHtml = buildUserTags(user, data);
+            
+            let contentHtml = '';
+            const div = document.createElement('div');
+            div.className = `msg-item item-${type}`;
+
+            if (type === 'chat') {
+                contentHtml = data.content || data.Content || '';
+                stats.msgTotal++;
+                
+                // 统计弹幕频率
+                if (contentHtml) {
+                    chatFrequencyMap.set(contentHtml, (chatFrequencyMap.get(contentHtml) || 0) + 1);
+                }
+
+                if (secUid && !danmakuUserSet.has(secUid)) {
+                    danmakuUserSet.add(secUid);
+                    stats.danmakuUsers = danmakuUserSet.size;
+                }
+            } else if (type === 'gift') {
+                const gift = data.gift || data.Gift || {};
+                const giftName = gift.name || '未知礼物';
+                const giftId = gift.id || gift.Id || giftName;
+                
+                // 统计新增入团
+                if (giftName === '入团卡') {
+                    stats.fansLight++;
+                    updateStats();
+                }
+
+                const gCount = Number(data.combo_count || data.comboCount || data.group_count || data.groupCount || 1);
+                const diamond = Number(gift.diamond_count || gift.diamondCount || 0);
+                
+                // 统计送礼人数
+                if (secUid && !gifterUserSet.has(secUid)) {
+                    gifterUserSet.add(secUid);
+                    stats.giftCount = gifterUserSet.size;
+                    updateStats();
+                }
+
+                // 连送处理逻辑
+                const comboId = data.combo_id || data.comboId || data.msg_id || data.msgId || '0';
+                const comboKey = `${secUid}-${giftId}-${comboId}`;
+                const lastCount = giftComboMap.get(comboKey) || 0;
+                const increment = gCount - lastCount;
+
+                // 如果增量 <= 0 且不是第一次送礼，说明是重复或旧的连送消息，跳过统计
+                if (increment <= 0 && gCount > 1) return;
+
+                giftComboMap.set(comboKey, gCount);
+                
+                const totalVal = diamond * gCount;
+                const incrementVal = diamond * increment;
+                const giftIcon = getDyImage(gift.image || gift.Image);
+                
+                // 检查是否需要更新现有的连送消息 DOM
+                if (gCount > 1) {
+                    const existingMsg = chatList.querySelector(`.msg-item.item-gift[data-combo="${comboKey}"]`);
+                    if (existingMsg) {
+                        const body = existingMsg.querySelector('.msg-body');
+                        body.innerHTML = `送出 <span style="color:#eb2f96;font-weight:bold">${giftName}</span> ${giftIcon ? `<img src="${giftIcon}" class="gift-img" style="height:20px">` : ''} x ${gCount} <span class="diamond-badge masked-value"><img src="https://1911.aiwl.cc/zs.png" class="coin-icon"> ${totalVal}</span>`;
+                        
+                        // 更新统计和排行 (仅增加增量)
+                        stats.diamond += incrementVal;
+                        updateStats();
+                        updateGiftRanking(secUid, nickname, avatarUrl, tagsHtml, incrementVal);
+                        updateGiftValueList(userUrl, avatarUrl, nickname, tagsHtml, giftName, giftIcon, gCount, totalVal, comboKey);
+                        return; // 不再创建新消息
+                    }
+                }
+
+                contentHtml = `送出 <span style="color:#eb2f96;font-weight:bold">${giftName}</span> ${giftIcon ? `<img src="${giftIcon}" class="gift-img" style="height:20px">` : ''} x ${gCount}`;
+                if (totalVal > 0) {
+                    contentHtml += ` <span class="diamond-badge masked-value"><img src="https://1911.aiwl.cc/zs.png" class="coin-icon"> ${totalVal}</span>`;
+                    updateGiftRanking(secUid, nickname, avatarUrl, tagsHtml, incrementVal); // 初始消息也只加增量 (即 gCount)
+                }
+                stats.diamond += incrementVal;
+                updateStats();
+                // 只要有礼物就更新礼物价值榜 (按单次价值排行)
+                updateGiftValueList(userUrl, avatarUrl, nickname, tagsHtml, giftName, giftIcon, gCount, totalVal, comboKey);
+                
+                // 为 DOM 添加标识以便后续更新
+                div.setAttribute('data-combo', comboKey);
+            } else if (type === 'like') {
+                const lCount = Number(data.count || data.Count || 1);
+                stats.like = (Number(stats.like) || 0) + lCount;
+                updateStats();
+                renderOverlapAvatar(likeBar, avatarUrl, nickname);
+                updateLikeRanking(secUid, nickname, avatarUrl, tagsHtml, lCount);
+                return; // 不再添加到主弹幕列表
+            } else if (type === 'enter') {
+                stats.enter++;
+                updateStats();
+                renderOverlapAvatar(enterBar, avatarUrl, nickname);
+                
+                // 记录高等级用户进场
+                const payGrade = user.pay_grade || user.payGrade || user.PayGrade || {};
+                const level = Number(payGrade.level || payGrade.Level || 0);
+                if (level >= 30) {
+                    addHighLevelRecord(userUrl, avatarUrl, nickname, tagsHtml, level);
+                }
+                return; // 不再添加到主弹幕列表
+            } else if (type === 'social') {
+                const action = Number(data.action || 0);
+                
+                // 处理具体动作 (不再依赖官方累计值，改为自增计算监听期间的新增量)
+                if (action === 1) { // 关注
+                    contentHtml = `<span style="color:var(--dy-red); font-weight:bold">关注了主播</span>`;
+                    stats.follow++;
+                } else if (action === 3) { // 分享
+                    contentHtml = `<span style="color:var(--dy-blue); font-weight:bold">分享了直播间</span>`;
+                    stats.share++;
+                } else {
+                    contentHtml = `进行了社交互动`;
+                }
+                updateStats();
+            }
+
+            div.innerHTML = `
+                <div class="avatar-wrap">
+                    <a href="${userUrl}" target="_blank" title="主页"><img src="${avatarUrl}" class="avatar" loading="lazy"></a>
+                </div>
+                <div style="flex: 1">
+                    <div class="user-tags">
+                        <a href="${userUrl}" target="_blank" class="nickname">${nickname}</a>
+                        ${tagsHtml}
+                    </div>
+                    <div class="msg-body">${contentHtml}</div>
+                </div>
+            `;
+
+            chatList.appendChild(div);
+            
+            if (isAutoScroll) {
+                // 处于自动滚动模式时，强制保持在最底部
+                unreadCount = 0;
+                newMsgTip.style.display = 'none';
+                chatList.scrollTop = chatList.scrollHeight;
+            } else {
+                // 只有用户手动向上翻阅时，才累积未读提示
+                unreadCount++;
+                newMsgCountSpan.textContent = unreadCount;
+                newMsgTip.style.display = 'block';
+            }
+
+            if (chatList.children.length > MAX_CHAT_ITEMS) chatList.removeChild(chatList.firstChild);
+        }
+
+        // 监听滚动事件：精准判断用户操作
+        chatList.onscroll = () => {
+            const threshold = 150; 
+            const distanceFromBottom = chatList.scrollHeight - chatList.scrollTop - chatList.clientHeight;
+            
+            if (distanceFromBottom < threshold) {
+                // 用户滚回底部了，重新开启自动滚动
+                isAutoScroll = true;
+                unreadCount = 0;
+                newMsgTip.style.display = 'none';
+            } else {
+                // 用户明显往上翻了，停止自动滚动
+                isAutoScroll = false;
+            }
+        };
+
+        // 点击新消息提示：一键回到底部并开启自动滚动
+        newMsgTip.onclick = () => {
+            isAutoScroll = true;
+            unreadCount = 0;
+            newMsgTip.style.display = 'none';
+            chatList.scrollTop = chatList.scrollHeight;
+        };
+
+        // 更新并渲染礼物价值榜 (单次送礼排行)
+        function updateGiftValueList(userUrl, avatarUrl, nickname, tagsHtml, giftName, giftIcon, count, totalVal, comboKey) {
+            // 查找是否存在相同的连送记录
+            const existingIndex = comboKey ? giftValueList.findIndex(item => item.comboKey === comboKey) : -1;
+            
+            if (existingIndex > -1) {
+                // 更新已存在的记录
+                giftValueList[existingIndex].count = count;
+                giftValueList[existingIndex].totalVal = totalVal;
+                giftValueList[existingIndex].time = Date.now();
+            } else {
+                giftValueList.push({
+                    userUrl, avatarUrl, nickname, tagsHtml, giftName, giftIcon, count, totalVal, comboKey,
+                    time: Date.now()
+                });
+            }
+
+            // 按价值降序排列，价值相同按时间降序
+            giftValueList.sort((a, b) => b.totalVal - a.totalVal || b.time - a.time);
+
+            // 限制长度
+            if (giftValueList.length > 50) giftValueList.length = 50;
+
+            renderGiftValueList();
+        }
+
+        function renderGiftValueList() {
+            // 清理空提示
+            if (giftValueList.length === 0) {
+                giftList.innerHTML = '<div class="system-msg" style="background: transparent; border: none;">等待礼物...</div>';
+                return;
+            }
+
+            giftList.innerHTML = '';
+            giftValueList.forEach((item, index) => {
+                const rankNum = index + 1;
+                let rankClass = '';
+                if (rankNum === 1) rankClass = 'top1';
+                else if (rankNum === 2) rankClass = 'top2';
+                else if (rankNum === 3) rankClass = 'top3';
+
+                const div = document.createElement('div');
+                div.className = 'rank-item'; // 复用排行样式
+                div.style.padding = '6px 10px';
+                div.innerHTML = `
+                    <div class="rank-num ${rankClass}" style="width:20px; font-size: 14px;">${rankNum}</div>
+                    <a href="${item.userUrl}" target="_blank"><img src="${item.avatarUrl}" class="rank-avatar" style="width:24px; height:24px;"></a>
+                    <div class="rank-info" style="display: flex; align-items: center; justify-content: space-between; flex: 1; overflow: hidden; gap: 4px;">
+                        <div style="display: flex; flex-direction: column; overflow: hidden; flex: 1; gap: 2px;">
+                            <div style="display: flex; align-items: center; gap: 4px; overflow: hidden;">
+                                <div class="rank-name" style="max-width: 70px; font-size: 11px;">${item.nickname}</div>
+                                <div class="user-tags" style="margin-bottom: 0; flex-wrap: nowrap; overflow: hidden;">${item.tagsHtml}</div>
+                            </div>
+                            <div style="font-size: 10px; color: #888; display: flex; align-items: center; gap: 2px;">
+                                送出 ${item.giftName} ${item.giftIcon ? `<img src="${item.giftIcon}" style="height:12px;">` : ''} x ${item.count}
+                            </div>
+                        </div>
+                        <div class="rank-val masked-value" style="flex-shrink: 0; white-space: nowrap; font-size: 11px;"><img src="https://1911.aiwl.cc/zs.png" class="coin-icon"> ${item.totalVal.toLocaleString()}</div>
+                    </div>
+                `;
+                giftList.appendChild(div);
+            });
+        }
+
+        // 更新并渲染送礼排行
+        function updateGiftRanking(secUid, nickname, avatar, tagsHtml, diamond) {
+            if (!secUid || secUid === "") return;
+            
+            let userRank = giftRanking.get(secUid) || { nickname, avatar, tagsHtml, total: 0 };
+            userRank.total += diamond;
+            userRank.nickname = nickname; // 可能会改名，实时更新
+            userRank.avatar = avatar;
+            userRank.tagsHtml = tagsHtml;
+            giftRanking.set(secUid, userRank);
+
+            renderGiftRanking();
+        }
+
+        function renderGiftRanking() {
+            // 排序
+            const sorted = Array.from(giftRanking.values())
+                .sort((a, b) => b.total - a.total)
+                .slice(0, 50); // 取前50名
+
+            rankList.innerHTML = '';
+            sorted.forEach((item, index) => {
+                const rankNum = index + 1;
+                let rankClass = '';
+                if (rankNum === 1) rankClass = 'top1';
+                else if (rankNum === 2) rankClass = 'top2';
+                else if (rankNum === 3) rankClass = 'top3';
+
+                const div = document.createElement('div');
+                div.className = 'rank-item';
+                div.innerHTML = `
+                    <div class="rank-num ${rankClass}">${rankNum}</div>
+                    <img src="${item.avatar}" class="rank-avatar">
+                    <div class="rank-info" style="display: flex; align-items: center; justify-content: space-between; flex: 1; overflow: hidden; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 4px; overflow: hidden; flex: 1;">
+                            <div class="rank-name" style="max-width: 80px;">${item.nickname}</div>
+                            <div class="user-tags" style="margin-bottom: 0; flex-wrap: nowrap; overflow: hidden;">${item.tagsHtml}</div>
+                        </div>
+                        <div class="rank-val masked-value" style="flex-shrink: 0; white-space: nowrap;"><img src="https://1911.aiwl.cc/zs.png" class="coin-icon"> ${item.total.toLocaleString()}</div>
+                    </div>
+                `;
+                rankList.appendChild(div);
+            });
+        }
+
+        // 更新并渲染点赞排行
+        function updateLikeRanking(secUid, nickname, avatar, tagsHtml, count) {
+            if (!secUid || secUid === "") return;
+            
+            let userRank = likeRanking.get(secUid) || { nickname, avatar, tagsHtml, total: 0 };
+            userRank.total += count;
+            userRank.nickname = nickname;
+            userRank.avatar = avatar;
+            userRank.tagsHtml = tagsHtml;
+            likeRanking.set(secUid, userRank);
+
+            renderLikeRanking();
+        }
+
+        function renderLikeRanking() {
+            const sorted = Array.from(likeRanking.values())
+                .sort((a, b) => b.total - a.total)
+                .slice(0, 50);
+
+            likeRankList.innerHTML = '';
+            sorted.forEach((item, index) => {
+                const rankNum = index + 1;
+                let rankClass = '';
+                if (rankNum === 1) rankClass = 'top1';
+                else if (rankNum === 2) rankClass = 'top2';
+                else if (rankNum === 3) rankClass = 'top3';
+
+                const div = document.createElement('div');
+                div.className = 'rank-item';
+                div.innerHTML = `
+                    <div class="rank-num ${rankClass}">${rankNum}</div>
+                    <img src="${item.avatar}" class="rank-avatar">
+                    <div class="rank-info" style="display: flex; align-items: center; justify-content: space-between; flex: 1; overflow: hidden; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 4px; overflow: hidden; flex: 1;">
+                            <div class="rank-name" style="max-width: 80px;">${item.nickname}</div>
+                            <div class="user-tags" style="margin-bottom: 0; flex-wrap: nowrap; overflow: hidden;">${item.tagsHtml}</div>
+                        </div>
+                        <div class="rank-val" style="flex-shrink: 0; white-space: nowrap; color: #ff4d4f;"><i class="fa-solid fa-heart"></i> ${item.total.toLocaleString()}</div>
+                    </div>
+                `;
+                likeRankList.appendChild(div);
+            });
+        }
+
+        // 记录并渲染高等级榜
+        function addHighLevelRecord(userUrl, avatarUrl, nickname, tagsHtml, level) {
+            // 避免重复记录 (同一个用户进场多次只保留最新)
+            highLevelRecords = highLevelRecords.filter(r => r.nickname !== nickname);
+            
+            highLevelRecords.push({
+                userUrl, avatarUrl, nickname, tagsHtml, level,
+                time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+                timestamp: Date.now()
+            });
+
+            // 按等级降序排列，等级相同按进场时间降序
+            highLevelRecords.sort((a, b) => b.level - a.level || b.timestamp - a.timestamp);
+
+            if (highLevelRecords.length > 50) highLevelRecords.length = 50;
+            renderHighLevelRecords();
+        }
+
+        function renderHighLevelRecords() {
+            if (highLevelRecords.length === 0) {
+                highLevelList.innerHTML = '<div class="system-msg" style="background: transparent; border: none;">等待高等级用户...</div>';
+                return;
+            }
+
+            highLevelList.innerHTML = '';
+            highLevelRecords.forEach((item, index) => {
+                const rankNum = index + 1;
+                let rankClass = '';
+                if (rankNum === 1) rankClass = 'top1';
+                else if (rankNum === 2) rankClass = 'top2';
+                else if (rankNum === 3) rankClass = 'top3';
+
+                const div = document.createElement('div');
+                div.className = 'rank-item';
+                div.style.padding = '8px 10px';
+                div.innerHTML = `
+                    <div class="rank-num ${rankClass}" style="width:20px; font-size: 14px;">${rankNum}</div>
+                    <a href="${item.userUrl}" target="_blank"><img src="${item.avatarUrl}" class="rank-avatar" style="width:28px; height:28px;"></a>
+                    <div class="rank-info" style="display: flex; align-items: center; justify-content: space-between; flex: 1; overflow: hidden; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 4px; overflow: hidden; flex: 1;">
+                            <div class="rank-name" style="max-width: 80px;">${item.nickname}</div>
+                            <div class="user-tags" style="margin-bottom: 0; flex-wrap: nowrap; overflow: hidden;">${item.tagsHtml}</div>
+                        </div>
+                    </div>
+                `;
+                highLevelList.appendChild(div);
+            });
+        }
+
+        function appendSystemMsg(msg, isError = false) {
+            const div = document.createElement('div');
+            div.className = isError ? 'error-msg' : 'system-msg';
+            div.innerHTML = msg;
+            chatList.appendChild(div);
+            chatList.scrollTop = chatList.scrollHeight;
+        }
+
+        // 导出战报功能
+        function exportReport() {
+            const now = new Date();
+            const timeStr = now.toLocaleString();
+            const roomID = extractRoomID(roomInput.value) || '未知房间';
+            
+            // 1. 获取最多的10条弹幕
+            const topChats = Array.from(chatFrequencyMap.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 10);
+            
+            let chatText = topChats.length > 0 
+                ? topChats.map((item, index) => `${index + 1}. ${item[0]} (${item[1]}次)`).join('\n')
+                : '暂无数据';
+
+            // 2. 礼物价值榜 TOP 10
+            const topGiftValues = giftValueList.slice(0, 10);
+            let giftValueText = topGiftValues.length > 0
+                ? topGiftValues.map((item, index) => `${index + 1}. ${item.nickname}: ${item.giftName} x ${item.count} (${item.totalVal} 抖币)`).join('\n')
+                : '暂无数据';
+
+            // 3. 本场送礼排行 TOP 10
+            const topGifters = Array.from(giftRanking.values())
+                .sort((a, b) => b.total - a.total)
+                .slice(0, 10);
+            let gifterRankText = topGifters.length > 0
+                ? topGifters.map((item, index) => `${index + 1}. ${item.nickname} (累计: ${item.total} 抖币)`).join('\n')
+                : '暂无数据';
+
+            // 4. 本场点赞排行 TOP 10
+            const topLikers = Array.from(likeRanking.values())
+                .sort((a, b) => b.total - a.total)
+                .slice(0, 10);
+            let likerRankText = topLikers.length > 0
+                ? topLikers.map((item, index) => `${index + 1}. ${item.nickname} (点赞: ${item.total.toLocaleString()}次)`).join('\n')
+                : '暂无数据';
+
+            // 5. 高等级排行榜 TOP 10
+            const topHighLevels = highLevelRecords.slice(0, 10);
+            let highLevelText = topHighLevels.length > 0
+                ? topHighLevels.map((item, index) => `${index + 1}. ${item.nickname} (等级: Lv.${item.level})`).join('\n')
+                : '暂无数据';
+
+            const report = `直播间战报 - ${timeStr}
+----------------------------------------
+房间信息: ${roomID}
+监听时长: ${uiStats.duration.textContent}
+
+【基础统计】
+本场音浪收入: ${stats.diamond.toLocaleString()} (取抖币价值)
+本场直播场观: ${stats.enter.toLocaleString()} 人
+本场直播点赞: ${stats.like.toLocaleString()}
+本场送礼人数: ${stats.giftCount.toLocaleString()}
+本场新增粉丝: ${stats.follow.toLocaleString()}
+新增入团人数: ${stats.fansLight.toLocaleString()}
+最高在线峰值: ${stats.peakOnline.toLocaleString()}
+平均在线人数: ${stats.avgOnline.toLocaleString()}
+累计发送弹幕: ${stats.msgTotal.toLocaleString()}
+发送弹幕人数: ${stats.danmakuUsers.toLocaleString()}
+
+【礼物价值榜 TOP 10】
+${giftValueText}
+
+【本场送礼排行 TOP 10】
+${gifterRankText}
+
+【本场点赞排行 TOP 10】
+${likerRankText}
+
+【高等级排行榜 TOP 10 (Lv.30+)】
+${highLevelText}
+
+【热门弹幕 TOP 10】
+${chatText}
+----------------------------------------`;
+
+            const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `直播战报_${roomID}_${now.getTime()}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        exportBtn.onclick = exportReport;
+
+        // 历史记录逻辑
+        const STORAGE_KEY = 'dy_monitor_history';
+
+        function saveRoomToHistory(roomID, title = '') {
+            if (!roomID) return;
+            let history = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            // 去重
+            const existing = history.find(item => item.id === roomID);
+            const finalTitle = title || (existing ? existing.title : '');
+            
+            history = history.filter(item => item.id !== roomID);
+            // 插入到开头
+            history.unshift({
+                id: roomID,
+                title: finalTitle,
+                time: new Date().toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+            });
+            // 限制 10 条
+            if (history.length > 10) history.pop();
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+            renderHistory();
+        }
+
+        function deleteHistory(e, roomID) {
+            e.stopPropagation();
+            let history = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            history = history.filter(item => item.id !== roomID);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+            renderHistory();
+        }
+
+        function renderHistory() {
+            const history = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            if (history.length === 0) {
+                historySection.style.display = 'none';
+                return;
+            }
+            historySection.style.display = 'block';
+            historyList.innerHTML = '';
+            history.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'history-item';
+                div.onclick = () => {
+                    roomInput.value = item.id;
+                };
+                const displayTitle = item.title || item.id;
+                const subTitle = item.title ? item.id : '';
+                div.innerHTML = `
+                    <div class="history-info">
+                        <div style="display: flex; flex-direction: column; overflow: hidden;">
+                            <span class="history-id" title="${displayTitle}">${displayTitle}</span>
+                            ${subTitle ? `<span style="font-size: 10px; color: #bbb;">ID: ${subTitle}</span>` : ''}
+                        </div>
+                        <span class="history-time">${item.time}</span>
+                    </div>
+                    <i class="fa-solid fa-trash-can btn-delete-history" onclick="deleteHistory(event, '${item.id}')"></i>
+                `;
+                historyList.appendChild(div);
+            });
+        }
+
+        // 初始化历史记录
+        renderHistory();
+
+        // 一键打码逻辑
+        maskToggle.onclick = () => {
+            document.body.classList.toggle('is-masked');
+            maskToggle.classList.toggle('active');
+            const isMasked = document.body.classList.contains('is-masked');
+            maskToggle.querySelector('span').textContent = isMasked ? '取消打码' : '一键打码';
+            maskToggle.querySelector('i').className = isMasked ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash';
+        };
+
+        // 设置面板逻辑
+        settingsBtn.onclick = () => settingsModal.style.display = 'flex';
+        closeSettings.onclick = () => settingsModal.style.display = 'none';
+        window.onclick = (e) => { if (e.target === settingsModal) settingsModal.style.display = 'none'; };
+
+        // 关联本地文件 (File System Access API)
+        const linkFileBtn = document.getElementById('linkFile');
+        const linkStatus = document.getElementById('linkStatus');
+
+        linkFileBtn.onclick = async () => {
+            try {
+                const [handle] = await window.showOpenFilePicker({
+                    types: [{
+                        description: 'YAML Configuration',
+                        accept: { 'text/yaml': ['.yaml', '.yml'] }
+                    }],
+                    multiple: false
+                });
+                
+                configFileHandle = handle;
+                const file = await handle.getFile();
+                const content = await file.text();
+                
+                // 解析并填入
+                parseAndFillConfig(content);
+                
+                linkStatus.textContent = '已关联: ' + handle.name;
+                linkStatus.style.color = '#52c41a';
+                document.getElementById('saveYaml').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> 直接保存到文件';
+            } catch (err) {
+                console.error(err);
+                if (err.name !== 'AbortError') alert('关联失败: ' + err.message);
+            }
+        };
+
+        function parseAndFillConfig(content) {
+            const portMatch = content.match(/port:\s*["']?(\d+)["']?/);
+            const pollMatch = content.match(/poll_interval:\s*["']?([^"'\n\r]+)["']?/);
+            const notifyMatch = content.match(/notify_interval:\s*["']?([^"'\n\r]+)["']?/);
+            const cookieMatch = content.match(/douyin:\s*["']?([^"'\n\r]+)["']?/);
+
+            if (portMatch) document.getElementById('conf-port').value = portMatch[1];
+            if (pollMatch) document.getElementById('conf-poll').value = pollMatch[1];
+            if (notifyMatch) document.getElementById('conf-notify').value = notifyMatch[1];
+            if (cookieMatch) document.getElementById('conf-cookie').value = cookieMatch[1];
+        }
+
+        // 导入配置 (传统方式)
+        document.getElementById('importFile').onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                parseAndFillConfig(event.target.result);
+                alert('配置读取成功！');
+            };
+            reader.readAsText(file);
+        };
+
+        // 生成 YAML
+        function generateYaml() {
+            const port = document.getElementById('conf-port').value || '1088';
+            const poll = document.getElementById('conf-poll').value || '15s';
+            const notify = document.getElementById('conf-notify').value || '30s';
+            const cookie = document.getElementById('conf-cookie').value || '';
+
+            return `# 抖音直播配置文件
+# 自动生成于: ${new Date().toLocaleString()}
+
+# WebSocket 服务端口
+port: "${port}"
+
+# 是否输出未知消息类型（调试用）
+unknown: false
+
+# 未开播监控配置
+monitor:
+  # 检查是否开播的时间间隔
+  poll_interval: "${poll}"
+  # 未开播期间，向本地 WebSocket 客户端重复推送状态通知的时间间隔
+  notify_interval: "${notify}"
+
+# Cookie 配置
+cookie:
+  # 抖音默认 Cookie
+  douyin: "${cookie.replace(/"/g, '\\"')}"
+  # 按直播间 ID 配置 Cookie (此处暂不支持在线编辑复杂映射，请手动修改文件)
+  rooms: {}
+`;
+        }
+
+        document.getElementById('copyYaml').onclick = () => {
+            const yaml = generateYaml();
+            navigator.clipboard.writeText(yaml).then(() => alert('YAML 已复制到剪贴板'));
+        };
+
+        document.getElementById('saveYaml').onclick = async () => {
+            const yaml = generateYaml();
+            
+            if (configFileHandle) {
+                // 如果已关联文件，尝试直接写入
+                try {
+                    const writable = await configFileHandle.createWritable();
+                    await writable.write(yaml);
+                    await writable.close();
+                    alert('已直接保存到本地文件！请重启服务生效。');
+                    return;
+                } catch (err) {
+                    console.error(err);
+                    alert('直接保存失败 (可能权限不足): ' + err.message + '\n将转为下载模式。');
+                }
+            }
+
+            // 备选方案：下载文件
+            const blob = new Blob([yaml], { type: 'text/yaml;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'config.yaml';
+            a.click();
+            URL.revokeObjectURL(url);
+            alert('下载完成，请将其替换到程序所在目录并重启服务。');
+        };
+
+        // 统计计时器与采样逻辑
+        function startStatsTimers() {
+            startTime = new Date();
+            // 1. 监听时长计时器
+            durationTimer = setInterval(() => {
+                const now = new Date();
+                const diff = Math.floor((now - startTime) / 1000);
+                const h = Math.floor(diff / 3600).toString().padStart(2, '0');
+                const m = Math.floor((diff % 3600) / 60).toString().padStart(2, '0');
+                const s = (diff % 60).toString().padStart(2, '0');
+                const timeStr = h === "00" ? `${m}:${s}` : `${h}:${m}:${s}`;
+                uiStats.duration.textContent = timeStr;
+            }, 1000);
+
+            // 2. 在线人数采样器 (每 1 分钟采样一次，用于计算平均在线)
+            samplerTimer = setInterval(() => {
+                const currentViewer = Number(stats.viewer);
+                if (currentViewer > 0) {
+                    onlineHistory.push(currentViewer);
+                    // 强制使用数字累加计算平均值
+                    const sum = onlineHistory.reduce((a, b) => Number(a) + Number(b), 0);
+                    stats.avgOnline = Math.round(sum / onlineHistory.length);
+                    updateStats();
+                }
+            }, 60000);
+        }
+
+        function stopStatsTimers() {
+            if (durationTimer) clearInterval(durationTimer);
+            if (samplerTimer) clearInterval(samplerTimer);
+            durationTimer = null;
+            samplerTimer = null;
+        }
+
+        // 点击状态栏停止监听
+        statusIndicator.onclick = () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                if (confirm('确定要停止当前监听吗？')) {
+                    ws.close();
+                }
+            }
+        };
+
+        // WebSocket 连接控制
+        connectBtn.onclick = () => {
+            if (ws) {
+                ws.close();
+                return;
+            }
+
+            let roomID = extractRoomID(roomInput.value);
+            if (!roomID) { alert('请输入有效的房间ID或直播间链接！'); return; }
+
+            let host = window.location.host;
+            if (!host || host === "") host = "127.0.0.1:1088"; 
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${host}/ws/${roomID}`;
+            
+            appendSystemMsg(`<i class="fa-solid fa-spinner fa-spin"></i> 正在连接直播间 [${roomID}] ...`);
+            
+            try {
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = () => {
+                    statusIndicator.className = 'status-indicator active';
+                    statusText.textContent = '监听中';
+                    uiStats.duration.style.display = 'inline'; // 显示时长
+                    connectionOverlay.style.visibility = 'hidden';
+                    connectionOverlay.style.opacity = '0';
+                    connectBtn.innerHTML = '<i class="fa-solid fa-stop"></i> 停止监听';
+                    connectBtn.classList.add('connected');
+                    roomInput.disabled = true;
+                    appendSystemMsg(`<i class="fa-solid fa-check-circle" style="color:#52c41a"></i> 成功连接到房间，等待数据传输...`);
+                    
+                    // 保存到历史记录
+                    saveRoomToHistory(roomID);
+                    
+                    // 重置统计
+                    stats = { 
+                        viewer: 0, 
+                        peakOnline: 0,
+                        avgOnline: 0,
+                        like: 0, 
+                        giftCount: 0, 
+                        diamond: 0, 
+                        follow: 0, 
+                        share: 0, 
+                        enter: 0, 
+                        msgTotal: 0,
+                        danmakuUsers: 0,
+                        fansLight: 0,
+                        msgCount: 0 
+                    };
+                    onlineHistory = [];
+                    danmakuUserSet.clear();
+                    gifterUserSet.clear();
+                    giftRanking.clear();
+                    giftComboMap.clear();
+                    likeRanking.clear();
+                    chatFrequencyMap.clear();
+                    giftValueList = [];
+                    highLevelRecords = [];
+                    enterBar.innerHTML = '';
+                    likeBar.innerHTML = '';
+                    unreadCount = 0;
+                    isAutoScroll = true;
+                    newMsgTip.style.display = 'none';
+                    updateStats();
+                    startStatsTimers();
+                    giftList.innerHTML = '<div class="system-msg" style="background: transparent; border: none;">等待礼物...</div>';
+                    rankList.innerHTML = '<div class="system-msg" style="background: transparent; border: none;">暂无排名数据</div>';
+                    likeRankList.innerHTML = '<div class="system-msg" style="background: transparent; border: none;">暂无点赞数据</div>';
+                    highLevelList.innerHTML = '<div class="system-msg" style="background: transparent; border: none;">等待高等级用户...</div>';
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    
+                    // 1. 更新房间信息 (如果有)
+                    if (data.title || data.livename) {
+                        const roomName = data.title || data.livename;
+                        document.title = `[直播中] ${roomName} - 战报助手`;
+                        // 异步更新历史记录中的标题
+                        saveRoomToHistory(roomID, roomName);
+                    }
+
+                    // 2. 消息路由
+                    const method = data.method || '';
+                    if (method === "WebcastChatMessage" || method === "WebcastEmojiChatMessage") {
+                        renderMessage(data, 'chat');
+                    } else if (method === "WebcastGiftMessage") {
+                        renderMessage(data, 'gift');
+                    } else if (method === "WebcastMemberMessage" || method === "WebcastAudienceEntranceMessage") {
+                        renderMessage(data, 'enter');
+                    } else if (method === "WebcastLikeMessage") {
+                        renderMessage(data, 'like');
+                    } else if (method === "WebcastSocialMessage") {
+                        renderMessage(data, 'social');
+                    } else if (method === "WebcastRoomStatsMessage") {
+                        // 官方统计分流
+                        const val = Number(data.display_value || data.displayValue || data.display_Value || 0);
+                        const type = Number(data.display_type || data.displayType || 0);
+                        
+                        if (type === 3) { 
+                            // Type 3 明确为点赞总数
+                            if (val > 0) stats.like = val;
+                        } else {
+                            // 其他类型（通常 Type 1 是在线人数）
+                            // 优先取数值，如果没有数值但有短字符串，尝试记录短字符串
+                            if (val > 0) {
+                                stats.viewer = val;
+                                if (stats.viewer > stats.peakOnline) stats.peakOnline = stats.viewer;
+                            } else if (data.display_short || data.displayShort) {
+                                // 兜底：如果只有短字符串，直接显示到 UI
+                                uiStats.viewer.textContent = data.display_short || data.displayShort;
+                            }
+                        }
+                        updateStats();
+                    } else if (data.type === "system") {
+                        appendSystemMsg(`[系统控制] ${data.message}`, data.live === false);
+                    }
+                };
+
+                ws.onclose = (event) => {
+                    stopStatsTimers();
+                    statusIndicator.className = 'status-indicator';
+                    statusText.textContent = '未连接';
+                    uiStats.duration.style.display = 'none'; // 隐藏时长
+                    connectionOverlay.style.visibility = 'visible';
+                    connectionOverlay.style.opacity = '1';
+                    renderHistory(); // 重新渲染历史记录
+                    connectBtn.innerHTML = '<i class="fa-solid fa-play"></i> 开始监听';
+                    connectBtn.classList.remove('connected');
+                    roomInput.disabled = false;
+                    
+                    let reason = '连接已断开';
+                    if (event.reason) {
+                        try { reason = JSON.parse(event.reason).message || event.reason; } catch (e) { reason = event.reason; }
+                    } else if (event.code === 1006) {
+                        reason = '无法连接到服务，请检查后端程序 (127.0.0.1:1088) 是否正常运行。';
+                    }
+                    appendSystemMsg(`<i class="fa-solid fa-circle-exclamation"></i> ${reason}`, true);
+                    ws = null;
+                };
+
+                ws.onerror = () => appendSystemMsg('<i class="fa-solid fa-bug"></i> WebSocket 发生网络错误', true);
+            } catch (e) {
+                appendSystemMsg(`<i class="fa-solid fa-bug"></i> 创建连接失败: ${e.message}`, true);
+            }
+        };
+    </script>
+</body>
+</html>

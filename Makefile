@@ -6,7 +6,7 @@ GO_CLEAN := $(GO) clean
 GO_TIDY := $(GO) mod tidy
 LDFLAGS := -s -w
 
-.PHONY: all build build-linux build-windows build-darwin install clean proto help
+.PHONY: all build build-linux build-windows build-darwin install clean help
 
 all: build
 
@@ -34,10 +34,6 @@ install:
 	@echo "Tidying dependencies..."
 	$(GO_TIDY)
 
-proto:
-	@echo "Generating Go code from .proto files..."
-	protoc --proto_path=protobuf --go_out=. protobuf/new_douyin.proto
-
 clean:
 	@echo "Cleaning build artifacts..."
 	$(GO_CLEAN)
@@ -51,5 +47,4 @@ help:
 	@echo "  make build-darwin  - Build application for macOS"
 	@echo "  make install       - Tidy dependencies"
 	@echo "  make clean         - Clean build artifacts"
-	@echo "  make proto         - Generate Go code from .proto files"
 	@echo "  make help          - Display this help message"

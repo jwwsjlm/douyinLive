@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/ristretto/v2"
-	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
+	"github.com/jwwsjlm/douyinlive-proto/generated/new_douyin"
 	"google.golang.org/protobuf/proto"
 )
 

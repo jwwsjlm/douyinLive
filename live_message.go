@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 	"github.com/jwwsjlm/douyinLive/v2/utils"
+	"github.com/jwwsjlm/douyinlive-proto/generated/new_douyin"
 	"google.golang.org/protobuf/proto"
 )
 

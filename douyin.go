@@ -21,10 +21,10 @@ import (
 	"github.com/tidwall/gjson"
 
 	"github.com/gorilla/websocket"
-	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 	"github.com/jwwsjlm/douyinLive/v2/jsScript"
 	"github.com/jwwsjlm/douyinLive/v2/sign"
 	"github.com/jwwsjlm/douyinLive/v2/utils"
+	"github.com/jwwsjlm/douyinlive-proto/generated/new_douyin"
 	"github.com/jwwsjlm/req/v3"
 	"google.golang.org/protobuf/proto"
 )

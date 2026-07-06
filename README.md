@@ -734,6 +734,45 @@ cookie:
 go get github.com/jwwsjlm/douyinLive/v2
 ```
 
+### Protobuf 类型来源
+
+当前 protobuf 定义和生成代码已经从主仓库拆到单独仓库维护：
+
+```text
+github.com/jwwsjlm/douyinlive-proto
+```
+
+如果你只是把本项目当成本地 WebSocket 服务使用，不需要额外处理。服务端会继续把解析后的消息转成 JSON 发给客户端。
+
+如果你把本项目当 Go 库使用，并且需要自己解析 `LiveMessage.GetPayload()`，请使用新的 protobuf import 路径：
+
+```go
+import (
+	"github.com/jwwsjlm/douyinlive-proto/generated"
+	"github.com/jwwsjlm/douyinlive-proto/generated/new_douyin"
+)
+```
+
+旧版本里如果使用过下面这种路径：
+
+```go
+import "github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
+```
+
+需要改成：
+
+```go
+import "github.com/jwwsjlm/douyinlive-proto/generated/new_douyin"
+```
+
+`new_douyin` 的 protobuf schema 没有因为拆仓库改变，抖音下发的二进制 payload 解析方式也不变；变化的是 Go 代码的 import 路径。升级后建议执行：
+
+```bash
+go get github.com/jwwsjlm/douyinLive/v2@latest
+go get github.com/jwwsjlm/douyinlive-proto@latest
+go mod tidy
+```
+
 ### 订阅接口怎么选
 
 新版本推荐使用 `LiveMessage` 相关订阅接口：
@@ -848,7 +887,7 @@ import (
 	"log"
 
 	douyinlive "github.com/jwwsjlm/douyinLive/v2"
-	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
+	"github.com/jwwsjlm/douyinlive-proto/generated/new_douyin"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -907,7 +946,7 @@ func main() {
 }
 ```
 
-更多消息类型可以参考 `generated/new_douyin` 包下的 protobuf 生成代码。
+更多消息类型可以参考 [`github.com/jwwsjlm/douyinlive-proto/generated/new_douyin`](https://github.com/jwwsjlm/douyinlive-proto/tree/main/generated/new_douyin) 包下的 protobuf 生成代码。
 
 旧的 `Subscribe(func(raw, parsed))` 接口仍然保留，方便已有代码兼容；新代码建议优先使用 `SubscribeMessage` / `SubscribeMethod` / `SubscribeMethods`。
 
@@ -1071,8 +1110,7 @@ douyinLive/
 ├── douyin.go                 # 核心抓取逻辑，对外库接口
 ├── sign/                     # 签名与 Cookie 相关逻辑
 ├── jsScript/                 # 签名脚本
-├── protobuf/                 # protobuf 定义
-├── generated/                # 生成后的 protobuf 代码
+├── go.mod                    # Go module 依赖，protobuf 类型来自 github.com/jwwsjlm/douyinlive-proto
 ├── utils/                    # 工具函数
 ├── config.example.yaml       # 配置示例
 └── README.md

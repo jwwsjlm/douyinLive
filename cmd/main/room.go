@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/jwwsjlm/douyinLive/v2"
-	"github.com/jwwsjlm/douyinLive/v2/generated"
+	"github.com/jwwsjlm/douyinlive-proto/generated"
 	"github.com/lxzan/gws"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"

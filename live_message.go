@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// LiveMessage 封装抖音原始直播消息以及房间元数据。
 // LiveMessage wraps a raw Douyin webcast message with room metadata.
 type LiveMessage struct {
 	LiveID      string
@@ -21,6 +22,7 @@ type LiveMessage struct {
 	ReceivedAt  time.Time
 }
 
+// GetMethod 返回抖音直播消息的方法名。
 // GetMethod returns the Douyin webcast method name.
 func (m *LiveMessage) GetMethod() string {
 	if m == nil || m.Raw == nil {
@@ -29,6 +31,7 @@ func (m *LiveMessage) GetMethod() string {
 	return m.Raw.Method
 }
 
+// GetPayload 返回消息的原始 protobuf 载荷。
 // GetPayload returns the raw protobuf payload for the message.
 func (m *LiveMessage) GetPayload() []byte {
 	if m == nil || m.Raw == nil {
@@ -37,29 +40,40 @@ func (m *LiveMessage) GetPayload() []byte {
 	return m.Raw.Payload
 }
 
+// LiveMessageHandler 处理标准化后的直播消息。
 // LiveMessageHandler consumes normalized live messages.
 type LiveMessageHandler func(*LiveMessage)
 
+// eventHandler 保存旧版原始消息订阅回调。
+// eventHandler stores a legacy raw-message subscription callback.
 type eventHandler struct {
 	id      string
 	handler func(*new_douyin.Webcast_Im_Message, proto.Message)
 }
 
+// messageSubscriber 保存标准化消息订阅者及其方法过滤条件。
+// messageSubscriber stores a normalized-message subscriber and its method filters.
 type messageSubscriber struct {
 	id      string
 	handler LiveMessageHandler
 	methods map[string]struct{}
 }
 
+// messageBus 管理标准化直播消息的订阅与分发。
+// messageBus manages subscription and dispatch for normalized live messages.
 type messageBus struct {
 	mu          sync.RWMutex
 	subscribers []messageSubscriber
 }
 
+// newMessageBus 创建一个空的消息总线。
+// newMessageBus creates an empty message bus.
 func newMessageBus() *messageBus {
 	return &messageBus{}
 }
 
+// eventBus 返回实例级消息总线，必要时延迟初始化。
+// eventBus returns the instance message bus and lazily initializes it when needed.
 func (dl *DouyinLive) eventBus() *messageBus {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -70,16 +84,19 @@ func (dl *DouyinLive) eventBus() *messageBus {
 	return dl.events
 }
 
-// SubscribeMessage subscribes to normalized live messages.
+// SubscribeMessage 订阅所有标准化直播消息。
+// SubscribeMessage subscribes to all normalized live messages.
 func (dl *DouyinLive) SubscribeMessage(handler LiveMessageHandler) string {
 	return dl.eventBus().subscribe(handler)
 }
 
+// SubscribeMethod 订阅单个抖音直播消息方法，例如 WebcastChatMessage。
 // SubscribeMethod subscribes to one Douyin webcast method, for example WebcastChatMessage.
 func (dl *DouyinLive) SubscribeMethod(method string, handler LiveMessageHandler) string {
 	return dl.eventBus().subscribe(handler, method)
 }
 
+// SubscribeMethods 订阅一组抖音直播消息方法。
 // SubscribeMethods subscribes to a set of Douyin webcast methods.
 func (dl *DouyinLive) SubscribeMethods(methods []string, handler LiveMessageHandler) string {
 	if len(methods) == 0 {
@@ -88,6 +105,8 @@ func (dl *DouyinLive) SubscribeMethods(methods []string, handler LiveMessageHand
 	return dl.eventBus().subscribe(handler, methods...)
 }
 
+// subscribe 注册一个标准化消息订阅者并返回订阅 ID。
+// subscribe registers a normalized-message subscriber and returns its subscription ID.
 func (b *messageBus) subscribe(handler LiveMessageHandler, methods ...string) string {
 	if handler == nil {
 		return ""
@@ -119,6 +138,8 @@ func (b *messageBus) subscribe(handler LiveMessageHandler, methods ...string) st
 	return subscriber.id
 }
 
+// unsubscribe 按订阅 ID 移除标准化消息订阅者。
+// unsubscribe removes a normalized-message subscriber by subscription ID.
 func (b *messageBus) unsubscribe(id string) {
 	if id == "" {
 		return
@@ -135,6 +156,8 @@ func (b *messageBus) unsubscribe(id string) {
 	}
 }
 
+// hasSubscriber 判断订阅 ID 当前是否仍然有效。
+// hasSubscriber reports whether a subscription ID is still active.
 func (b *messageBus) hasSubscriber(id string) bool {
 	if id == "" {
 		return false
@@ -151,14 +174,8 @@ func (b *messageBus) hasSubscriber(id string) bool {
 	return false
 }
 
-func (b *messageBus) publish(message *LiveMessage) {
-	b.publishWithLogger(nil, message)
-}
-
-func (b *messageBus) publishWithLogger(logger logSink, message *LiveMessage) {
-	b.publishWithLoggerUntil(logger, message, nil)
-}
-
+// publishWithLoggerUntil 分发消息，并在停止条件触发时中止。
+// publishWithLoggerUntil dispatches a message and stops when the stop condition fires.
 func (b *messageBus) publishWithLoggerUntil(logger logSink, message *LiveMessage, stop func() bool) {
 	if message == nil {
 		return
@@ -189,6 +206,8 @@ func (b *messageBus) publishWithLoggerUntil(logger logSink, message *LiveMessage
 	}
 }
 
+// accepts 判断订阅者是否接收指定方法名的消息。
+// accepts reports whether the subscriber accepts messages for the given method.
 func (s messageSubscriber) accepts(method string) bool {
 	if len(s.methods) == 0 {
 		return true

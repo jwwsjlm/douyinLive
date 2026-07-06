@@ -10,6 +10,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+func publishForTest(bus *messageBus, message *LiveMessage) {
+	publishForTestWithLogger(bus, nil, message)
+}
+
+func publishForTestWithLogger(bus *messageBus, logger logSink, message *LiveMessage) {
+	bus.publishWithLoggerUntil(logger, message, nil)
+}
+
 func TestMessageBusSubscribeAll(t *testing.T) {
 	bus := newMessageBus()
 	var got []string
@@ -21,8 +29,8 @@ func TestMessageBusSubscribeAll(t *testing.T) {
 		t.Fatalf("subscribe returned empty id")
 	}
 
-	bus.publish(&LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}})
-	bus.publish(&LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastGiftMessage}})
+	publishForTest(bus, &LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}})
+	publishForTest(bus, &LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastGiftMessage}})
 
 	if len(got) != 2 {
 		t.Fatalf("all-message subscriber got %d messages, want 2", len(got))
@@ -43,9 +51,9 @@ func TestMessageBusSubscribeOneMethod(t *testing.T) {
 		t.Fatalf("subscribe returned empty id")
 	}
 
-	bus.publish(&LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastGiftMessage}})
-	bus.publish(&LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}})
-	bus.publish(&LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastLikeMessage}})
+	publishForTest(bus, &LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastGiftMessage}})
+	publishForTest(bus, &LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}})
+	publishForTest(bus, &LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastLikeMessage}})
 
 	if len(got) != 1 || got[0] != WebcastChatMessage {
 		t.Fatalf("method subscriber got %#v, want only %s", got, WebcastChatMessage)
@@ -63,9 +71,9 @@ func TestMessageBusSubscribeMultipleMethods(t *testing.T) {
 		t.Fatalf("subscribe returned empty id")
 	}
 
-	bus.publish(&LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastLikeMessage}})
-	bus.publish(&LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastGiftMessage}})
-	bus.publish(&LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}})
+	publishForTest(bus, &LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastLikeMessage}})
+	publishForTest(bus, &LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastGiftMessage}})
+	publishForTest(bus, &LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}})
 
 	if len(got) != 2 {
 		t.Fatalf("multi-method subscriber got %d messages, want 2", len(got))
@@ -83,7 +91,7 @@ func TestMessageBusUnsubscribe(t *testing.T) {
 		calls++
 	}, WebcastChatMessage)
 	bus.unsubscribe(id)
-	bus.publish(&LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}})
+	publishForTest(bus, &LiveMessage{Raw: &new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}})
 
 	if calls != 0 {
 		t.Fatalf("unsubscribed handler was called %d times", calls)
@@ -102,7 +110,7 @@ func TestMessageBusSkipsSubscriberUnsubscribedDuringPublish(t *testing.T) {
 		calls++
 	})
 
-	bus.publish(&LiveMessage{})
+	publishForTest(bus, &LiveMessage{})
 
 	if calls != 0 {
 		t.Fatalf("subscriber removed during publish was called %d times", calls)
@@ -120,7 +128,7 @@ func TestMessageBusRecoversSubscriberPanic(t *testing.T) {
 		calls++
 	})
 
-	bus.publishWithLogger(normalizeLogger(log.Default()), &LiveMessage{
+	publishForTestWithLogger(bus, normalizeLogger(log.Default()), &LiveMessage{
 		Raw: &new_douyin.Webcast_Im_Message{Method: WebcastChatMessage},
 	})
 

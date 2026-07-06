@@ -8,18 +8,24 @@ import (
 )
 
 // SM3 国密哈希算法实现
+// SM3 实现国密 SM3 哈希算法的内部状态。
+// SM3 stores the internal state for the SM3 hash implementation.
 type SM3 struct {
 	reg   []uint32
 	chunk []byte
 	size  int
 }
 
+// NewSM3 创建并初始化 SM3 哈希器。
+// NewSM3 creates and initializes an SM3 hasher.
 func NewSM3() *SM3 {
 	sm3 := &SM3{}
 	sm3.Reset()
 	return sm3
 }
 
+// Reset 将 SM3 哈希器恢复到初始状态。
+// Reset restores the SM3 hasher to its initial state.
 func (sm3 *SM3) Reset() {
 	sm3.reg = []uint32{
 		1937774191, 1226093241, 388252375, 3666478592,
@@ -29,11 +35,15 @@ func (sm3 *SM3) Reset() {
 	sm3.size = 0
 }
 
+// leftRotate 对 uint32 执行循环左移。
+// leftRotate rotates a uint32 value left by n bits.
 func leftRotate(x uint32, n int) uint32 {
 	n %= 32
 	return (x << n) | (x >> (32 - n))
 }
 
+// getTj 返回 SM3 压缩函数第 j 轮常量。
+// getTj returns the round constant for step j of the SM3 compression function.
 func getTj(j int) uint32 {
 	if 0 <= j && j < 16 {
 		return 2043430169 // 0x79CC4519
@@ -44,6 +54,8 @@ func getTj(j int) uint32 {
 	return 0
 }
 
+// ffj 执行 SM3 压缩函数中的 FF 布尔函数。
+// ffj evaluates the FF boolean function used by SM3 compression.
 func ffj(j int, x, y, z uint32) uint32 {
 	if 0 <= j && j < 16 {
 		return x ^ y ^ z
@@ -54,6 +66,8 @@ func ffj(j int, x, y, z uint32) uint32 {
 	return 0
 }
 
+// ggj 执行 SM3 压缩函数中的 GG 布尔函数。
+// ggj evaluates the GG boolean function used by SM3 compression.
 func ggj(j int, x, y, z uint32) uint32 {
 	if 0 <= j && j < 16 {
 		return x ^ y ^ z
@@ -64,6 +78,8 @@ func ggj(j int, x, y, z uint32) uint32 {
 	return 0
 }
 
+// Write 将数据追加到 SM3 哈希器并压缩完整分组。
+// Write appends data to the SM3 hasher and compresses complete blocks.
 func (sm3 *SM3) Write(data []byte) {
 	sm3.size += len(data)
 	f := 64 - len(sm3.chunk)
@@ -86,6 +102,8 @@ func (sm3 *SM3) Write(data []byte) {
 	}
 }
 
+// fill 对剩余数据执行 SM3 填充。
+// fill applies SM3 padding to the remaining data.
 func (sm3 *SM3) fill() {
 	bitLength := uint64(sm3.size) * 8
 	sm3.chunk = append(sm3.chunk, 0x80)
@@ -108,6 +126,8 @@ func (sm3 *SM3) fill() {
 	sm3.chunk = append(sm3.chunk, byte(lowBits>>24), byte(lowBits>>16), byte(lowBits>>8), byte(lowBits))
 }
 
+// compress 执行单个 SM3 512 位分组压缩。
+// compress processes one 512-bit SM3 block.
 func (sm3 *SM3) compress(data []byte) {
 	if len(data) < 64 {
 		// 数据不足 64 字节，内部错误，返回
@@ -157,6 +177,8 @@ func (sm3 *SM3) compress(data []byte) {
 	sm3.reg[7] ^= h
 }
 
+// Sum 返回数据的 SM3 摘要，并在完成后重置哈希器。
+// Sum returns the SM3 digest for data and resets the hasher afterwards.
 func (sm3 *SM3) Sum(data []byte) []byte {
 	if data != nil {
 		sm3.Reset()
@@ -180,6 +202,8 @@ func (sm3 *SM3) Sum(data []byte) []byte {
 }
 
 // RC4 加密
+// rc4Encrypt 使用 RC4 对文本进行异或流加密。
+// rc4Encrypt encrypts text with RC4 stream encryption.
 func rc4Encrypt(plaintext string, key string) string {
 	cipher, err := rc4.NewCipher([]byte(key))
 	if err != nil {
@@ -192,6 +216,8 @@ func rc4Encrypt(plaintext string, key string) string {
 }
 
 // 结果加密（魔改Base64）
+// resultEncrypt 使用指定编码表对二进制字符串进行变体 Base64 编码。
+// resultEncrypt encodes a binary string with the selected custom Base64 table.
 func resultEncrypt(longStr string, num string) string {
 	encodingTables := map[string]string{
 		"s0": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",
@@ -225,6 +251,8 @@ func resultEncrypt(longStr string, num string) string {
 	return string(result)
 }
 
+// getLongInt 从字符串指定三字节分组中读取 24 位整数。
+// getLongInt reads a 24-bit integer from a three-byte group in the string.
 func getLongInt(roundNum int, longStr string) uint32 {
 	roundNum = roundNum * 3
 	var char1, char2, char3 byte
@@ -240,6 +268,8 @@ func getLongInt(roundNum int, longStr string) uint32 {
 	return uint32(char1)<<16 | uint32(char2)<<8 | uint32(char3)
 }
 
+// generRandom 根据随机数和选项生成混淆字节。
+// generRandom derives obfuscated bytes from a random number and option bytes.
 func generRandom(randomNum int, option []int) []byte {
 	byte1 := byte(randomNum & 255)
 	byte2 := byte((randomNum >> 8) & 255)
@@ -252,6 +282,8 @@ func generRandom(randomNum int, option []int) []byte {
 	}
 }
 
+// generateRandomStr 生成 a_bogus 前缀所需的固定随机片段。
+// generateRandomStr generates the fixed pseudo-random prefix used by a_bogus.
 func generateRandomStr() string {
 	randomValues := []float64{0.123456789, 0.987654321, 0.555555555}
 	randomBytes := make([]byte, 0)
@@ -263,6 +295,8 @@ func generateRandomStr() string {
 	return string(randomBytes)
 }
 
+// splitToBytes 将 uint32 按大端序拆成四个字节。
+// splitToBytes splits a uint32 into four big-endian bytes.
 func splitToBytes(num uint32) []byte {
 	return []byte{
 		byte(num >> 24),
@@ -272,6 +306,8 @@ func splitToBytes(num uint32) []byte {
 	}
 }
 
+// generateRc4BbStr 组装 a_bogus 的加密 bb 字节串。
+// generateRc4BbStr builds the encrypted bb byte string used by a_bogus.
 func generateRc4BbStr(urlSearchParams, userAgent, windowEnvStr string, suffix string, arguments []int) string {
 	sm3 := NewSM3()
 	startTime := uint32(time.Now().UnixMilli())
@@ -401,6 +437,8 @@ func generateRc4BbStr(urlSearchParams, userAgent, windowEnvStr string, suffix st
 //	userAgent: 浏览器User-Agent
 //
 // 返回：a_bogus签名字符串
+// AbSign 生成抖音 web/enter 请求所需的 a_bogus 签名。
+// AbSign generates the a_bogus signature required by Douyin web/enter requests.
 func AbSign(urlSearchParams, userAgent string) string {
 	windowEnvStr := "1920|1080|1920|1040|0|30|0|0|1872|92|1920|1040|1857|92|1|24|Win32"
 	return resultEncrypt(

@@ -17,10 +17,9 @@ import (
 	"github.com/jwwsjlm/douyinLive/v2/generated/new_douyin"
 )
 
-// HasGzipEncoding 判断消息头中是否包含gzip编码
-
+// HasGzipEncoding 判断消息头中是否包含 gzip 编码。
+// HasGzipEncoding reports whether the push headers declare gzip compression.
 func HasGzipEncoding(headers []*new_douyin.Webcast_Im_PushHeader) bool {
-
 	for _, header := range headers {
 		if header.Key == "compress_type" && header.Value == "gzip" {
 			return true
@@ -29,7 +28,8 @@ func HasGzipEncoding(headers []*new_douyin.Webcast_Im_PushHeader) bool {
 	return false
 }
 
-// GetxMSStub 拼接map并返回其MD5哈希值的十六进制字符串
+// GetxMSStub 拼接有序参数并返回 MD5 十六进制摘要。
+// GetxMSStub joins ordered parameters and returns their MD5 hex digest.
 func GetxMSStub(params *orderedmap.OrderedMap) string {
 	var sigParams strings.Builder
 	for i, key := range params.Keys() {
@@ -43,6 +43,8 @@ func GetxMSStub(params *orderedmap.OrderedMap) string {
 	return hex.EncodeToString(hash[:])
 }
 
+// randomIndex 返回 [0, max) 范围内的安全随机索引。
+// randomIndex returns a cryptographically random index in the [0, max) range.
 func randomIndex(max int) int {
 	if max <= 1 {
 		return 0
@@ -55,6 +57,8 @@ func randomIndex(max int) int {
 	return int(n.Int64())
 }
 
+// randomInt64 返回 [0, max) 范围内的安全随机 int64。
+// randomInt64 returns a cryptographically random int64 in the [0, max) range.
 func randomInt64(max int64) int64 {
 	if max <= 1 {
 		return 0
@@ -67,6 +71,8 @@ func randomInt64(max int64) int64 {
 	return n.Int64()
 }
 
+// GenerateJitterNanos 生成不超过最大时长的随机抖动纳秒数。
+// GenerateJitterNanos returns random jitter in nanoseconds up to the maximum duration.
 func GenerateJitterNanos(maxDuration time.Duration) int64 {
 	if maxDuration <= 0 {
 		return 0
@@ -74,7 +80,8 @@ func GenerateJitterNanos(maxDuration time.Duration) int64 {
 	return randomInt64(int64(maxDuration))
 }
 
-// GenerateMsToken 生成随机的msToken
+// GenerateMsToken 生成随机 msToken。
+// GenerateMsToken generates a random msToken value.
 func GenerateMsToken(length int) string {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+="
 	b := make([]byte, length)
@@ -84,7 +91,8 @@ func GenerateMsToken(length int) string {
 	return string(b) + "=_"
 }
 
-// GzipCompressAndBase64Encode 将数据进行gzip压缩并进行Base64编码
+// GzipCompressAndBase64Encode 将数据 gzip 压缩后进行 Base64 编码。
+// GzipCompressAndBase64Encode gzip-compresses data and encodes it as Base64.
 func GzipCompressAndBase64Encode(data []byte) (string, error) {
 	var b bytes.Buffer
 	w := gzip.NewWriter(&b)
@@ -99,7 +107,8 @@ func GzipCompressAndBase64Encode(data []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(b.Bytes()), nil
 }
 
-// NewOrderedMap 创建一个有序的map
+// NewOrderedMap 创建 WebSocket 签名所需的有序参数表。
+// NewOrderedMap creates the ordered parameter map required for WebSocket signing.
 func NewOrderedMap(roomID, pushID string) *orderedmap.OrderedMap {
 	smap := orderedmap.NewOrderedMap()
 	smap.Set("live_id", "1")
@@ -118,7 +127,8 @@ func NewOrderedMap(roomID, pushID string) *orderedmap.OrderedMap {
 	return smap
 }
 
-// RandomUserAgent 生成随机的浏览器用户代理字符串
+// RandomUserAgent 生成随机浏览器 User-Agent。
+// RandomUserAgent generates a random browser User-Agent string.
 func RandomUserAgent() string {
 	osList := []string{
 		"(Windows NT 10.0; WOW64)", "(Windows NT 10.0; Win64; x64)",
@@ -139,7 +149,8 @@ func RandomUserAgent() string {
 	return fmt.Sprintf("Mozilla/5.0 %s AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36", os, chromeVersion)
 }
 
-// GenerateUniqueID 生成唯一标识符
+// GenerateUniqueID 生成唯一标识符。
+// GenerateUniqueID generates a unique identifier.
 func GenerateUniqueID() string {
 	return uuid.New().String()
 }

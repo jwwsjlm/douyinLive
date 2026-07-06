@@ -11,6 +11,8 @@ import (
 	"syscall"
 )
 
+// main 加载配置、启动 WebSocket 服务，并在收到退出信号时优雅关闭。
+// main loads configuration, starts the WebSocket service, and gracefully shuts down on exit signals.
 func main() {
 	// 加载配置
 	cfg, err := NewConfig()

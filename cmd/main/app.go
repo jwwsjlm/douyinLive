@@ -14,12 +14,20 @@ import (
 )
 
 const (
+	// httpReadHeaderTimeout 限制读取请求头的最长时间。
+	// httpReadHeaderTimeout limits how long the server waits for request headers.
 	httpReadHeaderTimeout = 5 * time.Second
-	httpIdleTimeout       = 2 * time.Minute
-	httpMaxHeaderBytes    = 16 << 10
+	// httpIdleTimeout 限制空闲 HTTP 连接保留时间。
+	// httpIdleTimeout limits how long idle HTTP connections are kept.
+	httpIdleTimeout = 2 * time.Minute
+	// httpMaxHeaderBytes 限制 HTTP 请求头最大字节数。
+	// httpMaxHeaderBytes limits the maximum HTTP request header size.
+	httpMaxHeaderBytes = 16 << 10
 )
 
 // App 是应用的核心结构体，封装了所有依赖
+// App 封装 HTTP 服务、房间管理器和运行配置。
+// App bundles the HTTP server, room manager, and runtime configuration.
 type App struct {
 	ctx         context.Context
 	logger      *appLogger
@@ -31,6 +39,8 @@ type App struct {
 }
 
 // NewApp 创建并返回一个新的 App 实例
+// NewApp 创建应用实例并初始化房间管理器。
+// NewApp creates an application instance and initializes the room manager.
 func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error) {
 	if logger == nil {
 		logger = newAppLogger(nil)
@@ -56,6 +66,8 @@ func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error
 }
 
 // Run 启动应用服务
+// Run 启动 WebSocket HTTP 服务，并在端口占用时自动尝试下一个端口。
+// Run starts the WebSocket HTTP server and tries the next port when the configured one is busy.
 func (a *App) Run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws/", a.handleWebSocket)
@@ -80,6 +92,8 @@ func (a *App) Run() error {
 	}
 }
 
+// newHTTPServer 创建带基础超时限制的 HTTP 服务。
+// newHTTPServer creates an HTTP server with basic timeout limits.
 func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              addr,
@@ -91,6 +105,8 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 }
 
 // Shutdown 优雅地关闭应用
+// Shutdown 优雅关闭房间管理器和 HTTP 服务。
+// Shutdown gracefully stops the room manager and HTTP server.
 func (a *App) Shutdown() error {
 	a.logger.Info("正在关闭 RoomManager")
 	a.roomManager.CloseAll()
@@ -105,6 +121,8 @@ func (a *App) Shutdown() error {
 }
 
 // handleWebSocket 处理新的 WebSocket 连接请求
+// handleWebSocket 解析房间 ID 并升级客户端 WebSocket 连接。
+// handleWebSocket parses the room ID and upgrades the client WebSocket connection.
 func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	roomID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/ws/"), "/")
 	if roomID == "" {
@@ -138,6 +156,8 @@ func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	go socket.ReadLoop()
 }
 
+// parseCookieOverride 从查询参数读取本次连接专用 Cookie。
+// parseCookieOverride reads the per-connection cookie override from query parameters.
 func parseCookieOverride(r *http.Request) (string, error) {
 	q := r.URL.Query()
 	if cookie := strings.TrimSpace(q.Get("cookie")); cookie != "" {
@@ -156,6 +176,8 @@ func parseCookieOverride(r *http.Request) (string, error) {
 	return strings.TrimSpace(cookie), nil
 }
 
+// decodeCookieBase64 解码 URL 安全或标准 Base64 Cookie。
+// decodeCookieBase64 decodes URL-safe or standard Base64 cookie values.
 func decodeCookieBase64(value string) (string, error) {
 	decoders := []*base64.Encoding{
 		base64.RawURLEncoding,

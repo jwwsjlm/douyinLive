@@ -10,20 +10,23 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// cookieConfig is the YAML shape used internally by CookieManager.
+// cookieConfig 定义 CookieManager 内部使用的 YAML 配置结构。
+// cookieConfig defines the YAML shape used internally by CookieManager.
 type cookieConfig struct {
 	Cookie struct {
 		Douyin string `yaml:"douyin"`
 	} `yaml:"cookie"`
 }
 
-// CookieManager Cookie 管理器
+// CookieManager 管理抖音 Cookie 配置和请求用 Cookie jar。
+// CookieManager manages Douyin cookie configuration and the request cookie jar.
 type CookieManager struct {
 	config *cookieConfig
 	jar    *cookiejar.Jar
 }
 
-// NewCookieManager 创建 Cookie 管理器
+// NewCookieManager 创建 Cookie 管理器。
+// NewCookieManager creates a cookie manager.
 func NewCookieManager() *CookieManager {
 	jar, _ := cookiejar.New(nil)
 	return &CookieManager{
@@ -31,7 +34,8 @@ func NewCookieManager() *CookieManager {
 	}
 }
 
-// LoadConfig 从 YAML 文件加载配置
+// LoadConfig 从 YAML 文件加载 Cookie 配置。
+// LoadConfig loads cookie configuration from a YAML file.
 func (cm *CookieManager) LoadConfig(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -46,7 +50,8 @@ func (cm *CookieManager) LoadConfig(path string) error {
 	return nil
 }
 
-// LoadFromEnv 从环境变量加载 Cookie
+// LoadFromEnv 从环境变量加载 Cookie。
+// LoadFromEnv loads cookies from environment variables.
 func (cm *CookieManager) LoadFromEnv() {
 	if cm.config == nil {
 		cm.config = &cookieConfig{}
@@ -55,7 +60,8 @@ func (cm *CookieManager) LoadFromEnv() {
 	cm.config.Cookie.Douyin = os.Getenv("DOUYIN_COOKIE")
 }
 
-// GetDouyinCookie 获取抖音 Cookie
+// GetDouyinCookie 获取当前抖音 Cookie。
+// GetDouyinCookie returns the current Douyin cookie.
 func (cm *CookieManager) GetDouyinCookie() string {
 	if cm.config != nil {
 		return cm.config.Cookie.Douyin
@@ -63,7 +69,8 @@ func (cm *CookieManager) GetDouyinCookie() string {
 	return ""
 }
 
-// SetDouyinCookie 手动设置抖音 Cookie
+// SetDouyinCookie 手动设置抖音 Cookie。
+// SetDouyinCookie sets the Douyin cookie manually.
 func (cm *CookieManager) SetDouyinCookie(cookie string) {
 	if cm.config == nil {
 		cm.config = &cookieConfig{}
@@ -71,7 +78,8 @@ func (cm *CookieManager) SetDouyinCookie(cookie string) {
 	cm.config.Cookie.Douyin = cookie
 }
 
-// ParseCookies 解析 cookie 字符串为 []*http.Cookie
+// ParseCookies 将 Cookie 字符串解析为 http.Cookie 列表。
+// ParseCookies parses a cookie header string into http.Cookie values.
 func (cm *CookieManager) ParseCookies(cookieStr string) []*http.Cookie {
 	var cookies []*http.Cookie
 	if cookieStr == "" {
@@ -93,7 +101,8 @@ func (cm *CookieManager) ParseCookies(cookieStr string) []*http.Cookie {
 	return cookies
 }
 
-// SetCookies 设置 Cookie 到 jar
+// SetCookies 将 Cookie 字符串写入 jar。
+// SetCookies stores a cookie string in the jar for the given URL.
 func (cm *CookieManager) SetCookies(rawURL string, cookieStr string) error {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
@@ -105,7 +114,8 @@ func (cm *CookieManager) SetCookies(rawURL string, cookieStr string) error {
 	return nil
 }
 
-// GetCookies 从 jar 获取 Cookie
+// GetCookies 从 jar 中读取指定 URL 的 Cookie。
+// GetCookies returns cookies from the jar for the given URL.
 func (cm *CookieManager) GetCookies(rawURL string) []*http.Cookie {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
@@ -115,7 +125,8 @@ func (cm *CookieManager) GetCookies(rawURL string) []*http.Cookie {
 	return cm.jar.Cookies(parsedURL)
 }
 
-// UpdateCookie 更新指定名称的 Cookie 值
+// UpdateCookie 按名称更新配置中的 Cookie 值。
+// UpdateCookie updates a named cookie value in the configuration.
 func (cm *CookieManager) UpdateCookie(name, value string) {
 	if cm.config == nil {
 		cm.config = &cookieConfig{}
@@ -127,7 +138,8 @@ func (cm *CookieManager) UpdateCookie(name, value string) {
 	}
 }
 
-// SaveConfig 保存配置到文件
+// SaveConfig 将当前配置保存到文件。
+// SaveConfig saves the current configuration to a file.
 func (cm *CookieManager) SaveConfig(path string) error {
 	data, err := yaml.Marshal(cm.config)
 	if err != nil {
@@ -137,19 +149,20 @@ func (cm *CookieManager) SaveConfig(path string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// ValidateCookie 验证 Cookie 是否有效（简单检查）
+// ValidateCookie 简单检查 Cookie 是否包含关键抖音字段。
+// ValidateCookie performs a lightweight check for important Douyin cookie fields.
 func (cm *CookieManager) ValidateCookie(cookieStr string) bool {
 	if cookieStr == "" {
 		return false
 	}
 
-	// 检查是否包含关键 cookie
 	return strings.Contains(cookieStr, "ttwid=") ||
 		strings.Contains(cookieStr, "passport_csrf_token=") ||
 		strings.Contains(cookieStr, "odin_tt=")
 }
 
-// GetCookieNames 获取 Cookie 中包含的所有名称
+// GetCookieNames 返回 Cookie 字符串中包含的所有名称。
+// GetCookieNames returns all cookie names contained in a cookie string.
 func (cm *CookieManager) GetCookieNames(cookieStr string) []string {
 	var names []string
 	cookies := cm.ParseCookies(cookieStr)

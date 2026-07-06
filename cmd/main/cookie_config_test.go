@@ -136,6 +136,27 @@ func TestRoomCloseIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRoomCloseAllClientsClosesEveryWaitingClient(t *testing.T) {
+	room := NewRoom("1001", nil, false, "", signProviderLocal, "", time.Second, time.Second, nil)
+	first := NewClient("client-1", nil)
+	second := NewClient("client-2", nil)
+	room.addClient(first)
+	room.addClient(second)
+
+	room.closeAllClients(liveInvalidMessage)
+
+	if got := room.clientCount(); got != 0 {
+		t.Fatalf("client count after closeAllClients = %d, want 0", got)
+	}
+	for _, client := range []*Client{first, second} {
+		select {
+		case <-client.stopCh:
+		default:
+			t.Fatalf("client %s was not closed", client.id)
+		}
+	}
+}
+
 func TestClientCloseAllowsNilConn(t *testing.T) {
 	client := NewClient("client-1", nil)
 

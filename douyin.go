@@ -68,6 +68,8 @@ var impersonatedUserAgents = []string{
 }
 
 // DouyinLive 结构体定义
+// DouyinLive 管理一个抖音直播间的 HTTP 初始化、WebSocket 连接和消息分发。
+// DouyinLive manages HTTP initialization, WebSocket connection, and message dispatch for one Douyin live room.
 type DouyinLive struct {
 	liveID              string
 	roomID              string
@@ -105,10 +107,14 @@ type DouyinLive struct {
 	closeCancel         context.CancelFunc
 }
 
+// liveStatusGuard 通过多次确认降低直播状态误判概率。
+// liveStatusGuard reduces live-status false positives by requiring repeated confirmation.
 type liveStatusGuard struct {
 	offlineConfirmations int
 }
 
+// Record 记录一次直播状态检查结果，并返回是否确认下播。
+// Record stores one live-status check result and reports whether offline is confirmed.
 func (g *liveStatusGuard) Record(isLive bool) bool {
 	if isLive {
 		g.offlineConfirmations = 0
@@ -118,10 +124,14 @@ func (g *liveStatusGuard) Record(isLive bool) bool {
 	return g.offlineConfirmations >= 2
 }
 
+// Reset 清空直播状态确认计数。
+// Reset clears the live-status confirmation counter.
 func (g *liveStatusGuard) Reset() {
 	g.offlineConfirmations = 0
 }
 
+// roomInfoSnapshot 保存房间信息的一致性快照。
+// roomInfoSnapshot stores a consistent snapshot of room metadata.
 type roomInfoSnapshot struct {
 	liveID      string
 	roomID      string
@@ -133,14 +143,20 @@ type roomInfoSnapshot struct {
 
 // NewDouyinLive 创建一个新的 DouyinLive 实例
 // cookie 参数：可选的手动传入 Cookie，用于需要登录态的请求
+// NewDouyinLive 创建使用本地签名的抖音直播监听实例。
+// NewDouyinLive creates a Douyin live listener that uses local signing.
 func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, error) {
 	return newDouyinLive(liveID, logger, cookie, newLocalWebsocketSigner())
 }
 
+// NewDouyinLiveWithTikHub 创建使用 TikHub 在线签名的抖音直播监听实例。
+// NewDouyinLiveWithTikHub creates a Douyin live listener that uses TikHub online signing.
 func NewDouyinLiveWithTikHub(liveID string, logger logger, cookie string, tikHubToken string) (*DouyinLive, error) {
 	return newDouyinLive(liveID, logger, cookie, newTikHubWebsocketSigner(tikHubToken, ""))
 }
 
+// newDouyinLive 初始化 DouyinLive 的共享构造逻辑。
+// newDouyinLive initializes the shared construction logic for DouyinLive.
 func newDouyinLive(liveID string, baseLogger logger, cookie string, signer websocketSigner) (*DouyinLive, error) {
 	userAgent := newHTTPUserAgent()
 	if signer == nil {
@@ -192,6 +208,8 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string, signer webso
 	return dl, nil
 }
 
+// newHTTPUserAgent 随机选择一个用于 HTTP 伪装的浏览器 UA。
+// newHTTPUserAgent randomly selects a browser user agent for HTTP impersonation.
 func newHTTPUserAgent() string {
 	if len(impersonatedUserAgents) == 0 {
 		return ""
@@ -203,6 +221,8 @@ func newHTTPUserAgent() string {
 	return impersonatedUserAgents[n.Int64()]
 }
 
+// newHTTPClient 创建带浏览器伪装和超时设置的 HTTP 客户端。
+// newHTTPClient creates an HTTP client with browser impersonation and timeout settings.
 func newHTTPClient(userAgent string) *req.Client {
 	return req.C().
 		ImpersonateChromeWithOS(req.BrowserOSWindows).
@@ -212,16 +232,26 @@ func newHTTPClient(userAgent string) *req.Client {
 		SetTimeout(httpRequestTimeout)
 }
 
+// GetName 返回直播间主播名称。
+// GetName returns the live room owner name.
 func (dl *DouyinLive) GetName() string {
 	return dl.roomInfoSnapshot().liveName
 }
+
+// GetTitle 返回直播间标题。
+// GetTitle returns the live room title.
 func (dl *DouyinLive) GetTitle() string {
 	return dl.roomInfoSnapshot().title
 }
+
+// GetAvatarThumb 返回主播头像缩略图地址。
+// GetAvatarThumb returns the owner avatar thumbnail URL.
 func (dl *DouyinLive) GetAvatarThumb() string {
 	return dl.roomInfoSnapshot().avatarThumb
 }
 
+// roomInfoSnapshot 返回当前房间信息的线程安全快照。
+// roomInfoSnapshot returns a thread-safe snapshot of the current room metadata.
 func (dl *DouyinLive) roomInfoSnapshot() roomInfoSnapshot {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -236,6 +266,8 @@ func (dl *DouyinLive) roomInfoSnapshot() roomInfoSnapshot {
 	}
 }
 
+// updateRoomInfo 更新 WebSocket 和输出所需的房间信息。
+// updateRoomInfo updates room metadata required by WebSocket signing and output.
 func (dl *DouyinLive) updateRoomInfo(roomID, pushID, liveName, title, avatarThumb string) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -247,6 +279,8 @@ func (dl *DouyinLive) updateRoomInfo(roomID, pushID, liveName, title, avatarThum
 	dl.avatarThumb = avatarThumb
 }
 
+// parseRoomInfo 从 web/enter 响应中提取房间 ID、push ID 和展示信息。
+// parseRoomInfo extracts room ID, push ID, and display metadata from a web/enter response.
 func parseRoomInfo(body string) (roomInfoSnapshot, error) {
 	roomID := firstNonEmptyGJSON(body,
 		"data.data.0.id_str",
@@ -292,6 +326,8 @@ func parseRoomInfo(body string) (roomInfoSnapshot, error) {
 	}, nil
 }
 
+// firstNonEmptyGJSON 按路径顺序返回第一个非空 gjson 字符串值。
+// firstNonEmptyGJSON returns the first non-empty gjson string value for the given paths.
 func firstNonEmptyGJSON(body string, paths ...string) string {
 	for _, path := range paths {
 		value := gjson.Get(body, path).String()
@@ -302,11 +338,15 @@ func firstNonEmptyGJSON(body string, paths ...string) string {
 	return ""
 }
 
+// queryEscapeValue 按查询参数规则转义并保持空格为 %20。
+// queryEscapeValue escapes a query value while preserving spaces as %20.
 func queryEscapeValue(value string) string {
 	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
 }
 
 // Close 关闭抖音直播连接，确保资源正确释放
+// Close 主动关闭直播监听并释放当前连接。
+// Close actively stops live listening and releases the current connection.
 func (dl *DouyinLive) Close() {
 	dl.setManualClose(true)
 	dl.setLiveStatus(false)
@@ -316,11 +356,15 @@ func (dl *DouyinLive) Close() {
 }
 
 // Dispose releases resources for instances that won't enter Start().
+// Dispose 释放尚未进入 Start 流程的实例资源。
+// Dispose releases resources for instances that will not enter Start.
 func (dl *DouyinLive) Dispose() {
 	dl.Close()
 	dl.releaseCache()
 }
 
+// releaseCache 幂等释放房间信息缓存。
+// releaseCache idempotently releases the room-info cache.
 func (dl *DouyinLive) releaseCache() {
 	dl.releaseOnce.Do(func() {
 		if dl.ristretto != nil {
@@ -329,6 +373,8 @@ func (dl *DouyinLive) releaseCache() {
 	})
 }
 
+// rebuildHTTPClientAndHeaders 重建 HTTP 客户端并刷新基础请求头。
+// rebuildHTTPClientAndHeaders rebuilds the HTTP client and refreshes base headers.
 func (dl *DouyinLive) rebuildHTTPClientAndHeaders() {
 	dl.client = newHTTPClient(dl.userAgent)
 	dl.headers = make(http.Header)
@@ -336,18 +382,24 @@ func (dl *DouyinLive) rebuildHTTPClientAndHeaders() {
 	dl.refreshSignerUserAgent()
 }
 
+// refreshSignerUserAgent 将当前 UA 同步给签名器。
+// refreshSignerUserAgent syncs the current user agent to the signer.
 func (dl *DouyinLive) refreshSignerUserAgent() {
 	if dl.signer != nil {
 		dl.signer.UpdateUserAgent(dl.userAgent)
 	}
 }
 
+// resetReconnectTracking 清空连续重连失败计数。
+// resetReconnectTracking clears consecutive reconnect failure tracking.
 func (dl *DouyinLive) resetReconnectTracking() {
 	dl.mu.Lock()
 	dl.consecutiveFailures = 0
 	dl.mu.Unlock()
 }
 
+// recordReconnectFailure 记录一次重连失败并返回连续失败次数。
+// recordReconnectFailure records one reconnect failure and returns the consecutive count.
 func (dl *DouyinLive) recordReconnectFailure(reason string) int {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -355,6 +407,8 @@ func (dl *DouyinLive) recordReconnectFailure(reason string) int {
 	return dl.consecutiveFailures
 }
 
+// ensureCloseContextLocked 在持锁状态下确保关闭上下文存在。
+// ensureCloseContextLocked ensures the close context exists while the lock is held.
 func (dl *DouyinLive) ensureCloseContextLocked() {
 	if dl.closeCtx != nil && dl.closeCancel != nil {
 		return
@@ -365,6 +419,8 @@ func (dl *DouyinLive) ensureCloseContextLocked() {
 	}
 }
 
+// signalClose 广播关闭信号并取消关闭上下文。
+// signalClose broadcasts the close signal and cancels the close context.
 func (dl *DouyinLive) signalClose() {
 	dl.mu.Lock()
 	if dl.closeCh == nil {
@@ -379,6 +435,8 @@ func (dl *DouyinLive) signalClose() {
 	dl.mu.Unlock()
 }
 
+// resetCloseSignal 为新一轮 Start 流程重置关闭信号。
+// resetCloseSignal resets the close signal for a new Start cycle.
 func (dl *DouyinLive) resetCloseSignal() {
 	dl.mu.Lock()
 	if dl.closeCh == nil || dl.closeSignalClosed {
@@ -391,6 +449,8 @@ func (dl *DouyinLive) resetCloseSignal() {
 	dl.mu.Unlock()
 }
 
+// closeSignal 返回当前关闭信号通道。
+// closeSignal returns the current close-signal channel.
 func (dl *DouyinLive) closeSignal() <-chan struct{} {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -400,6 +460,8 @@ func (dl *DouyinLive) closeSignal() <-chan struct{} {
 	return dl.closeCh
 }
 
+// waitForReconnectDelay 等待重连延迟，并在关闭信号到来时提前退出。
+// waitForReconnectDelay waits for reconnect delay and exits early on close signal.
 func (dl *DouyinLive) waitForReconnectDelay(delay time.Duration) bool {
 	if delay <= 0 {
 		select {
@@ -421,6 +483,8 @@ func (dl *DouyinLive) waitForReconnectDelay(delay time.Duration) bool {
 	}
 }
 
+// requestContext 创建受关闭信号和请求超时共同控制的上下文。
+// requestContext creates a context governed by both close signal and request timeout.
 func (dl *DouyinLive) requestContext() (context.Context, context.CancelFunc) {
 	dl.mu.Lock()
 	dl.ensureCloseContextLocked()
@@ -430,6 +494,8 @@ func (dl *DouyinLive) requestContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(parent, httpRequestTimeout)
 }
 
+// contextWithCloseSignal 将关闭通道转换为可取消上下文。
+// contextWithCloseSignal converts a close channel into a cancellable context.
 func contextWithCloseSignal(closeCh <-chan struct{}) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -442,6 +508,8 @@ func contextWithCloseSignal(closeCh <-chan struct{}) (context.Context, context.C
 	return ctx, cancel
 }
 
+// prepareRequestContextLocked 在持上下文锁时准备 HTTP 请求头和 Cookie。
+// prepareRequestContextLocked prepares HTTP headers and cookies while the context lock is held.
 func (dl *DouyinLive) prepareRequestContextLocked() error {
 	if err := dl.fetchTTWID(); err != nil {
 		return err
@@ -454,6 +522,8 @@ func (dl *DouyinLive) prepareRequestContextLocked() error {
 	return nil
 }
 
+// prepareWebSocketContextLocked 准备 WebSocket 建连所需的房间信息和签名运行时。
+// prepareWebSocketContextLocked prepares room data and signer runtime needed for WebSocket dialing.
 func (dl *DouyinLive) prepareWebSocketContextLocked() error {
 	if err := dl.prepareRequestContextLocked(); err != nil {
 		return err
@@ -473,6 +543,8 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() error {
 	return nil
 }
 
+// refreshReconnectContextLocked 按重连策略刷新 UA、HTTP 客户端和房间上下文。
+// refreshReconnectContextLocked refreshes user agent, HTTP client, and room context for reconnects.
 func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP bool) error {
 	oldUserAgent := dl.userAgent
 	if changeUA {
@@ -503,6 +575,8 @@ func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP b
 }
 
 // getCookieParts 获取当前有效的 Cookie 键值对
+// getCookieParts 组装当前有效 Cookie 的键值片段。
+// getCookieParts builds key-value parts for the currently effective cookies.
 func (dl *DouyinLive) getCookieParts() []string {
 	configCookie := dl.cookieManager.GetDouyinCookie()
 	if configCookie != "" {
@@ -522,6 +596,8 @@ func (dl *DouyinLive) getCookieParts() []string {
 }
 
 // getCookieString 获取 Cookie 字符串（用于 headers）
+// getCookieString 返回用于请求头的 Cookie 字符串。
+// getCookieString returns the Cookie header string.
 func (dl *DouyinLive) getCookieString() string {
 	parts := dl.getCookieParts()
 	if len(parts) == 0 {
@@ -531,11 +607,15 @@ func (dl *DouyinLive) getCookieString() string {
 }
 
 // setupCookies 设置 Cookie，优先使用配置文件中的 Cookie
+// setupCookies 将当前 Cookie 写入请求头。
+// setupCookies writes the current cookie string into request headers.
 func (dl *DouyinLive) setupCookies() {
 	dl.headers.Set("Cookie", dl.getCookieString())
 }
 
 // fetchTTWID 获取 TTWID 和其他 Cookie
+// fetchTTWID 请求抖音首页并提取 ttwid 及附加 Cookie。
+// fetchTTWID requests the Douyin homepage and extracts ttwid plus extra cookies.
 func (dl *DouyinLive) fetchTTWID() error {
 	ctx, cancel := dl.requestContext()
 	defer cancel()
@@ -573,6 +653,8 @@ func (dl *DouyinLive) fetchTTWID() error {
 }
 
 // fetchRoomEnterData 获取直播间接口数据（对齐 DouyinLiveRecorder 的 web/enter 逻辑）
+// fetchRoomEnterData 获取直播间入口数据，优先使用短时缓存。
+// fetchRoomEnterData fetches room enter data and prefers the short-lived cache.
 func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 	V, found := dl.ristretto.Get(dl.liveID)
 	if found {
@@ -594,6 +676,8 @@ func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 	return dl.refreshRoomEnterData()
 }
 
+// refreshRoomEnterData 强制请求直播间入口数据并刷新房间信息。
+// refreshRoomEnterData force-fetches room enter data and refreshes room metadata.
 func (dl *DouyinLive) refreshRoomEnterData() (string, error) {
 	var body string
 
@@ -642,7 +726,9 @@ func (dl *DouyinLive) refreshRoomEnterData() (string, error) {
 	return body, nil
 }
 
-// 把真正的请求抽成独立函数，代码更干净
+// doRequest 请求直播间入口信息。
+// doRequest 请求直播间入口信息。
+// doRequest requests the live room enter information.
 func (dl *DouyinLive) doRequest() (string, error) {
 	params := fmt.Sprintf(
 		"aid=6383&app_name=douyin_web&live_id=1&device_platform=web"+
@@ -690,6 +776,8 @@ func (dl *DouyinLive) doRequest() (string, error) {
 	return body, nil
 }
 
+// logRoomInfoResponseSummary 输出无法解析房间信息时的响应摘要。
+// logRoomInfoResponseSummary logs a response summary when room metadata cannot be parsed.
 func (dl *DouyinLive) logRoomInfoResponseSummary(body string) {
 	if dl.logger == nil {
 		return
@@ -706,6 +794,8 @@ func (dl *DouyinLive) logRoomInfoResponseSummary(body string) {
 }
 
 // refreshLiveStatusFromAPI 通过房间接口刷新当前直播状态。
+// refreshLiveStatusFromAPI 通过 HTTP 接口刷新并保存直播状态。
+// refreshLiveStatusFromAPI refreshes and stores live status through the HTTP API.
 func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
 	isLive, err := dl.fetchLiveStatusFromAPI()
 	if err != nil {
@@ -715,6 +805,8 @@ func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
 	return isLive, nil
 }
 
+// fetchLiveStatusFromAPI 从直播间入口数据判断当前是否开播。
+// fetchLiveStatusFromAPI determines whether the room is live from room enter data.
 func (dl *DouyinLive) fetchLiveStatusFromAPI() (bool, error) {
 	dl.contextMu.Lock()
 	defer dl.contextMu.Unlock()
@@ -733,6 +825,8 @@ func (dl *DouyinLive) fetchLiveStatusFromAPI() (bool, error) {
 }
 
 // IsLive 检查直播间是否开播，并返回判活过程中的错误。
+// IsLive 检查直播间当前是否开播。
+// IsLive checks whether the live room is currently live.
 func (dl *DouyinLive) IsLive() (bool, error) {
 	isLive, err := dl.refreshLiveStatusFromAPI()
 	if err != nil {
@@ -743,6 +837,8 @@ func (dl *DouyinLive) IsLive() (bool, error) {
 }
 
 // setLiveStatus 设置直播间状态（线程安全）
+// setLiveStatus 更新内部直播状态。
+// setLiveStatus updates the internal live status.
 func (dl *DouyinLive) setLiveStatus(status bool) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -753,6 +849,8 @@ func (dl *DouyinLive) setLiveStatus(status bool) {
 }
 
 // isLiveStatus 获取直播间状态（线程安全）
+// isLiveStatus 返回内部直播状态。
+// isLiveStatus returns the internal live status.
 func (dl *DouyinLive) isLiveStatus() bool {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -760,6 +858,8 @@ func (dl *DouyinLive) isLiveStatus() bool {
 }
 
 // setManualClose 设置是否为手动关闭（线程安全）
+// setManualClose 标记连接是否由调用方主动关闭。
+// setManualClose marks whether the connection is being closed by the caller.
 func (dl *DouyinLive) setManualClose(status bool) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -767,6 +867,8 @@ func (dl *DouyinLive) setManualClose(status bool) {
 }
 
 // isManualClose 获取是否为手动关闭（线程安全）
+// isManualClose 返回当前是否处于主动关闭流程。
+// isManualClose reports whether the listener is in a manual close flow.
 func (dl *DouyinLive) isManualClose() bool {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -775,6 +877,8 @@ func (dl *DouyinLive) isManualClose() bool {
 
 // Start 启动直播间连接。
 // 方法内部会先刷新直播状态，确保作为库直接调用时也能进入消息处理循环。
+// Start 启动直播监听并阻塞处理 WebSocket 消息直到结束。
+// Start starts live listening and blocks while processing WebSocket messages until it ends.
 func (dl *DouyinLive) Start() error {
 	if dl.isManualClose() {
 		return context.Canceled
@@ -809,6 +913,8 @@ func (dl *DouyinLive) Start() error {
 }
 
 // startWebSocket 基于当前上下文建立 WebSocket 连接。
+// startWebSocket 建立上游 WebSocket 连接并启动心跳。
+// startWebSocket establishes the upstream WebSocket connection and starts heartbeats.
 func (dl *DouyinLive) startWebSocket() error {
 	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = websocketConnectTimeout
@@ -840,6 +946,8 @@ func (dl *DouyinLive) startWebSocket() error {
 	return nil
 }
 
+// configureWebSocket 设置 WebSocket 读取限制和 pong 处理。
+// configureWebSocket configures WebSocket read limits and pong handling.
 func (dl *DouyinLive) configureWebSocket(conn *websocket.Conn) {
 	if conn == nil {
 		return
@@ -852,6 +960,8 @@ func (dl *DouyinLive) configureWebSocket(conn *websocket.Conn) {
 }
 
 // buildWebsocketURL 基于当前上下文构建 WebSocket URL
+// buildWebsocketURL 生成带签名的抖音 WebSocket URL。
+// buildWebsocketURL builds the signed Douyin WebSocket URL.
 func (dl *DouyinLive) buildWebsocketURL() (string, error) {
 	fetchTime := time.Now().UnixNano() / int64(time.Millisecond)
 	roomInfo := dl.roomInfoSnapshot()
@@ -888,6 +998,8 @@ func (dl *DouyinLive) buildWebsocketURL() (string, error) {
 	), nil
 }
 
+// websocketDialContext 准备首次建连所需的 URL 和请求头。
+// websocketDialContext prepares the URL and headers for the initial dial.
 func (dl *DouyinLive) websocketDialContext() (string, http.Header, error) {
 	dl.contextMu.Lock()
 	defer dl.contextMu.Unlock()
@@ -902,6 +1014,8 @@ func (dl *DouyinLive) websocketDialContext() (string, http.Header, error) {
 	return url, dl.headers.Clone(), nil
 }
 
+// reconnectDialContext 准备重连所需的 URL 和请求头。
+// reconnectDialContext prepares the URL and headers for a reconnect dial.
 func (dl *DouyinLive) reconnectDialContext(changeUA bool, rebuildHTTP bool) (string, http.Header, error) {
 	dl.contextMu.Lock()
 	defer dl.contextMu.Unlock()
@@ -917,6 +1031,8 @@ func (dl *DouyinLive) reconnectDialContext(changeUA bool, rebuildHTTP bool) (str
 }
 
 // processMessages 处理消息
+// processMessages 持续读取上游 WebSocket 消息并按编码类型分发解析。
+// processMessages continuously reads upstream WebSocket messages and dispatches decoding by encoding type.
 func (dl *DouyinLive) processMessages() {
 	for dl.isLiveStatus() {
 		messageType, data, err := dl.readMessage()
@@ -957,6 +1073,8 @@ func (dl *DouyinLive) processMessages() {
 }
 
 // readMessage 读取消息
+// readMessage 从当前 WebSocket 连接读取一条消息。
+// readMessage reads one message from the current WebSocket connection.
 func (dl *DouyinLive) readMessage() (int, []byte, error) {
 	dl.mu.Lock()
 	conn := dl.conn
@@ -968,6 +1086,8 @@ func (dl *DouyinLive) readMessage() (int, []byte, error) {
 	return conn.ReadMessage()
 }
 
+// writeBinaryMessage 串行写入二进制 WebSocket 消息。
+// writeBinaryMessage serially writes a binary WebSocket message.
 func (dl *DouyinLive) writeBinaryMessage(data []byte) error {
 	dl.writeMu.Lock()
 	defer dl.writeMu.Unlock()
@@ -986,6 +1106,8 @@ func (dl *DouyinLive) writeBinaryMessage(data []byte) error {
 	return conn.WriteMessage(websocket.BinaryMessage, data)
 }
 
+// sendPing 向上游 WebSocket 发送 ping 控制帧。
+// sendPing sends a ping control frame to the upstream WebSocket.
 func (dl *DouyinLive) sendPing() error {
 	dl.writeMu.Lock()
 	defer dl.writeMu.Unlock()
@@ -1005,6 +1127,8 @@ func (dl *DouyinLive) sendPing() error {
 	return conn.WriteControl(websocket.PingMessage, []byte("ping"), deadline)
 }
 
+// startHeartbeatLoop 启动 ping 心跳和 HTTP 兜底状态检查循环。
+// startHeartbeatLoop starts the ping heartbeat and fallback HTTP status-check loop.
 func (dl *DouyinLive) startHeartbeatLoop() {
 	dl.stopHeartbeatLoop()
 
@@ -1060,6 +1184,8 @@ func (dl *DouyinLive) startHeartbeatLoop() {
 	}()
 }
 
+// shouldCloseAfterStatusCheck 根据连续状态检查结果判断是否应关闭连接。
+// shouldCloseAfterStatusCheck decides whether to close the connection based on repeated status checks.
 func (dl *DouyinLive) shouldCloseAfterStatusCheck(isLive bool) bool {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -1072,6 +1198,8 @@ func (dl *DouyinLive) shouldCloseAfterStatusCheck(isLive bool) bool {
 	return shouldClose
 }
 
+// stopHeartbeatLoop 停止心跳循环并等待 goroutine 退出。
+// stopHeartbeatLoop stops the heartbeat loop and waits for its goroutine to exit.
 func (dl *DouyinLive) stopHeartbeatLoop() {
 	dl.mu.Lock()
 	stopCh := dl.heartbeatStopCh
@@ -1096,6 +1224,8 @@ func (dl *DouyinLive) stopHeartbeatLoop() {
 	}
 }
 
+// closeCurrentConnection 关闭当前 WebSocket 连接并发送 close 控制帧。
+// closeCurrentConnection closes the current WebSocket connection and sends a close control frame.
 func (dl *DouyinLive) closeCurrentConnection(code int, reason string) {
 	dl.mu.Lock()
 	conn := dl.conn
@@ -1116,18 +1246,24 @@ func (dl *DouyinLive) closeCurrentConnection(code int, reason string) {
 }
 
 // handleGzipMessage 处理 GZIP 消息
+// handleGzipMessage 解压并解析 gzip 编码的 PushFrame 载荷。
+// handleGzipMessage decompresses and decodes a gzip-encoded PushFrame payload.
 func (dl *DouyinLive) handleGzipMessage(pushFrame *new_douyin.Webcast_Im_PushFrame, response *new_douyin.Webcast_Im_Response, controlMsg *new_douyin.Webcast_Im_ControlMessage) {
 	if err := dl.decodeGzipResponse(pushFrame.Payload, pushFrame, response, controlMsg); err != nil {
 		dl.logger.Warn("解析 GZIP Response 失败", "live_id", dl.liveID, "payload_len", len(pushFrame.Payload), "err", err)
 	}
 }
 
+// handlePlainMessage 解析未压缩的 PushFrame 载荷。
+// handlePlainMessage decodes an uncompressed PushFrame payload.
 func (dl *DouyinLive) handlePlainMessage(pushFrame *new_douyin.Webcast_Im_PushFrame, response *new_douyin.Webcast_Im_Response, controlMsg *new_douyin.Webcast_Im_ControlMessage) {
 	if err := dl.decodeResponse(pushFrame.Payload, pushFrame, response, controlMsg); err != nil {
 		dl.logger.Warn("解析 Response 失败", "live_id", dl.liveID, "payload_len", len(pushFrame.Payload), "err", err)
 	}
 }
 
+// decodeResponse 反序列化响应、按需 ACK，并分发其中的业务消息。
+// decodeResponse unmarshals a response, sends ACK when needed, and dispatches contained messages.
 func (dl *DouyinLive) decodeResponse(data []byte, pushFrame *new_douyin.Webcast_Im_PushFrame, response *new_douyin.Webcast_Im_Response, controlMsg *new_douyin.Webcast_Im_ControlMessage) error {
 	*response = new_douyin.Webcast_Im_Response{}
 	if err := proto.Unmarshal(data, response); err != nil {
@@ -1147,6 +1283,8 @@ func (dl *DouyinLive) decodeResponse(data []byte, pushFrame *new_douyin.Webcast_
 	return nil
 }
 
+// decodeGzipResponse 解压 gzip 响应并复用普通响应解析流程。
+// decodeGzipResponse decompresses a gzip response and reuses the normal response decoder.
 func (dl *DouyinLive) decodeGzipResponse(data []byte, pushFrame *new_douyin.Webcast_Im_PushFrame, response *new_douyin.Webcast_Im_Response, controlMsg *new_douyin.Webcast_Im_ControlMessage) error {
 	buf := dl.bufferPool.Get().(*bytes.Buffer)
 	buf.Reset()
@@ -1175,6 +1313,8 @@ func (dl *DouyinLive) decodeGzipResponse(data []byte, pushFrame *new_douyin.Webc
 }
 
 // sendAck 发送 ACK 消息
+// sendAck 向上游发送 PushFrame ACK。
+// sendAck sends a PushFrame ACK to the upstream server.
 func (dl *DouyinLive) sendAck(logID uint64, internalExt string) {
 	ackFrame := &new_douyin.Webcast_Im_PushFrame{
 		LogID:       logID,
@@ -1200,6 +1340,8 @@ func (dl *DouyinLive) sendAck(logID uint64, internalExt string) {
 }
 
 // handleSingleMessage 处理单条消息
+// handleSingleMessage 处理单条业务消息，并识别下播控制消息。
+// handleSingleMessage handles one business message and detects live-end control messages.
 func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 	controlMsg *new_douyin.Webcast_Im_ControlMessage) {
 	if dl.isManualClose() || !dl.isLiveStatus() {
@@ -1222,6 +1364,8 @@ func (dl *DouyinLive) handleSingleMessage(msg *new_douyin.Webcast_Im_Message,
 	dl.emitEvent(msg, nil)
 }
 
+// reconnectPlan 根据失败原因和次数计算重连延迟及刷新策略。
+// reconnectPlan computes reconnect delay and refresh strategy from failure reason and count.
 func (dl *DouyinLive) reconnectPlan(reason string, failureCount int, baseDelay time.Duration, allowUARefresh bool) (delay time.Duration, changeUA bool, rebuildHTTP bool) {
 	// 指数退避：delay = baseDelay * 2^(failureCount-1)
 	// 失败次数越多，等待时间越长，避免频繁重试触发风控
@@ -1264,6 +1408,8 @@ func (dl *DouyinLive) reconnectPlan(reason string, failureCount int, baseDelay t
 }
 
 // max 是 time.Duration 版本的 max 函数
+// max 返回两个 duration 中较大的一个。
+// max returns the larger of two durations.
 func max(a, b time.Duration) time.Duration {
 	if a > b {
 		return a
@@ -1272,6 +1418,8 @@ func max(a, b time.Duration) time.Duration {
 }
 
 // reconnectDecision 描述重连策略
+// reconnectDecision 将读错误转换为重连决策。
+// reconnectDecision converts a read error into a reconnect decision.
 func (dl *DouyinLive) reconnectDecision(err error) (reason string, shouldRetry bool, delay time.Duration, allowUARefresh bool) {
 	if dl.isManualClose() {
 		return "manual_close", false, 0, false
@@ -1306,7 +1454,9 @@ func (dl *DouyinLive) reconnectDecision(err error) (reason string, shouldRetry b
 	return "network_or_unknown", true, baseReconnectDelay, true
 }
 
-// 修改 handleReadError 方法，使用库自带方法判断错误
+// handleReadError 判断读错误是否需要重连。
+// handleReadError 判断读错误是否需要重连并执行重连流程。
+// handleReadError decides whether a read error should reconnect and runs the reconnect flow.
 func (dl *DouyinLive) handleReadError(err error) bool {
 	// 如果是手动关闭，不进行重连
 	if dl.isManualClose() {
@@ -1348,7 +1498,9 @@ func (dl *DouyinLive) handleReadError(err error) bool {
 	return dl.reconnect(defaultMaxRetries, changeUA, rebuildHTTP)
 }
 
-// 优化后的 reconnect 方法
+// reconnect 按退避策略重建上游 WebSocket 连接。
+// reconnect 按退避策略重建上游 WebSocket 连接。
+// reconnect rebuilds the upstream WebSocket connection with backoff.
 func (dl *DouyinLive) reconnect(attempts int, changeUA bool, rebuildHTTP bool) bool {
 	// 如果是手动关闭，不进行重连
 	if dl.isManualClose() {
@@ -1439,6 +1591,8 @@ func (dl *DouyinLive) reconnect(attempts int, changeUA bool, rebuildHTTP bool) b
 }
 
 // cleanup 清理资源
+// cleanup 释放当前连接、心跳和缓存资源。
+// cleanup releases the current connection, heartbeat loop, and cache resources.
 func (dl *DouyinLive) cleanup() {
 	dl.stopHeartbeatLoop()
 
@@ -1455,6 +1609,8 @@ func (dl *DouyinLive) cleanup() {
 }
 
 // emitEvent 触发事件，遍历处理所有有效处理器
+// emitEvent 向旧版原始订阅者和新版标准化订阅者分发事件。
+// emitEvent dispatches events to legacy raw subscribers and normalized message subscribers.
 func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto.Message) {
 	if msg == nil {
 		return
@@ -1501,6 +1657,8 @@ func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto
 	})
 }
 
+// hasEventHandler 判断旧版订阅 ID 是否仍然有效。
+// hasEventHandler reports whether a legacy subscription ID is still active.
 func (dl *DouyinLive) hasEventHandler(id string) bool {
 	if id == "" {
 		return false
@@ -1518,6 +1676,8 @@ func (dl *DouyinLive) hasEventHandler(id string) bool {
 }
 
 // Subscribe 订阅事件，生成唯一ID
+// Subscribe 订阅原始抖音消息和可选解析结果。
+// Subscribe subscribes to raw Douyin messages and their optional parsed result.
 func (dl *DouyinLive) Subscribe(handler func(*new_douyin.Webcast_Im_Message, proto.Message)) string {
 	if handler == nil {
 		return ""
@@ -1534,6 +1694,8 @@ func (dl *DouyinLive) Subscribe(handler func(*new_douyin.Webcast_Im_Message, pro
 }
 
 // Unsubscribe 取消订阅事件，通过ID查找并移除
+// Unsubscribe 通过订阅 ID 取消原始消息或标准化消息订阅。
+// Unsubscribe cancels a raw-message or normalized-message subscription by ID.
 func (dl *DouyinLive) Unsubscribe(id string) {
 	dl.eventBus().unsubscribe(id)
 

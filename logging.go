@@ -1,9 +1,12 @@
 package douyinLive
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
+	"net/url"
 	"strings"
 )
 
@@ -103,6 +106,40 @@ func formatLogMessage(msg string, args ...interface{}) string {
 		parts = append(parts, key+"="+value)
 	}
 	return strings.Join(parts, " ")
+}
+
+func logFlowArgs(stage, step string, args ...interface{}) []interface{} {
+	flowArgs := make([]interface{}, 0, 4+len(args))
+	flowArgs = append(flowArgs, "stage", stage, "step", step)
+	flowArgs = append(flowArgs, args...)
+	return flowArgs
+}
+
+func websocketHostForLog(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" {
+		return "<unknown>"
+	}
+	return parsed.Host
+}
+
+func classifyReadError(err error) string {
+	if err == nil {
+		return "none"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "i/o timeout"):
+		return "timeout"
+	case strings.Contains(text, "use of closed network connection"):
+		return "closed_network_connection"
+	default:
+		return "network_or_unknown"
+	}
 }
 
 // SlogLogger 将 slog.Logger 适配到 NewDouyinLive 接受的旧 logger 接口。

@@ -83,12 +83,12 @@ func GenerateJitterNanos(maxDuration time.Duration) int64 {
 // GenerateMsToken 生成随机 msToken。
 // GenerateMsToken generates a random msToken value.
 func GenerateMsToken(length int) string {
-	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+="
+	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 	b := make([]byte, length)
 	for i := range b {
 		b[i] = charset[randomIndex(len(charset))]
 	}
-	return string(b) + "=_"
+	return string(b)
 }
 
 // GzipCompressAndBase64Encode 将数据 gzip 压缩后进行 Base64 编码。
@@ -114,7 +114,7 @@ func NewOrderedMap(roomID, pushID string) *orderedmap.OrderedMap {
 	smap.Set("live_id", "1")
 	smap.Set("aid", "6383")
 	smap.Set("version_code", "180800")
-	smap.Set("webcast_sdk_version", "1.0.14-beta.0")
+	smap.Set("webcast_sdk_version", "1.0.15")
 	smap.Set("room_id", roomID)
 	smap.Set("sub_room_id", "")
 	smap.Set("sub_channel_id", "")

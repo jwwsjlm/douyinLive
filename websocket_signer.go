@@ -13,7 +13,6 @@ import (
 
 	tikhub "github.com/jwwsjlm/Tikhub"
 	"github.com/jwwsjlm/douyinLive/v2/jsScript"
-	"github.com/jwwsjlm/douyinLive/v2/utils"
 )
 
 const (
@@ -57,9 +56,7 @@ func (localWebsocketSigner) Name() string {
 // Sign 使用本地 JS 生成 WebSocket 签名。
 // Sign generates a WebSocket signature using the local JavaScript implementation.
 func (localWebsocketSigner) Sign(_ context.Context, roomID, userUniqueID, _ string) (string, error) {
-	return jsScript.ExecuteJS(utils.GetxMSStub(
-		utils.NewOrderedMap(roomID, userUniqueID),
-	)), nil
+	return jsScript.ExecuteJS(newWebsocketSignatureParams(roomID, userUniqueID).XMSStub()), nil
 }
 
 // UpdateUserAgent 保持接口一致，本地签名器的 UA 在 LoadGoja 时设置。

@@ -21,38 +21,36 @@ func main() {
 		fmt.Fprintln(os.Stderr, "解决方法: 在同目录下创建 config.yaml，或使用命令行参数 douyinLive --port 1088")
 		os.Exit(1)
 	}
-	logger := newAppLogger(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slogLevel(cfg.Log.Level),
-	})))
+	logger := newAppLogger(slog.New(slog.NewTextHandler(os.Stdout, appLogHandlerOptions(cfg.Log.Level))))
 
 	// 创建应用实例
-	logger.Info("版本信息", "version", VersionString())
+	logger.Info("版本信息", "stage", "startup", "step", "version", "version", VersionString())
 
 	app, err := NewApp(context.Background(), cfg, logger)
 	if err != nil {
-		logger.Error("创建应用实例失败", "err", err)
+		logger.Error("创建应用实例失败", "stage", "startup", "step", "create_app", "err", err)
 		os.Exit(1)
 	}
 
 	// 启动应用
 	go func() {
 		if err := app.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("服务运行失败", "err", err)
+			logger.Error("服务运行失败", "stage", "startup", "step", "run_server", "err", err)
 			os.Exit(1)
 		}
 	}()
 	<-app.ready
-	logger.Info("WebSocket 服务启动成功", "addr", "ws://127.0.0.1:"+app.runningPort)
+	logger.Info("WebSocket 服务启动成功", "stage", "startup", "step", "listen", "addr", "ws://127.0.0.1:"+app.runningPort)
 
 	// 等待终止信号，实现优雅关闭
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	logger.Info("接收到终止信号，开始优雅关闭")
+	logger.Info("接收到终止信号，开始优雅关闭", "stage", "shutdown", "step", "signal")
 
 	if err := app.Shutdown(); err != nil {
-		logger.Error("服务关闭失败", "err", err)
+		logger.Error("服务关闭失败", "stage", "shutdown", "step", "close_server", "err", err)
 		os.Exit(1)
 	}
-	logger.Info("服务已成功关闭")
+	logger.Info("服务已成功关闭", "stage", "shutdown", "step", "done")
 }

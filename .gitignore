@@ -31,6 +31,12 @@ config*.local.yaml
 # Logs
 *.log
 
+# Local captures / reverse-engineering exports
+/captures/
+*.har
+*.network-request
+*.network-response
+
 # Go
 *.test
 *.out

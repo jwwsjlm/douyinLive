@@ -489,6 +489,53 @@ APP_SIGN_PROVIDER=tikhub APP_TIKHUB_KEY=YOUR_TIKHUB_KEY ./douyinLive
 
 TikHub API Key 可以在 [TikHub 注册页](https://user.tikhub.io/register) 注册账号后，到 [TikHub 用户中心](https://user.tikhub.io/) 创建 API Key / API Token。Key 属于敏感信息，不要提交到仓库。
 
+### 日志等级与 Issue 排查
+
+日志使用 Go `slog` 文本格式，默认输出 `info` 及以上级别。排查连接、签名、心跳或重连问题时，请先临时开启 `debug`：
+
+```bash
+./douyinLive --config ./config.yaml --log-level debug
+```
+
+Windows：
+
+```powershell
+.\douyinLive.exe --config .\config.yaml --log-level debug
+```
+
+日志等级含义：
+
+- `debug`：详细排查信息，包括 `web/enter`、`im/fetch`、WebSocket URL 生成、签名输入、cursor/internal_ext、重连上下文等。提交连接类 Issue 时建议开启。
+- `info`：正常生命周期信息，例如服务启动、房间开始监听、WebSocket 连接成功、重连成功、正常关闭。
+- `warn`：可恢复异常，例如读取 WS 超时、心跳发送失败、一次直播状态兜底检测失败、准备重连。
+- `error`：不可自动恢复或最终失败，例如配置加载失败、房间状态刷新失败、连接最终失败。
+
+关键字段说明：
+
+- `stage`：失败发生的大阶段，例如 `startup`、`room_info`、`im_fetch`、`ws`。
+- `step`：阶段内的具体步骤，例如 `live_page_state`、`web_enter`、`prefetch`、`signature`、`build_url`、`dial`、`read`、`decode_push_frame`。
+- `live_id`：用户传入的直播间标识。
+- `room_id`：网页解析到的真实直播间房间 ID。
+- `user_unique_id`：网页侧用于 IM/WS 的用户唯一 ID。
+- `reason`：重连或读取失败的分类，例如 `timeout`、`closed_network_connection`、`network_or_unknown`。
+- `status`、`status_code`、`content_type`、`raw_len`：HTTP 或 WS 响应状态，常用于判断是接口空响应、protobuf 解析失败还是握手失败。
+
+提交 Issue 时建议贴这几段日志：
+
+- 程序启动后的版本行：包含 `version`、`source`、`signProvider`。
+- 第一次出现 `stage=room_info` 到 `stage=ws step=dial` 的完整日志。
+- 发生断线时，从第一条 `读取 WebSocket 消息失败` 到后续 `检测到需重连`、`重连成功` 或 `连接最终失败` 的日志。
+- 如果是签名问题，请贴 `stage=ws step=signature` 和 `stage=ws step=build_url`，但不要贴完整 Cookie、完整 URL、完整 `signature`、完整 `msToken`。
+
+提交前请打码：
+
+- `Cookie`
+- `msToken`
+- `a_bogus`
+- `signature`
+- `sessionid` / `sid_guard` / `ttwid`
+- 任何账号、手机号、邮箱或私密直播间信息
+
 ### CLI 参数速查
 
 ```text

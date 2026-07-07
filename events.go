@@ -8,9 +8,11 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// emitEvent 触发事件，遍历处理所有有效处理器
 // emitEvent 向旧版原始订阅者和新版标准化订阅者分发事件。
 // emitEvent dispatches events to legacy raw subscribers and normalized message subscribers.
+// 参数/Parameters:
+//   - msg: 抖音原始 protobuf 消息。 Raw Douyin protobuf message.
+//   - parsed: 可选的解析后 protobuf 消息。 Optional parsed protobuf payload.
 func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto.Message) {
 	if msg == nil {
 		return
@@ -59,6 +61,8 @@ func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto
 
 // hasEventHandler 判断旧版订阅 ID 是否仍然有效。
 // hasEventHandler reports whether a legacy subscription ID is still active.
+// 参数/Parameters:
+//   - id: 旧版订阅 ID。 Legacy subscription ID.
 func (dl *DouyinLive) hasEventHandler(id string) bool {
 	if id == "" {
 		return false
@@ -75,9 +79,10 @@ func (dl *DouyinLive) hasEventHandler(id string) bool {
 	return false
 }
 
-// Subscribe 订阅事件，生成唯一ID
 // Subscribe 订阅原始抖音消息和可选解析结果。
 // Subscribe subscribes to raw Douyin messages and their optional parsed result.
+// 参数/Parameters:
+//   - handler: 接收原始消息和可选解析结果的回调。 Callback receiving the raw message and optional parsed payload.
 func (dl *DouyinLive) Subscribe(handler func(*new_douyin.Webcast_Im_Message, proto.Message)) string {
 	if handler == nil {
 		return ""
@@ -93,9 +98,10 @@ func (dl *DouyinLive) Subscribe(handler func(*new_douyin.Webcast_Im_Message, pro
 	return id
 }
 
-// Unsubscribe 取消订阅事件，通过ID查找并移除
 // Unsubscribe 通过订阅 ID 取消原始消息或标准化消息订阅。
 // Unsubscribe cancels a raw-message or normalized-message subscription by ID.
+// 参数/Parameters:
+//   - id: Subscribe 或标准化订阅方法返回的订阅 ID。 Subscription ID returned by Subscribe or normalized subscription APIs.
 func (dl *DouyinLive) Unsubscribe(id string) {
 	dl.eventBus().unsubscribe(id)
 

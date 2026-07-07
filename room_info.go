@@ -3,6 +3,7 @@ package douyinLive
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,7 +21,10 @@ type roomInfoSnapshot struct {
 	liveName    string
 	title       string
 	avatarThumb string
+	anchorOnly  bool
 }
+
+var livePageRoomStatusPattern = regexp.MustCompile(`"id_str"\s*:\s*"?(\d+)"?\s*,\s*"status"\s*:\s*(\d+)\s*,\s*"status_str"\s*:\s*"?([^",}]*)"?`)
 
 // GetName 返回直播间主播名称。
 // GetName returns the live room owner name.
@@ -40,6 +44,12 @@ func (dl *DouyinLive) GetAvatarThumb() string {
 	return dl.roomInfoSnapshot().avatarThumb
 }
 
+// HasAnchorOnlyPageIdentity ????????? roomInfo.anchor ??? roomInfo.room?
+// HasAnchorOnlyPageIdentity reports whether the page returned roomInfo.anchor without roomInfo.room.
+func (dl *DouyinLive) HasAnchorOnlyPageIdentity() bool {
+	return dl.roomInfoSnapshot().anchorOnly
+}
+
 // roomInfoSnapshot 返回当前房间信息的线程安全快照。
 // roomInfoSnapshot returns a thread-safe snapshot of the current room metadata.
 func (dl *DouyinLive) roomInfoSnapshot() roomInfoSnapshot {
@@ -53,11 +63,18 @@ func (dl *DouyinLive) roomInfoSnapshot() roomInfoSnapshot {
 		liveName:    dl.liveName,
 		title:       dl.title,
 		avatarThumb: dl.avatarThumb,
+		anchorOnly:  dl.anchorOnlyPageIdentity,
 	}
 }
 
 // updateRoomInfo 更新 WebSocket 和输出所需的房间信息。
 // updateRoomInfo updates room metadata required by WebSocket signing and output.
+// 参数/Parameters:
+//   - roomID: 抖音长房间 ID。 Douyin long room ID.
+//   - pushID: WebSocket 签名所需的用户唯一 ID。 User unique ID required for WebSocket signing.
+//   - liveName: 主播昵称。 Live owner nickname.
+//   - title: 直播间标题。 Live room title.
+//   - avatarThumb: 主播头像缩略图地址。 Live owner avatar thumbnail URL.
 func (dl *DouyinLive) updateRoomInfo(roomID, pushID, liveName, title, avatarThumb string) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
@@ -67,19 +84,79 @@ func (dl *DouyinLive) updateRoomInfo(roomID, pushID, liveName, title, avatarThum
 	dl.liveName = liveName
 	dl.title = title
 	dl.avatarThumb = avatarThumb
+	dl.anchorOnlyPageIdentity = roomID == "" && (liveName != "" || avatarThumb != "")
 }
 
 func (dl *DouyinLive) updateRoomInfoFromEnter(info roomInfoSnapshot) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
 
-	dl.roomID = info.roomID
+	if info.roomID != "" {
+		dl.roomID = info.roomID
+		dl.anchorOnlyPageIdentity = false
+	}
+	if info.anchorOnly {
+		dl.roomID = ""
+		dl.anchorOnlyPageIdentity = true
+	}
 	if dl.pushID == "" {
 		dl.pushID = info.pushID
 	}
-	dl.liveName = info.liveName
-	dl.title = info.title
-	dl.avatarThumb = info.avatarThumb
+	if info.liveName != "" {
+		dl.liveName = info.liveName
+	}
+	if info.title != "" {
+		dl.title = info.title
+	}
+	if info.avatarThumb != "" {
+		dl.avatarThumb = info.avatarThumb
+	}
+}
+
+// updateRoomInfoFromLivePage 合并直播页内嵌状态中的房间信息。
+// updateRoomInfoFromLivePage merges room metadata parsed from the embedded live-page state.
+// 参数/Parameters:
+//   - info: 从直播页 HTML 解析出的房间信息。 Room metadata parsed from the live page HTML.
+func (dl *DouyinLive) updateRoomInfoFromLivePage(info roomInfoSnapshot) {
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+
+	if info.anchorOnly {
+		dl.roomID = ""
+		dl.anchorOnlyPageIdentity = true
+	} else if info.roomID != "" {
+		dl.roomID = info.roomID
+		dl.anchorOnlyPageIdentity = false
+	}
+	if info.pushID != "" {
+		dl.pushID = info.pushID
+	}
+	if info.liveName != "" {
+		dl.liveName = info.liveName
+	}
+	if info.title != "" {
+		dl.title = info.title
+	}
+	if info.avatarThumb != "" {
+		dl.avatarThumb = info.avatarThumb
+	}
+}
+
+// logMissingLiveName 记录已拿到连接必需参数但缺少主播昵称的情况。
+// logMissingLiveName records when required connection parameters are available but the owner nickname is missing.
+// 参数/Parameters:
+//   - source: 触发缺失日志的数据来源。 Data source that triggered the missing-name log.
+//   - info: 当前房间信息快照。 Current room metadata snapshot.
+func (dl *DouyinLive) logMissingLiveName(source string, info roomInfoSnapshot) {
+	if dl.logger == nil {
+		return
+	}
+	dl.logger.Warn("直播间名称未获取到，已继续连接",
+		"live_id", dl.liveID,
+		"room_id", info.roomID,
+		"user_unique_id", info.pushID,
+		"source", source,
+	)
 }
 
 func (dl *DouyinLive) setLivePageIDs(roomID, userUniqueID string) {
@@ -100,6 +177,8 @@ func (dl *DouyinLive) setLivePageIDs(roomID, userUniqueID string) {
 
 // parseRoomInfo 从 web/enter 响应中提取房间 ID、push ID 和展示信息。
 // parseRoomInfo extracts room ID, push ID, and display metadata from a web/enter response.
+// 参数/Parameters:
+//   - body: web/enter 接口返回体。 Response body returned by the web/enter endpoint.
 func parseRoomInfo(body string) (roomInfoSnapshot, error) {
 	roomID := firstNonEmptyGJSON(body,
 		"data.data.0.id_str",
@@ -125,10 +204,13 @@ func parseRoomInfo(body string) (roomInfoSnapshot, error) {
 	)
 	avatarThumb := firstNonEmptyGJSON(body,
 		"data.user.avatar_thumb.url_list.2",
+		"data.user.avatar_thumb.url_list.1",
 		"data.user.avatar_thumb.url_list.0",
 		"data.data.0.owner.avatar_thumb.url_list.2",
+		"data.data.0.owner.avatar_thumb.url_list.1",
 		"data.data.0.owner.avatar_thumb.url_list.0",
 		"data.room.owner.avatar_thumb.url_list.2",
+		"data.room.owner.avatar_thumb.url_list.1",
 		"data.room.owner.avatar_thumb.url_list.0",
 	)
 
@@ -145,9 +227,252 @@ func parseRoomInfo(body string) (roomInfoSnapshot, error) {
 	}, nil
 }
 
-// firstNonEmptyGJSON 按路径顺序返回第一个非空 gjson 字符串值。
-// firstNonEmptyGJSON returns the first non-empty gjson string value for the given paths.
+// parseRoomInfoFromLivePage 从直播页 SSR 内嵌状态中提取房间展示信息。
+// parseRoomInfoFromLivePage extracts display metadata from the live page's embedded SSR state.
+// 参数/Parameters:
+//   - body: 直播间页面 HTML 内容。 Live-room page HTML content.
+//
+// parseRoomInfoFromLivePage ???? SSR ??????????????
+// parseRoomInfoFromLivePage extracts display metadata from the live page's embedded SSR state.
+// ??/Parameters:
+//   - body: ????? HTML ??? Live-room page HTML content.
+func parseRoomInfoFromLivePage(body string) roomInfoSnapshot {
+	for _, candidate := range livePageStateCandidates(body) {
+		if roomInfoObj := roomInfoObjectFromLivePageState(candidate); roomInfoObj != "" {
+			hasRoomObj := roomInfoObjectHasRoomIdentity(roomInfoObj)
+			hasAnchorObj := roomInfoObjectHasAnchorIdentity(roomInfoObj)
+			roomID := firstNonEmptyGJSON(roomInfoObj,
+				"room.id_str",
+				"room.id",
+			)
+			info := roomInfoSnapshot{
+				roomID: roomID,
+				pushID: firstNonEmptyGJSON(roomInfoObj,
+					"anchor.id_str",
+					"anchor.id",
+					"room.owner.id_str",
+					"room.owner.id",
+					"room.owner_user_id_str",
+					"room.owner_user_id",
+					"owner.id_str",
+					"owner.id",
+				),
+				liveName: firstNonEmptyGJSON(roomInfoObj,
+					"anchor.nickname",
+					"room.owner.nickname",
+					"owner.nickname",
+				),
+				title: firstNonEmptyGJSON(roomInfoObj,
+					"room.title",
+					"title",
+				),
+				avatarThumb: firstNonEmptyGJSON(roomInfoObj,
+					"anchor.avatar_thumb.url_list.2",
+					"anchor.avatar_thumb.url_list.1",
+					"anchor.avatar_thumb.url_list.0",
+					"room.owner.avatar_thumb.url_list.2",
+					"room.owner.avatar_thumb.url_list.1",
+					"room.owner.avatar_thumb.url_list.0",
+					"owner.avatar_thumb.url_list.2",
+					"owner.avatar_thumb.url_list.1",
+					"owner.avatar_thumb.url_list.0",
+				),
+				anchorOnly: hasAnchorObj && !hasRoomObj,
+			}
+			if info.roomID != "" || info.pushID != "" || info.liveName != "" || info.title != "" || info.avatarThumb != "" || info.anchorOnly {
+				return info
+			}
+		}
+
+		roomObj := roomObjectFromLivePageState(candidate)
+		if roomObj == "" {
+			continue
+		}
+		info := roomInfoSnapshot{
+			roomID: firstNonEmptyGJSON(roomObj,
+				"id_str",
+				"id",
+			),
+			pushID: firstNonEmptyGJSON(roomObj,
+				"owner.id_str",
+				"owner.id",
+				"owner_user_id_str",
+				"owner_user_id",
+			),
+			liveName: firstNonEmptyGJSON(roomObj,
+				"owner.nickname",
+				"anchor.nickname",
+			),
+			title: firstNonEmptyGJSON(roomObj,
+				"title",
+			),
+			avatarThumb: firstNonEmptyGJSON(roomObj,
+				"owner.avatar_thumb.url_list.2",
+				"owner.avatar_thumb.url_list.1",
+				"owner.avatar_thumb.url_list.0",
+				"anchor.avatar_thumb.url_list.2",
+				"anchor.avatar_thumb.url_list.1",
+				"anchor.avatar_thumb.url_list.0",
+			),
+		}
+		if info.roomID != "" || info.pushID != "" || info.liveName != "" || info.title != "" || info.avatarThumb != "" {
+			return info
+		}
+	}
+	return roomInfoSnapshot{}
+}
+
+func livePageStateCandidates(body string) []string {
+	candidates := []string{body}
+	decoded := body
+	for i := 0; i < 6; i++ {
+		next := strings.NewReplacer(
+			`\\u0026`, "&",
+			`\u0026`, "&",
+			`\\\"`, `"`,
+			`\"`, `"`,
+		).Replace(decoded)
+		if next == decoded {
+			break
+		}
+		decoded = next
+		candidates = append(candidates, decoded)
+	}
+	return candidates
+}
+
+func roomInfoObjectFromLivePageState(body string) string {
+	var anchorOnlyFallback string
+	for _, marker := range []string{
+		`"roomStore":{"roomInfo":`,
+		`"roomInfo":`,
+	} {
+		searchFrom := 0
+		for {
+			relativeMarkerIdx := strings.Index(body[searchFrom:], marker)
+			if relativeMarkerIdx < 0 {
+				break
+			}
+			markerIdx := searchFrom + relativeMarkerIdx
+			openIdx := strings.Index(body[markerIdx+len(marker):], "{")
+			if openIdx < 0 {
+				searchFrom = markerIdx + len(marker)
+				continue
+			}
+			openIdx += markerIdx + len(marker)
+			obj := jsonObjectAt(body, openIdx)
+			if obj != "" {
+				if roomInfoObjectHasRoomIdentity(obj) {
+					return obj
+				}
+				if anchorOnlyFallback == "" && roomInfoObjectHasAnchorIdentity(obj) {
+					anchorOnlyFallback = obj
+				}
+			}
+			searchFrom = markerIdx + len(marker)
+		}
+	}
+	return anchorOnlyFallback
+}
+
+func roomInfoObjectHasIdentity(obj string) bool {
+	return roomInfoObjectHasRoomIdentity(obj) || roomInfoObjectHasAnchorIdentity(obj)
+}
+
+func roomInfoObjectHasRoomIdentity(obj string) bool {
+	return firstNonEmptyGJSON(obj, "room.id_str", "room.id") != ""
+}
+
+func roomInfoObjectHasAnchorIdentity(obj string) bool {
+	if !jsonObjectExists(obj, "anchor") {
+		return false
+	}
+	if firstNonEmptyGJSON(obj,
+		"anchor.id_str",
+		"anchor.id",
+		"anchor.sec_uid",
+		"anchor.nickname",
+		"anchor.avatar_thumb.url_list.0",
+	) != "" {
+		return true
+	}
+	return strings.TrimSpace(gjson.Get(obj, "anchor").Raw) != "{}"
+}
+
+func jsonObjectExists(obj, path string) bool {
+	raw := strings.TrimSpace(gjson.Get(obj, path).Raw)
+	return strings.HasPrefix(raw, "{") && strings.HasSuffix(raw, "}")
+}
+
+func roomObjectFromLivePageState(body string) string {
+	for _, marker := range []string{
+		`"roomStore":{"roomInfo":{"room":`,
+		`"roomInfo":{"room":`,
+		`"room":`,
+	} {
+		markerIdx := strings.Index(body, marker)
+		if markerIdx < 0 {
+			continue
+		}
+		openIdx := strings.Index(body[markerIdx+len(marker):], "{")
+		if openIdx < 0 {
+			continue
+		}
+		openIdx += markerIdx + len(marker)
+		if obj := jsonObjectAt(body, openIdx); obj != "" && gjson.Get(obj, "id_str").String() != "" {
+			return obj
+		}
+	}
+	return ""
+}
+
+func jsonObjectAt(body string, openIdx int) string {
+	if openIdx < 0 || openIdx >= len(body) || body[openIdx] != '{' {
+		return ""
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for idx := openIdx; idx < len(body); idx++ {
+		ch := body[idx]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == '"':
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return body[openIdx : idx+1]
+			}
+		}
+	}
+	return ""
+}
+
+// parseRoomIDFromLivePage 从直播间 HTML 中提取房间 ID。
+// parseRoomIDFromLivePage extracts the room ID from a live-room HTML page.
+// 参数/Parameters:
+//   - body: 直播间页面 HTML 内容。 Live-room page HTML content.
 func parseRoomIDFromLivePage(body string) string {
+	for _, candidate := range livePageStateCandidates(body) {
+		for _, match := range livePageRoomStatusPattern.FindAllStringSubmatch(candidate, -1) {
+			if len(match) >= 2 && match[1] != "" {
+				return match[1]
+			}
+		}
+	}
 	for _, marker := range []string{
 		`"room":{"id_str":"`,
 		`\"room\":{\"id_str\":\"`,
@@ -163,6 +488,7 @@ func parseRoomIDFromLivePage(body string) string {
 		`"roomId":"`,
 		`\"roomId\":\"`,
 		`"roomId":`,
+		"gift_effect_bg_",
 	} {
 		if value := digitsAfterMarker(body, marker); value != "" {
 			return value
@@ -186,27 +512,96 @@ func parseUserUniqueIDFromLivePage(body string) string {
 	return ""
 }
 
+type livePageStateSnapshot struct {
+	info              roomInfoSnapshot
+	userUniqueID      string
+	hasAnchorIdentity bool
+	isLive            bool
+	statusKnown       bool
+}
+
+func (s livePageStateSnapshot) hasRoomIdentity() bool {
+	return strings.TrimSpace(s.info.roomID) != ""
+}
+
+func (s livePageStateSnapshot) hasKnownPageIdentity() bool {
+	return s.hasRoomIdentity() || s.hasAnchorIdentity
+}
+
+// parseLivePageState 汇总直播页 SSR 状态。
+// 注意：网页里出现 user_unique_id 只能说明浏览器/访问者身份存在，不能证明直播间存在。
+// 只有解析到 room_id/id_str/gift_effect_bg_ 等房间身份后，才把页面视为有效直播间页面。
+func parseLivePageState(body string) livePageStateSnapshot {
+	state := livePageStateSnapshot{
+		info: parseRoomInfoFromLivePage(body),
+	}
+	state.hasAnchorIdentity = state.info.anchorOnly ||
+		strings.TrimSpace(state.info.liveName) != "" ||
+		strings.TrimSpace(state.info.avatarThumb) != "" ||
+		(state.info.roomID == "" && strings.TrimSpace(state.info.pushID) != "")
+	if state.info.roomID == "" && !state.info.anchorOnly {
+		state.info.roomID = parseRoomIDFromLivePage(body)
+	}
+	state.userUniqueID = parseUserUniqueIDFromLivePage(body)
+	if state.userUniqueID != "" {
+		state.info.pushID = state.userUniqueID
+	}
+	if state.info.anchorOnly {
+		state.isLive = false
+		state.statusKnown = true
+	} else if state.hasRoomIdentity() {
+		state.isLive, state.statusKnown = parseLiveStatusFromLivePage(body, state.info.roomID)
+	} else if state.hasAnchorIdentity {
+		state.isLive = false
+		state.statusKnown = true
+	}
+	return state
+}
+
 func parseLiveStatusFromLivePage(body, roomID string) (bool, bool) {
-	if roomID == "" {
-		return false, false
+	for _, candidate := range livePageStateCandidates(body) {
+		if roomObj := roomObjectFromLivePageState(candidate); roomObj != "" {
+			statusValue := gjson.Get(roomObj, "status")
+			candidateRoomID := firstNonEmptyGJSON(roomObj, "id_str", "id")
+			if statusValue.Exists() && (roomID == "" || candidateRoomID == roomID || strings.Contains(candidate, roomID)) {
+				return statusValue.Int() == 2, true
+			}
+		}
+		for _, match := range livePageRoomStatusPattern.FindAllStringSubmatch(candidate, -1) {
+			if len(match) < 3 {
+				continue
+			}
+			if roomID == "" || match[1] == roomID {
+				return match[2] == "2", true
+			}
+		}
+		if roomID != "" {
+			idx := strings.Index(candidate, roomID)
+			if idx >= 0 {
+				end := idx + 1200
+				if end > len(candidate) {
+					end = len(candidate)
+				}
+				segment := candidate[idx:end]
+				switch {
+				case strings.Contains(segment, `"status":2`) || strings.Contains(segment, `\"status\":2`):
+					return true, true
+				case strings.Contains(segment, `"status":`) || strings.Contains(segment, `\"status\":`):
+					return false, true
+				}
+			}
+		}
+		if livePageOfflineTextFound(candidate) && (roomID == "" || strings.Contains(candidate, roomID)) {
+			return false, true
+		}
 	}
-	idx := strings.Index(body, roomID)
-	if idx < 0 {
-		return false, false
-	}
-	end := idx + 1200
-	if end > len(body) {
-		end = len(body)
-	}
-	segment := body[idx:end]
-	switch {
-	case strings.Contains(segment, `"status":2`) || strings.Contains(segment, `\"status\":2`):
-		return true, true
-	case strings.Contains(segment, `"status":`) || strings.Contains(segment, `\"status\":`):
-		return false, true
-	default:
-		return false, false
-	}
+	return false, false
+}
+
+func livePageOfflineTextFound(body string) bool {
+	return strings.Contains(body, "直播已结束") ||
+		strings.Contains(body, "暂未开播") ||
+		strings.Contains(body, "未开播")
 }
 
 func digitsAfterMarker(body, marker string) string {
@@ -238,14 +633,9 @@ func firstNonEmptyGJSON(body string, paths ...string) string {
 	return ""
 }
 
-// fetchRoomEnterData 获取直播间接口数据（对齐 DouyinLiveRecorder 的 web/enter 逻辑）
-// fetchRoomEnterData 获取直播间入口数据，优先使用短时缓存。
-// fetchRoomEnterData fetches room enter data and prefers the short-lived cache.
+// fetchLivePageState 从直播页 HTML 中预取 room_id、user_unique_id 和直播状态。
+// fetchLivePageState preloads room_id, user_unique_id, and live status from the live page HTML.
 func (dl *DouyinLive) fetchLivePageState() error {
-	roomInfo := dl.roomInfoSnapshot()
-	if roomInfo.roomID != "" && roomInfo.pushID != "" {
-		return nil
-	}
 	ctx, cancel := dl.requestContext()
 	defer cancel()
 
@@ -274,16 +664,21 @@ func (dl *DouyinLive) fetchLivePageState() error {
 	if err != nil {
 		return err
 	}
-	roomID := parseRoomIDFromLivePage(body)
-	userUniqueID := parseUserUniqueIDFromLivePage(body)
-	if roomID == "" && userUniqueID == "" {
-		return errors.New("live page state not found")
+	pageState := parseLivePageState(body)
+	if !pageState.hasKnownPageIdentity() {
+		return fmt.Errorf("%w live_id=%s status=%d body_len=%d has_user_unique_id=%t",
+			errLivePageStateNotFound,
+			dl.liveID,
+			resp.GetStatusCode(),
+			len(body),
+			pageState.userUniqueID != "",
+		)
 	}
-	dl.setLivePageIDs(roomID, userUniqueID)
-	if isLive, ok := parseLiveStatusFromLivePage(body, roomID); ok {
-		dl.setLiveStatus(isLive)
+	dl.updateRoomInfoFromLivePage(pageState.info)
+	if pageState.statusKnown {
+		dl.setLiveStatus(pageState.isLive)
 	}
-	dl.logger.Debug("从直播间页面预取状态成功", "live_id", dl.liveID, "room_id", roomID, "user_unique_id", userUniqueID)
+	dl.logger.Debug("从直播间页面预取状态成功", "live_id", dl.liveID, "room_id", pageState.info.roomID, "user_unique_id", pageState.userUniqueID, "live_name", pageState.info.liveName, "title", pageState.info.title)
 	return nil
 }
 
@@ -306,14 +701,18 @@ func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 // refreshRoomEnterData force-fetches room enter data and refreshes room metadata.
 func (dl *DouyinLive) refreshRoomEnterData() (string, error) {
 	var body string
+	missingNameSource := "web_enter"
+	var livePageErr error
 
 	dl.logger.Debug("开始请求直播间信息", "live_id", dl.liveID)
 	if err := dl.fetchLivePageState(); err != nil {
+		livePageErr = err
 		dl.logger.Debug("从直播间页面预取状态失败，继续请求 web/enter", "live_id", dl.liveID, "err", err)
 	}
 	err := retry.Do(
 		func() error {
-			// 核心请求逻辑
+			// 核心请求逻辑。
+			// Core request flow.
 			reqBody, err := dl.doRequest()
 			if err != nil {
 				return err
@@ -327,8 +726,19 @@ func (dl *DouyinLive) refreshRoomEnterData() (string, error) {
 	)
 
 	if err != nil {
+		if roomNotFoundErr := dl.roomNotFoundErrorAfterRoomEnter(err, livePageErr); roomNotFoundErr != nil {
+			dl.logger.Warn("直播间不存在或页面未返回有效房间状态",
+				logFlowArgs("room_info", "room_not_found",
+					"live_id", dl.liveID,
+					"live_page_err", livePageErr,
+					"web_enter_err", err,
+				)...,
+			)
+			return "", roomNotFoundErr
+		}
 		if fallbackBody, ok := dl.roomEnterFallbackBody(err); ok {
 			dl.logger.Debug("web/enter 返回空响应，使用直播间页面状态兜底", "live_id", dl.liveID, "err", err)
+			missingNameSource = "live_page_fallback"
 			body = fallbackBody
 		} else {
 			dl.logger.Error("请求直播间信息失败，重试结束", "live_id", dl.liveID, "err", err)
@@ -340,6 +750,9 @@ func (dl *DouyinLive) refreshRoomEnterData() (string, error) {
 	if err != nil {
 		dl.logRoomInfoResponseSummary(body)
 		return "", err
+	}
+	if strings.TrimSpace(roomInfo.liveName) == "" {
+		dl.logMissingLiveName(missingNameSource, roomInfo)
 	}
 
 	dl.updateRoomInfoFromEnter(roomInfo)
@@ -459,12 +872,32 @@ func (dl *DouyinLive) shouldRetryRoomEnter(err error) bool {
 	if !shouldRetryRoomEnter(err) {
 		return false
 	}
+	if dl.isKnownOfflineStatus() {
+		return false
+	}
 	_, canFallback := dl.roomEnterFallbackBody(err)
 	return !canFallback
 }
 
 func isRoomInfoEmptyError(err error) bool {
 	return errors.Is(err, errRoomInfoEmpty) || (err != nil && strings.Contains(err.Error(), errRoomInfoEmpty.Error()))
+}
+
+func (dl *DouyinLive) roomNotFoundErrorAfterRoomEnter(err error, livePageErr error) error {
+	if !isRoomInfoEmptyError(err) {
+		return nil
+	}
+	if dl.isKnownOfflineStatus() {
+		return nil
+	}
+	roomInfo := dl.roomInfoSnapshot()
+	if roomInfo.roomID != "" || strings.TrimSpace(roomInfo.liveName) != "" || strings.TrimSpace(roomInfo.title) != "" || roomInfo.anchorOnly {
+		return nil
+	}
+	if errors.Is(livePageErr, errLivePageStateNotFound) {
+		return fmt.Errorf("%w: live_id=%s", ErrRoomNotFound, dl.liveID)
+	}
+	return nil
 }
 
 func (dl *DouyinLive) roomEnterFallbackBody(err error) (string, bool) {
@@ -475,17 +908,23 @@ func (dl *DouyinLive) roomEnterFallbackBody(err error) (string, bool) {
 	if roomInfo.roomID == "" || roomInfo.pushID == "" {
 		return "", false
 	}
+	liveName := roomInfo.liveName
+	if liveName == dl.liveID {
+		liveName = ""
+	}
 	return fmt.Sprintf(
 		`{"status_code":0,"data":{"data":[{"id_str":%q,"status":2,"owner":{"id_str":%q,"nickname":%q},"title":%q}]}}`,
 		roomInfo.roomID,
 		roomInfo.pushID,
-		roomInfo.liveName,
+		liveName,
 		roomInfo.title,
 	), true
 }
 
 // logRoomInfoResponseSummary 输出无法解析房间信息时的响应摘要。
 // logRoomInfoResponseSummary logs a response summary when room metadata cannot be parsed.
+// 参数/Parameters:
+//   - body: 无法解析的响应体。 Response body that could not be parsed.
 func (dl *DouyinLive) logRoomInfoResponseSummary(body string) {
 	if dl.logger == nil {
 		return
@@ -501,7 +940,6 @@ func (dl *DouyinLive) logRoomInfoResponseSummary(body string) {
 	)
 }
 
-// refreshLiveStatusFromAPI 通过房间接口刷新当前直播状态。
 // refreshLiveStatusFromAPI 通过 HTTP 接口刷新并保存直播状态。
 // refreshLiveStatusFromAPI refreshes and stores live status through the HTTP API.
 func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
@@ -523,12 +961,47 @@ func (dl *DouyinLive) fetchLiveStatusFromAPI() (bool, error) {
 		return false, err
 	}
 
+	if err := dl.fetchLivePageState(); err == nil {
+		roomInfo := dl.roomInfoSnapshot()
+		if isLive, known := dl.liveStatusSnapshot(); known {
+			if roomInfo.roomID != "" || strings.TrimSpace(roomInfo.liveName) != "" || strings.TrimSpace(roomInfo.title) != "" || roomInfo.anchorOnly {
+				step := "live_page_offline"
+				msg := "?????????????????"
+				if roomInfo.anchorOnly {
+					step = "account_offline_no_room"
+					msg = "????????????????????????"
+				}
+				if isLive {
+					step = "live_page_online"
+					msg = "??????????"
+				}
+				dl.logger.Info(msg,
+					logFlowArgs("room_info", step,
+						"live_id", dl.liveID,
+						"room_id", roomInfo.roomID,
+						"live_name", roomInfo.liveName,
+						"title", roomInfo.title,
+						"has_room", !roomInfo.anchorOnly && roomInfo.roomID != "",
+						"account_only", roomInfo.anchorOnly,
+					)...,
+				)
+				return isLive, nil
+			}
+		}
+	}
+
 	body, err := dl.refreshRoomEnterData()
 	if err != nil {
-		if isRoomInfoEmptyError(err) && dl.isLiveStatus() {
+		if isRoomInfoEmptyError(err) {
 			roomInfo := dl.roomInfoSnapshot()
-			if roomInfo.roomID != "" && roomInfo.pushID != "" {
-				return true, nil
+			isLive, known := dl.liveStatusSnapshot()
+			if known {
+				switch {
+				case isLive && roomInfo.roomID != "" && roomInfo.pushID != "":
+					return true, nil
+				case !isLive && (roomInfo.roomID != "" || strings.TrimSpace(roomInfo.liveName) != "" || strings.TrimSpace(roomInfo.title) != "" || roomInfo.anchorOnly):
+					return false, nil
+				}
 			}
 		}
 		return false, err
@@ -538,13 +1011,12 @@ func (dl *DouyinLive) fetchLiveStatusFromAPI() (bool, error) {
 	return status == 2, nil
 }
 
-// IsLive 检查直播间是否开播，并返回判活过程中的错误。
 // IsLive 检查直播间当前是否开播。
 // IsLive checks whether the live room is currently live.
 func (dl *DouyinLive) IsLive() (bool, error) {
 	isLive, err := dl.refreshLiveStatusFromAPI()
 	if err != nil {
-		dl.setLiveStatus(false)
+		dl.clearLiveStatus()
 		return false, err
 	}
 	return isLive, nil

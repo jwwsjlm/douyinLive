@@ -22,6 +22,8 @@ var (
 
 // LoadGoja 将 JavaScript 加载到 Goja 运行时，并设置签名所需的浏览器环境。
 // LoadGoja loads JavaScript into the Goja runtime and prepares the browser-like signing environment.
+// 参数/Parameters:
+//   - ua: 签名环境使用的浏览器 User-Agent。 Browser User-Agent used by the signing environment.
 func LoadGoja(ua string) error {
 	return LoadGojaWithCookie(ua, "")
 }
@@ -40,6 +42,8 @@ func LoadGojaWithCookie(ua, cookie string) error {
 
 // ExecuteJS 调用 JavaScript 中的 get_sign 函数生成签名。
 // ExecuteJS calls the JavaScript get_sign function to generate a signature.
+// 参数/Parameters:
+//   - signature: 传入 get_sign 的 X-MS-STUB 字符串。 X-MS-STUB string passed to get_sign.
 func ExecuteJS(signature string) string {
 	mu.Lock()
 	defer mu.Unlock()

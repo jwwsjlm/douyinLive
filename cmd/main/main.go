@@ -14,7 +14,8 @@ import (
 // main 加载配置、启动 WebSocket 服务，并在收到退出信号时优雅关闭。
 // main loads configuration, starts the WebSocket service, and gracefully shuts down on exit signals.
 func main() {
-	// 加载配置
+	// 加载配置。
+	// Load configuration.
 	cfg, err := NewConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "加载配置失败:", err)
@@ -23,7 +24,8 @@ func main() {
 	}
 	logger := newAppLogger(slog.New(slog.NewTextHandler(os.Stdout, appLogHandlerOptions(cfg.Log.Level))))
 
-	// 创建应用实例
+	// 创建应用实例。
+	// Create the application instance.
 	logger.Info("版本信息", "stage", "startup", "step", "version", "version", VersionString())
 
 	app, err := NewApp(context.Background(), cfg, logger)
@@ -32,7 +34,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 启动应用
+	// 启动应用。
+	// Start the application.
 	go func() {
 		if err := app.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("服务运行失败", "stage", "startup", "step", "run_server", "err", err)
@@ -42,7 +45,8 @@ func main() {
 	<-app.ready
 	logger.Info("WebSocket 服务启动成功", "stage", "startup", "step", "listen", "addr", "ws://127.0.0.1:"+app.runningPort)
 
-	// 等待终止信号，实现优雅关闭
+	// 等待终止信号，实现优雅关闭。
+	// Wait for termination signals and shut down gracefully.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

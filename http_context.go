@@ -36,6 +36,8 @@ func newHTTPUserAgent() string {
 
 // newHTTPClient 创建带浏览器伪装和超时设置的 HTTP 客户端。
 // newHTTPClient creates an HTTP client with browser impersonation and timeout settings.
+// 参数/Parameters:
+//   - userAgent: 请求使用的浏览器 User-Agent。 Browser User-Agent used for requests.
 func newHTTPClient(userAgent string) *req.Client {
 	return req.C().
 		ImpersonateChromeWithOS(req.BrowserOSWindows).
@@ -47,6 +49,8 @@ func newHTTPClient(userAgent string) *req.Client {
 
 // queryEscapeValue 按查询参数规则转义并保持空格为 %20。
 // queryEscapeValue escapes a query value while preserving spaces as %20.
+// 参数/Parameters:
+//   - value: 待转义的查询参数值。 Query value to escape.
 func queryEscapeValue(value string) string {
 	return strings.ReplaceAll(url.QueryEscape(value), "+", "%20")
 }
@@ -141,6 +145,8 @@ func (dl *DouyinLive) closeSignal() <-chan struct{} {
 
 // waitForReconnectDelay 等待重连延迟，并在关闭信号到来时提前退出。
 // waitForReconnectDelay waits for reconnect delay and exits early on close signal.
+// 参数/Parameters:
+//   - delay: 本次重连前等待的时长。 Duration to wait before the reconnect attempt.
 func (dl *DouyinLive) waitForReconnectDelay(delay time.Duration) bool {
 	if delay <= 0 {
 		select {
@@ -175,6 +181,8 @@ func (dl *DouyinLive) requestContext() (context.Context, context.CancelFunc) {
 
 // contextWithCloseSignal 将关闭通道转换为可取消上下文。
 // contextWithCloseSignal converts a close channel into a cancellable context.
+// 参数/Parameters:
+//   - closeCh: 关闭信号通道。 Close-signal channel.
 func contextWithCloseSignal(closeCh <-chan struct{}) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -213,6 +221,20 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() error {
 	if err := dl.fetchLivePageState(); err != nil {
 		dl.logger.Debug("从直播间页面预取状态失败，继续请求 web/enter", logFlowArgs("room_info", "live_page_state", "live_id", dl.liveID, "endpoint", "live_page", "fallback", "web_enter", "err", err)...)
 	}
+	if dl.isKnownOfflineStatus() {
+		roomInfo := dl.roomInfoSnapshot()
+		if roomInfo.roomID != "" || roomInfo.liveName != "" || roomInfo.title != "" {
+			dl.logger.Info("直播页显示当前未开播，暂不建立上游 WebSocket",
+				logFlowArgs("room_info", "live_page_offline",
+					"live_id", dl.liveID,
+					"room_id", roomInfo.roomID,
+					"live_name", roomInfo.liveName,
+					"title", roomInfo.title,
+				)...,
+			)
+			return nil
+		}
+	}
 
 	initialIMFetched := false
 	roomInfo := dl.roomInfoSnapshot()
@@ -248,8 +270,19 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() error {
 	return nil
 }
 
+// PrepareWebSocketContext 按网页流程预取直播页、im/fetch 和签名上下文。
+// PrepareWebSocketContext preloads live page, im/fetch, and signing context using the browser flow.
+func (dl *DouyinLive) PrepareWebSocketContext() error {
+	dl.contextMu.Lock()
+	defer dl.contextMu.Unlock()
+	return dl.prepareWebSocketContextLocked()
+}
+
 // refreshReconnectContextLocked 按重连策略刷新 UA、HTTP 客户端和房间上下文。
 // refreshReconnectContextLocked refreshes user agent, HTTP client, and room context for reconnects.
+// 参数/Parameters:
+//   - changeUA: 是否更换浏览器 User-Agent。 Whether to rotate the browser User-Agent.
+//   - rebuildHTTP: 是否重建 HTTP 客户端。 Whether to rebuild the HTTP client.
 func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP bool) error {
 	oldUserAgent := dl.userAgent
 	if changeUA {
@@ -279,7 +312,6 @@ func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP b
 	return nil
 }
 
-// getCookieParts 获取当前有效的 Cookie 键值对
 // getCookieParts 组装当前有效 Cookie 的键值片段。
 // getCookieParts builds key-value parts for the currently effective cookies.
 func (dl *DouyinLive) getCookieParts() []string {
@@ -300,7 +332,6 @@ func (dl *DouyinLive) getCookieParts() []string {
 	return parts
 }
 
-// getCookieString 获取 Cookie 字符串（用于 headers）
 // getCookieString 返回用于请求头的 Cookie 字符串。
 // getCookieString returns the Cookie header string.
 func (dl *DouyinLive) getCookieString() string {
@@ -311,6 +342,10 @@ func (dl *DouyinLive) getCookieString() string {
 	return strings.Join(parts, "; ")
 }
 
+// cookieValue 按名称读取当前有效 Cookie 值，优先使用用户配置的 Cookie。
+// cookieValue reads the effective cookie value by name, preferring user-configured cookies.
+// 参数/Parameters:
+//   - name: Cookie 名称。 Cookie name.
 func (dl *DouyinLive) cookieValue(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" || dl.cookieManager == nil {
@@ -333,22 +368,24 @@ func (dl *DouyinLive) cookieValue(name string) string {
 	return dl.additionalCookies[name]
 }
 
-// setupCookies 设置 Cookie，优先使用配置文件中的 Cookie
-// setupCookies 将当前 Cookie 写入请求头。
-// setupCookies writes the current cookie string into request headers.
+// shouldFetchTTWID 判断是否需要自动请求首页获取 ttwid。
+// shouldFetchTTWID reports whether ttwid should be fetched automatically from the homepage.
 func (dl *DouyinLive) shouldFetchTTWID() bool {
 	return !dl.hasConfiguredCookie()
 }
 
+// hasConfiguredCookie 判断用户是否显式配置了 Cookie。
+// hasConfiguredCookie reports whether the user explicitly configured a Cookie.
 func (dl *DouyinLive) hasConfiguredCookie() bool {
 	return dl.cookieManager != nil && strings.TrimSpace(dl.cookieManager.GetDouyinCookie()) != ""
 }
 
+// setupCookies 将当前 Cookie 写入请求头。
+// setupCookies writes the current cookie string into request headers.
 func (dl *DouyinLive) setupCookies() {
 	dl.headers.Set("Cookie", dl.getCookieString())
 }
 
-// fetchTTWID 获取 TTWID 和其他 Cookie
 // fetchTTWID 请求抖音首页并提取 ttwid 及附加 Cookie。
 // fetchTTWID requests the Douyin homepage and extracts ttwid plus extra cookies.
 func (dl *DouyinLive) fetchTTWID() error {
@@ -362,23 +399,27 @@ func (dl *DouyinLive) fetchTTWID() error {
 		return fmt.Errorf("请求TTWID失败: %w", err)
 	}
 
-	// 收集所有 Cookie
+	// 收集所有 Cookie。
+	// Collect all cookies.
 	cookies := make(map[string]string)
 	for _, c := range resp.Cookies() {
 		cookies[c.Name] = c.Value
 	}
 
-	// 刷新额外 Cookie，避免旧值残留
+	// 刷新额外 Cookie，避免旧值残留。
+	// Refresh extra cookies to avoid stale values.
 	dl.additionalCookies = make(map[string]string)
 
-	// 优先使用 ttwid，如果没有找到则报错
+	// 优先使用 ttwid，如果没有找到则报错。
+	// Prefer ttwid and fail when it is missing.
 	if ttwid, exists := cookies["ttwid"]; exists {
 		dl.ttwid = ttwid
 	} else {
 		return errors.New("未找到TTWID cookie")
 	}
 
-	// 存储其他重要 Cookie
+	// 存储其他重要 Cookie。
+	// Store the remaining useful cookies.
 	for name, value := range cookies {
 		if name != "ttwid" {
 			dl.additionalCookies[name] = value
@@ -387,9 +428,10 @@ func (dl *DouyinLive) fetchTTWID() error {
 	return nil
 }
 
-// doRequest 请求直播间入口信息。
-// doRequest 请求直播间入口信息。
-// doRequest requests the live room enter information.
+// chromeVersionFromUserAgent 从 User-Agent 中提取 Chrome 完整版本号。
+// chromeVersionFromUserAgent extracts the full Chrome version from User-Agent.
+// 参数/Parameters:
+//   - userAgent: 浏览器 User-Agent 字符串。 Browser User-Agent string.
 func chromeVersionFromUserAgent(userAgent string) string {
 	const marker = "Chrome/"
 	if idx := strings.Index(userAgent, marker); idx >= 0 {

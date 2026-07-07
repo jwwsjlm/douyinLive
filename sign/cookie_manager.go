@@ -36,6 +36,8 @@ func NewCookieManager() *CookieManager {
 
 // LoadConfig 从 YAML 文件加载 Cookie 配置。
 // LoadConfig loads cookie configuration from a YAML file.
+// 参数/Parameters:
+//   - path: YAML 配置文件路径。 YAML config file path.
 func (cm *CookieManager) LoadConfig(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -71,6 +73,8 @@ func (cm *CookieManager) GetDouyinCookie() string {
 
 // SetDouyinCookie 手动设置抖音 Cookie。
 // SetDouyinCookie sets the Douyin cookie manually.
+// 参数/Parameters:
+//   - cookie: 抖音 Cookie 字符串。 Douyin cookie string.
 func (cm *CookieManager) SetDouyinCookie(cookie string) {
 	if cm.config == nil {
 		cm.config = &cookieConfig{}
@@ -80,6 +84,8 @@ func (cm *CookieManager) SetDouyinCookie(cookie string) {
 
 // ParseCookies 将 Cookie 字符串解析为 http.Cookie 列表。
 // ParseCookies parses a cookie header string into http.Cookie values.
+// 参数/Parameters:
+//   - cookieStr: Cookie 请求头字符串。 Cookie header string.
 func (cm *CookieManager) ParseCookies(cookieStr string) []*http.Cookie {
 	var cookies []*http.Cookie
 	if cookieStr == "" {
@@ -103,6 +109,9 @@ func (cm *CookieManager) ParseCookies(cookieStr string) []*http.Cookie {
 
 // SetCookies 将 Cookie 字符串写入 jar。
 // SetCookies stores a cookie string in the jar for the given URL.
+// 参数/Parameters:
+//   - rawURL: Cookie 归属的 URL。 URL that owns the cookies.
+//   - cookieStr: Cookie 请求头字符串。 Cookie header string.
 func (cm *CookieManager) SetCookies(rawURL string, cookieStr string) error {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
@@ -116,6 +125,8 @@ func (cm *CookieManager) SetCookies(rawURL string, cookieStr string) error {
 
 // GetCookies 从 jar 中读取指定 URL 的 Cookie。
 // GetCookies returns cookies from the jar for the given URL.
+// 参数/Parameters:
+//   - rawURL: 要读取 Cookie 的 URL。 URL to read cookies for.
 func (cm *CookieManager) GetCookies(rawURL string) []*http.Cookie {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
@@ -127,6 +138,9 @@ func (cm *CookieManager) GetCookies(rawURL string) []*http.Cookie {
 
 // UpdateCookie 按名称更新配置中的 Cookie 值。
 // UpdateCookie updates a named cookie value in the configuration.
+// 参数/Parameters:
+//   - name: Cookie 名称。 Cookie name.
+//   - value: Cookie 新值。 New cookie value.
 func (cm *CookieManager) UpdateCookie(name, value string) {
 	if cm.config == nil {
 		cm.config = &cookieConfig{}
@@ -140,6 +154,8 @@ func (cm *CookieManager) UpdateCookie(name, value string) {
 
 // SaveConfig 将当前配置保存到文件。
 // SaveConfig saves the current configuration to a file.
+// 参数/Parameters:
+//   - path: YAML 配置文件路径。 YAML config file path.
 func (cm *CookieManager) SaveConfig(path string) error {
 	data, err := yaml.Marshal(cm.config)
 	if err != nil {
@@ -151,6 +167,8 @@ func (cm *CookieManager) SaveConfig(path string) error {
 
 // ValidateCookie 简单检查 Cookie 是否包含关键抖音字段。
 // ValidateCookie performs a lightweight check for important Douyin cookie fields.
+// 参数/Parameters:
+//   - cookieStr: 待检查的 Cookie 字符串。 Cookie string to validate.
 func (cm *CookieManager) ValidateCookie(cookieStr string) bool {
 	if cookieStr == "" {
 		return false
@@ -163,6 +181,8 @@ func (cm *CookieManager) ValidateCookie(cookieStr string) bool {
 
 // GetCookieNames 返回 Cookie 字符串中包含的所有名称。
 // GetCookieNames returns all cookie names contained in a cookie string.
+// 参数/Parameters:
+//   - cookieStr: Cookie 请求头字符串。 Cookie header string.
 func (cm *CookieManager) GetCookieNames(cookieStr string) []string {
 	var names []string
 	cookies := cm.ParseCookies(cookieStr)

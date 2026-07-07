@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// SM3 国密哈希算法实现
 // SM3 实现国密 SM3 哈希算法的内部状态。
 // SM3 stores the internal state for the SM3 hash implementation.
 type SM3 struct {
@@ -37,6 +36,9 @@ func (sm3 *SM3) Reset() {
 
 // leftRotate 对 uint32 执行循环左移。
 // leftRotate rotates a uint32 value left by n bits.
+// 参数/Parameters:
+//   - x: 待旋转的 32 位整数。 32-bit integer to rotate.
+//   - n: 左移位数。 Number of bits to rotate left.
 func leftRotate(x uint32, n int) uint32 {
 	n %= 32
 	return (x << n) | (x >> (32 - n))
@@ -44,6 +46,8 @@ func leftRotate(x uint32, n int) uint32 {
 
 // getTj 返回 SM3 压缩函数第 j 轮常量。
 // getTj returns the round constant for step j of the SM3 compression function.
+// 参数/Parameters:
+//   - j: SM3 压缩轮次，范围为 0-63。 SM3 compression round index, in the 0-63 range.
 func getTj(j int) uint32 {
 	if 0 <= j && j < 16 {
 		return 2043430169 // 0x79CC4519
@@ -56,6 +60,11 @@ func getTj(j int) uint32 {
 
 // ffj 执行 SM3 压缩函数中的 FF 布尔函数。
 // ffj evaluates the FF boolean function used by SM3 compression.
+// 参数/Parameters:
+//   - j: SM3 压缩轮次。 SM3 compression round index.
+//   - x: FF 输入字。 FF input word.
+//   - y: FF 输入字。 FF input word.
+//   - z: FF 输入字。 FF input word.
 func ffj(j int, x, y, z uint32) uint32 {
 	if 0 <= j && j < 16 {
 		return x ^ y ^ z
@@ -68,6 +77,11 @@ func ffj(j int, x, y, z uint32) uint32 {
 
 // ggj 执行 SM3 压缩函数中的 GG 布尔函数。
 // ggj evaluates the GG boolean function used by SM3 compression.
+// 参数/Parameters:
+//   - j: SM3 压缩轮次。 SM3 compression round index.
+//   - x: GG 输入字。 GG input word.
+//   - y: GG 输入字。 GG input word.
+//   - z: GG 输入字。 GG input word.
 func ggj(j int, x, y, z uint32) uint32 {
 	if 0 <= j && j < 16 {
 		return x ^ y ^ z
@@ -80,6 +94,8 @@ func ggj(j int, x, y, z uint32) uint32 {
 
 // Write 将数据追加到 SM3 哈希器并压缩完整分组。
 // Write appends data to the SM3 hasher and compresses complete blocks.
+// 参数/Parameters:
+//   - data: 要写入哈希器的数据。 Data to write into the hasher.
 func (sm3 *SM3) Write(data []byte) {
 	sm3.size += len(data)
 	f := 64 - len(sm3.chunk)
@@ -128,9 +144,12 @@ func (sm3 *SM3) fill() {
 
 // compress 执行单个 SM3 512 位分组压缩。
 // compress processes one 512-bit SM3 block.
+// 参数/Parameters:
+//   - data: 至少 64 字节的分组数据。 Block data with at least 64 bytes.
 func (sm3 *SM3) compress(data []byte) {
 	if len(data) < 64 {
 		// 数据不足 64 字节，内部错误，返回
+		// Data is shorter than 64 bytes; treat it as an internal error and return.
 		return
 	}
 
@@ -179,6 +198,8 @@ func (sm3 *SM3) compress(data []byte) {
 
 // Sum 返回数据的 SM3 摘要，并在完成后重置哈希器。
 // Sum returns the SM3 digest for data and resets the hasher afterwards.
+// 参数/Parameters:
+//   - data: 要计算摘要的数据。 Data to hash.
 func (sm3 *SM3) Sum(data []byte) []byte {
 	if data != nil {
 		sm3.Reset()
@@ -201,9 +222,11 @@ func (sm3 *SM3) Sum(data []byte) []byte {
 	return result
 }
 
-// RC4 加密
 // rc4Encrypt 使用 RC4 对文本进行异或流加密。
 // rc4Encrypt encrypts text with RC4 stream encryption.
+// 参数/Parameters:
+//   - plaintext: 待加密文本。 Text to encrypt.
+//   - key: RC4 密钥。 RC4 key.
 func rc4Encrypt(plaintext string, key string) string {
 	cipher, err := rc4.NewCipher([]byte(key))
 	if err != nil {
@@ -215,9 +238,11 @@ func rc4Encrypt(plaintext string, key string) string {
 	return string(dst)
 }
 
-// 结果加密（魔改Base64）
 // resultEncrypt 使用指定编码表对二进制字符串进行变体 Base64 编码。
 // resultEncrypt encodes a binary string with the selected custom Base64 table.
+// 参数/Parameters:
+//   - longStr: 二进制字符串内容。 Binary string content.
+//   - num: 编码表选择编号。 Encoding table selector.
 func resultEncrypt(longStr string, num string) string {
 	encodingTables := map[string]string{
 		"s0": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=",
@@ -253,6 +278,9 @@ func resultEncrypt(longStr string, num string) string {
 
 // getLongInt 从字符串指定三字节分组中读取 24 位整数。
 // getLongInt reads a 24-bit integer from a three-byte group in the string.
+// 参数/Parameters:
+//   - roundNum: 三字节分组序号。 Three-byte group index.
+//   - longStr: 提供字节数据的字符串。 String that provides byte data.
 func getLongInt(roundNum int, longStr string) uint32 {
 	roundNum = roundNum * 3
 	var char1, char2, char3 byte
@@ -270,6 +298,9 @@ func getLongInt(roundNum int, longStr string) uint32 {
 
 // generRandom 根据随机数和选项生成混淆字节。
 // generRandom derives obfuscated bytes from a random number and option bytes.
+// 参数/Parameters:
+//   - randomNum: 输入随机数。 Input random number.
+//   - option: 混淆选项字节。 Obfuscation option bytes.
 func generRandom(randomNum int, option []int) []byte {
 	byte1 := byte(randomNum & 255)
 	byte2 := byte((randomNum >> 8) & 255)
@@ -297,6 +328,8 @@ func generateRandomStr() string {
 
 // splitToBytes 将 uint32 按大端序拆成四个字节。
 // splitToBytes splits a uint32 into four big-endian bytes.
+// 参数/Parameters:
+//   - num: 待拆分的 32 位整数。 32-bit integer to split.
 func splitToBytes(num uint32) []byte {
 	return []byte{
 		byte(num >> 24),
@@ -308,11 +341,18 @@ func splitToBytes(num uint32) []byte {
 
 // generateRc4BbStr 组装 a_bogus 的加密 bb 字节串。
 // generateRc4BbStr builds the encrypted bb byte string used by a_bogus.
+// 参数/Parameters:
+//   - urlSearchParams: 请求 URL 查询参数字符串。 Request URL query string.
+//   - userAgent: 浏览器 User-Agent。 Browser User-Agent.
+//   - windowEnvStr: 浏览器环境摘要字符串。 Browser environment summary string.
+//   - suffix: a_bogus 后缀随机片段。 Random suffix fragment for a_bogus.
+//   - arguments: 算法固定参数表。 Fixed algorithm argument table.
 func generateRc4BbStr(urlSearchParams, userAgent, windowEnvStr string, suffix string, arguments []int) string {
 	sm3 := NewSM3()
 	startTime := uint32(time.Now().UnixMilli())
 
-	// 计算三次哈希
+	// 计算三次哈希。
+	// Compute the three hash rounds.
 	urlHash := sm3.Sum(sm3.Sum([]byte(urlSearchParams + suffix)))
 	cusHash := sm3.Sum(sm3.Sum([]byte(suffix)))
 	uaKey := string([]byte{0, 1, 14})
@@ -430,15 +470,11 @@ func generateRc4BbStr(urlSearchParams, userAgent, windowEnvStr string, suffix st
 	return rc4Encrypt(bbStr, string([]byte{121}))
 }
 
-// AbSign 生成抖音a_bogus签名
-// 参数：
-//
-//	urlSearchParams: URL查询参数字符串，如 "aid=6383&app_name=douyin_web&web_rid=123456
-//	userAgent: 浏览器User-Agent
-//
-// 返回：a_bogus签名字符串
 // AbSign 生成抖音 web/enter 请求所需的 a_bogus 签名。
 // AbSign generates the a_bogus signature required by Douyin web/enter requests.
+// 参数/Parameters:
+//   - urlSearchParams: URL 查询参数字符串，例如 "aid=6383&app_name=douyin_web"。 URL query string, for example "aid=6383&app_name=douyin_web".
+//   - userAgent: 浏览器 User-Agent。 Browser User-Agent.
 func AbSign(urlSearchParams, userAgent string) string {
 	windowEnvStr := "1920|1080|1920|1040|0|30|0|0|1872|92|1920|1040|1857|92|1|24|Win32"
 	return resultEncrypt(

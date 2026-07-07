@@ -13,13 +13,20 @@ import (
 
 // reconnectPlan 根据失败原因和次数计算重连延迟及刷新策略。
 // reconnectPlan computes reconnect delay and refresh strategy from failure reason and count.
+// 参数/Parameters:
+//   - reason: 归类后的失败原因。 Classified failure reason.
+//   - failureCount: 连续失败次数。 Consecutive failure count.
+//   - baseDelay: 基础重连等待时间。 Base reconnect delay.
+//   - allowUARefresh: 是否允许刷新 UA 和 HTTP 上下文。 Whether UA and HTTP context refresh is allowed.
 func (dl *DouyinLive) reconnectPlan(reason string, failureCount int, baseDelay time.Duration, allowUARefresh bool) (delay time.Duration, changeUA bool, rebuildHTTP bool) {
 	if dl.hasConfiguredCookie() {
 		allowUARefresh = false
 	}
 
-	// 指数退避：delay = baseDelay * 2^(failureCount-1)
-	// 失败次数越多，等待时间越长，避免频繁重试触发风控
+	// 指数退避：delay = baseDelay * 2^(failureCount-1)。
+	// Exponential backoff: delay = baseDelay * 2^(failureCount-1).
+	// 失败次数越多，等待时间越长，避免频繁重试触发风控。
+	// More failures increase the wait time to avoid aggressive retry behavior.
 	delay = baseDelay
 	if failureCount > 1 {
 		expDelay := baseDelay * (1 << (failureCount - 1))
@@ -62,9 +69,11 @@ func (dl *DouyinLive) reconnectPlan(reason string, failureCount int, baseDelay t
 	return delay, changeUA, rebuildHTTP
 }
 
-// max 是 time.Duration 版本的 max 函数
 // max 返回两个 duration 中较大的一个。
 // max returns the larger of two durations.
+// 参数/Parameters:
+//   - a: 第一个 duration。 First duration.
+//   - b: 第二个 duration。 Second duration.
 func max(a, b time.Duration) time.Duration {
 	if a > b {
 		return a
@@ -72,9 +81,10 @@ func max(a, b time.Duration) time.Duration {
 	return b
 }
 
-// reconnectDecision 描述重连策略
 // reconnectDecision 将读错误转换为重连决策。
 // reconnectDecision converts a read error into a reconnect decision.
+// 参数/Parameters:
+//   - err: WebSocket 读取或关闭错误。 WebSocket read or close error.
 func (dl *DouyinLive) reconnectDecision(err error) (reason string, shouldRetry bool, delay time.Duration, allowUARefresh bool) {
 	if dl.isManualClose() {
 		return "manual_close", false, 0, false
@@ -109,11 +119,13 @@ func (dl *DouyinLive) reconnectDecision(err error) (reason string, shouldRetry b
 	return "network_or_unknown", true, baseReconnectDelay, true
 }
 
-// handleReadError 判断读错误是否需要重连。
 // handleReadError 判断读错误是否需要重连并执行重连流程。
 // handleReadError decides whether a read error should reconnect and runs the reconnect flow.
+// 参数/Parameters:
+//   - err: 本次读取失败返回的错误。 Error returned by the failed read.
 func (dl *DouyinLive) handleReadError(err error) bool {
-	// 如果是手动关闭，不进行重连
+	// 如果是手动关闭，不进行重连。
+	// Do not reconnect after a manual close.
 	if dl.isManualClose() {
 		dl.logger.Info("连接被手动关闭，不进行重连", "live_id", dl.liveID)
 		return false
@@ -128,10 +140,10 @@ func (dl *DouyinLive) handleReadError(err error) bool {
 	if statusErr != nil {
 		dl.logger.Warn("WS 读错后 HTTP 兜底检测失败，继续按重连流程处理", "live_id", dl.liveID, "err", statusErr)
 	} else if dl.shouldCloseAfterStatusCheck(isLive) {
-		dl.logger.Info("WS 读错后 HTTP 兜底确认直播已下播，不再重连", "live_id", dl.liveID, "live_name", dl.GetName())
+		dl.logger.Info("WS 读错后 HTTP 兜底确认直播已下播，不再重连", "live_id", dl.liveID, "live_name", dl.GetName(), "title", dl.GetTitle())
 		return false
 	} else if !isLive {
-		dl.logger.Warn("WS 读错后 HTTP 兜底检测到一次未开播状态，继续重连等待二次确认", "live_id", dl.liveID, "live_name", dl.GetName())
+		dl.logger.Warn("WS 读错后 HTTP 兜底检测到一次未开播状态，继续重连等待二次确认", "live_id", dl.liveID, "live_name", dl.GetName(), "title", dl.GetTitle())
 	}
 
 	reason, shouldRetry, baseDelay, allowUARefresh := dl.reconnectDecision(err)
@@ -154,10 +166,14 @@ func (dl *DouyinLive) handleReadError(err error) bool {
 }
 
 // reconnect 按退避策略重建上游 WebSocket 连接。
-// reconnect 按退避策略重建上游 WebSocket 连接。
 // reconnect rebuilds the upstream WebSocket connection with backoff.
+// 参数/Parameters:
+//   - attempts: 最大尝试次数。 Maximum number of attempts.
+//   - changeUA: 是否允许刷新 User-Agent。 Whether User-Agent refresh is allowed.
+//   - rebuildHTTP: 是否重建 HTTP 客户端上下文。 Whether to rebuild the HTTP client context.
 func (dl *DouyinLive) reconnect(attempts int, changeUA bool, rebuildHTTP bool) bool {
-	// 如果是手动关闭，不进行重连
+	// 如果是手动关闭，不进行重连。
+	// Do not reconnect after a manual close.
 	if dl.isManualClose() {
 		dl.logger.Info("连接被手动关闭，不进行重连", "live_id", dl.liveID)
 		return false
@@ -207,6 +223,7 @@ func (dl *DouyinLive) reconnect(attempts int, changeUA bool, rebuildHTTP bool) b
 		dl.conn = conn
 		dl.mu.Unlock()
 		dl.configureWebSocket(conn)
+		dl.setLiveStatus(true)
 		dl.startHeartbeatLoop()
 		dl.resetReconnectTracking()
 		return nil
@@ -241,6 +258,6 @@ func (dl *DouyinLive) reconnect(attempts int, changeUA bool, rebuildHTTP bool) b
 		return false
 	}
 
-	dl.logger.Info("重连成功", "live_id", dl.liveID, "live_name", dl.GetName())
+	dl.logger.Info("重连成功", "live_id", dl.liveID, "live_name", dl.GetName(), "title", dl.GetTitle())
 	return true
 }

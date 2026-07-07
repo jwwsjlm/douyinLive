@@ -27,14 +27,14 @@ const clientWriteTimeout = 5 * time.Second
 
 var (
 	pongMessage              = []byte("pong")
-	serviceClosingMessage    = []byte(`{"type":"system","message":"服务正在关闭"}`)
-	liveInvalidMessage       = []byte(`{"type":"system","message":"直播间未开播或ID无效"}`)
-	slowClientClosingMessage = []byte(`{"type":"system","message":"客户端消费过慢，连接已关闭"}`)
+	serviceClosingMessage    = []byte(`{"type":"system","event":"service_status","code":"SERVICE_SHUTTING_DOWN","message":"服务正在关闭，当前连接将断开","suggestion":"等待服务重新启动后再连接"}`)
+	roomInvalidMessage       = []byte(`{"type":"system","event":"live_status","code":"ROOM_NOT_FOUND","valid":false,"live":false,"status":"not_found","status_text":"直播间不存在或房间号无效","message":"直播间不存在或房间号无效，已关闭连接","suggestion":"请检查直播间ID是否输入正确；如果是短号或主页号，请确认网页可以正常打开该账号或直播间"}`)
+	liveStartFailedMessage   = []byte(`{"type":"system","event":"live_status","code":"ROOM_CHECK_FAILED","valid":false,"live":false,"status":"error","status_text":"直播间状态检查失败","message":"直播间状态检查失败，请稍后重试","suggestion":"请稍后重新连接；如果多次失败，请开启 debug 日志并检查 Cookie 是否过期"}`)
+	slowClientClosingMessage = []byte(`{"type":"system","event":"client_status","code":"CLIENT_TOO_SLOW","message":"客户端接收消息太慢，服务端已关闭连接","suggestion":"请检查客户端消费逻辑，避免长时间阻塞消息读取"}`)
 
 	errRoomInactive = errors.New("房间已关闭或无客户端")
 )
 
-// RoomManager 管理所有直播间实例
 // RoomManager 管理所有直播间实例及其复用键。
 // RoomManager manages all room instances and their reuse keys.
 type RoomManager struct {
@@ -42,18 +42,25 @@ type RoomManager struct {
 	roomsMu        sync.RWMutex
 	logger         *appLogger
 	unknown        bool
-	cookie         string            // 抖音默认 Cookie
-	roomCookies    map[string]string // 按直播间 ID 配置的 Cookie
+	cookie         string            // 抖音默认 Cookie。 Default Douyin Cookie.
+	roomCookies    map[string]string // 按直播间 ID 配置的 Cookie。 Per-room Cookie overrides keyed by room ID.
 	signProvider   string
 	tikHubKey      string
 	pollInterval   time.Duration
 	notifyInterval time.Duration
 }
 
-// NewRoomManager 创建一个新的 RoomManager
-// cookie 参数：可选的抖音默认 Cookie
 // NewRoomManager 创建直播间管理器。
 // NewRoomManager creates a room manager.
+// 参数/Parameters:
+//   - logger: 应用日志器。 Application logger.
+//   - unknown: 是否保留未知消息类型。 Whether to keep unknown message types.
+//   - cookie: 可选抖音默认 Cookie。 Optional default Douyin Cookie.
+//   - roomCookies: 按直播间 ID 配置的 Cookie。 Per-room Cookie overrides keyed by room ID.
+//   - signProvider: WebSocket 签名来源。 WebSocket signature provider.
+//   - tikHubKey: TikHub API Key。 TikHub API key.
+//   - pollInterval: 未开播轮询间隔。 Offline-room polling interval.
+//   - notifyInterval: 未开播状态通知间隔。 Offline status notification interval.
 func NewRoomManager(logger *appLogger, unknown bool, cookie string, roomCookies map[string]string, signProvider string, tikHubKey string, pollInterval time.Duration, notifyInterval time.Duration) *RoomManager {
 	if logger == nil {
 		logger = newAppLogger(nil)
@@ -77,6 +84,9 @@ func NewRoomManager(logger *appLogger, unknown bool, cookie string, roomCookies 
 
 // cookieForRoom 按连接覆盖、房间配置、默认配置的优先级选择 Cookie。
 // cookieForRoom chooses a cookie by connection override, room config, then default config.
+// 参数/Parameters:
+//   - roomID: 当前直播间 ID。 Current live room ID.
+//   - override: 本次连接传入的 Cookie 覆盖值。 Cookie override provided by the current connection.
 func (rm *RoomManager) cookieForRoom(roomID string, override string) string {
 	if cookie := strings.TrimSpace(override); cookie != "" {
 		return cookie
@@ -93,6 +103,9 @@ func (rm *RoomManager) cookieForRoom(roomID string, override string) string {
 
 // roomManagerKey 生成房间复用键，避免不同 Cookie 的连接误共享会话。
 // roomManagerKey builds a reuse key that prevents sessions with different cookies from mixing.
+// 参数/Parameters:
+//   - roomID: 当前直播间 ID。 Current live room ID.
+//   - cookie: 当前连接实际使用的 Cookie。 Effective cookie used by the current connection.
 func roomManagerKey(roomID string, cookie string) string {
 	cookie = strings.TrimSpace(cookie)
 	if cookie == "" {
@@ -103,9 +116,11 @@ func roomManagerKey(roomID string, cookie string) string {
 	return roomID + "#" + hex.EncodeToString(sum[:8])
 }
 
-// GetOrCreateRoom 获取或创建一个新的房间实例
 // GetOrCreateRoom 获取现有房间或按当前 Cookie 上下文创建新房间。
 // GetOrCreateRoom returns an existing room or creates one for the current cookie context.
+// 参数/Parameters:
+//   - roomID: 用户请求的直播间标识。 Live room identifier requested by the user.
+//   - cookieOverride: 本次连接传入的 Cookie 覆盖值。 Cookie override supplied by this connection.
 func (rm *RoomManager) GetOrCreateRoom(roomID string, cookieOverride string) *Room {
 	cookie := rm.cookieForRoom(roomID, cookieOverride)
 	key := roomManagerKey(roomID, cookie)
@@ -135,7 +150,6 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string, cookieOverride string) *Ro
 	return room
 }
 
-// CloseAll 关闭所有房间
 // CloseAll 关闭管理器中的所有房间。
 // CloseAll closes every room managed by this manager.
 func (rm *RoomManager) CloseAll() {
@@ -170,6 +184,9 @@ type Client struct {
 
 // NewClient 创建客户端连接包装器。
 // NewClient creates a client connection wrapper.
+// 参数/Parameters:
+//   - id: 客户端连接唯一 ID。 Unique client connection ID.
+//   - conn: 底层 WebSocket 连接。 Underlying WebSocket connection.
 func NewClient(id string, conn *gws.Conn) *Client {
 	return &Client{
 		id:        id,
@@ -181,6 +198,9 @@ func NewClient(id string, conn *gws.Conn) *Client {
 
 // enqueue 将消息放入客户端发送队列，队列满时返回 false。
 // enqueue queues a message for the client and returns false when the queue is full.
+// 参数/Parameters:
+//   - opcode: 要发送的 WebSocket 帧类型。 WebSocket frame opcode to send.
+//   - payload: 要发送的消息载荷。 Message payload to send.
 func (c *Client) enqueue(opcode gws.Opcode, payload []byte) bool {
 	select {
 	case <-c.stopCh:
@@ -198,6 +218,8 @@ func (c *Client) enqueue(opcode gws.Opcode, payload []byte) bool {
 
 // writeLoop 串行消费发送队列并写入客户端连接。
 // writeLoop serially drains the outbound queue and writes to the client connection.
+// 参数/Parameters:
+//   - onWriteError: 写入失败时调用的清理回调。 Cleanup callback invoked on write failure.
 func (c *Client) writeLoop(onWriteError func()) {
 	for {
 		select {
@@ -227,6 +249,8 @@ func (c *Client) writeLoop(onWriteError func()) {
 
 // close 幂等关闭客户端连接和发送循环。
 // close idempotently closes the client connection and send loop.
+// 参数/Parameters:
+//   - closePayload: 可选 close 帧载荷。 Optional close-frame payload.
 func (c *Client) close(closePayload []byte) {
 	c.closeOnce.Do(func() {
 		close(c.stopCh)
@@ -244,6 +268,9 @@ func (c *Client) close(closePayload []byte) {
 
 // closeClient 从房间移除并关闭指定客户端。
 // closeClient removes and closes a client from the room.
+// 参数/Parameters:
+//   - clientID: 要关闭的客户端 ID。 Client ID to close.
+//   - closePayload: 可选 close 帧载荷。 Optional close-frame payload.
 func (r *Room) closeClient(clientID string, closePayload []byte) {
 	client, _, removed := r.removeClient(clientID)
 	if !removed {
@@ -263,7 +290,6 @@ func (r *Room) closeClient(clientID string, closePayload []byte) {
 	}
 }
 
-// Room 代表一个直播间
 // Room 表示一个直播间及其下游客户端、上游抖音监听和离线监控状态。
 // Room represents one live room with downstream clients, upstream Douyin listener, and offline monitor state.
 type Room struct {
@@ -280,16 +306,28 @@ type Room struct {
 	tikHubKey      string
 	pollInterval   time.Duration
 	notifyInterval time.Duration
+	liveName       string
+	title          string
+	avatarThumb    string
+	accountOnly    bool
 	starting       bool
 	closed         bool
 	monitorStopCh  chan struct{}
 	monitorDoneCh  chan struct{}
 }
 
-// NewRoom 创建一个新的房间实例
-// cookie 参数：可选的抖音 Cookie
 // NewRoom 创建直播间实例。
 // NewRoom creates a room instance.
+// 参数/Parameters:
+//   - id: 用户请求的直播间标识。 Live room identifier requested by the user.
+//   - logger: 应用日志器。 Application logger.
+//   - unknown: 是否保留未知消息类型。 Whether to keep unknown message types.
+//   - cookie: 当前房间使用的抖音 Cookie。 Douyin Cookie used by this room.
+//   - signProvider: WebSocket 签名来源。 WebSocket signature provider.
+//   - tikHubKey: TikHub API Key。 TikHub API key.
+//   - pollInterval: 未开播轮询间隔。 Offline-room polling interval.
+//   - notifyInterval: 未开播状态通知间隔。 Offline status notification interval.
+//   - onClose: 房间关闭后的回调。 Callback invoked after the room closes.
 func NewRoom(id string, logger *appLogger, unknown bool, cookie string, signProvider string, tikHubKey string, pollInterval time.Duration, notifyInterval time.Duration, onClose func()) *Room {
 	if logger == nil {
 		logger = newAppLogger(nil)
@@ -314,6 +352,8 @@ func NewRoom(id string, logger *appLogger, unknown bool, cookie string, signProv
 
 // addClient 将客户端加入房间并返回当前客户端数量。
 // addClient adds a client to the room and returns the current client count.
+// 参数/Parameters:
+//   - client: 要加入房间的客户端。 Client to add to the room.
 func (r *Room) addClient(client *Client) int {
 	r.clientsMu.Lock()
 	defer r.clientsMu.Unlock()
@@ -323,6 +363,8 @@ func (r *Room) addClient(client *Client) int {
 
 // getClient 按 ID 获取客户端。
 // getClient returns a client by ID.
+// 参数/Parameters:
+//   - clientID: 要查找的客户端 ID。 Client ID to look up.
 func (r *Room) getClient(clientID string) (*Client, bool) {
 	r.clientsMu.RLock()
 	defer r.clientsMu.RUnlock()
@@ -332,6 +374,8 @@ func (r *Room) getClient(clientID string) (*Client, bool) {
 
 // removeClient 从房间移除客户端并返回剩余数量。
 // removeClient removes a client from the room and returns the remaining count.
+// 参数/Parameters:
+//   - clientID: 要移除的客户端 ID。 Client ID to remove.
 func (r *Room) removeClient(clientID string) (*Client, int, bool) {
 	r.clientsMu.Lock()
 	defer r.clientsMu.Unlock()
@@ -386,6 +430,10 @@ func (r *Room) clearClients() []*Client {
 
 // appendJSONStringField 向已有 JSON 对象字节流追加一个字符串字段。
 // appendJSONStringField appends one string field to an existing JSON object buffer.
+// 参数/Parameters:
+//   - dst: 已有 JSON 对象字节流。 Existing JSON object bytes.
+//   - key: 要追加的字段名。 Field name to append.
+//   - value: 要追加的字段值。 Field value to append.
 func appendJSONStringField(dst []byte, key, value string) []byte {
 	dst = append(dst, ',')
 	dst = append(dst, '"')
@@ -397,6 +445,12 @@ func appendJSONStringField(dst []byte, key, value string) []byte {
 
 // buildEventJSON 将解析后的 protobuf JSON 补充直播间元数据。
 // buildEventJSON enriches parsed protobuf JSON with live room metadata.
+// 参数/Parameters:
+//   - jsonBytes: protobuf 转出的 JSON 字节。 JSON bytes produced from protobuf.
+//   - method: 抖音消息方法名。 Douyin message method name.
+//   - liveName: 主播昵称。 Live owner nickname.
+//   - title: 直播间标题。 Live room title.
+//   - avatarThumb: 主播头像缩略图地址。 Live owner avatar thumbnail URL.
 func (r *Room) buildEventJSON(jsonBytes []byte, method, liveName, title, avatarThumb string) ([]byte, error) {
 	if len(jsonBytes) == 0 || jsonBytes[len(jsonBytes)-1] != '}' {
 		return nil, fmt.Errorf("无效的事件 JSON")
@@ -414,25 +468,65 @@ func (r *Room) buildEventJSON(jsonBytes []byte, method, liveName, title, avatarT
 	return result, nil
 }
 
+func (r *Room) updateMetadataFromDouyinLive(d *douyinLive.DouyinLive) {
+	if d == nil {
+		return
+	}
+	liveName := d.GetName()
+	title := d.GetTitle()
+	avatarThumb := d.GetAvatarThumb()
+	accountOnly := d.HasAnchorOnlyPageIdentity()
+
+	r.mu.Lock()
+	if liveName != "" {
+		r.liveName = liveName
+	}
+	if title != "" {
+		r.title = title
+	}
+	if avatarThumb != "" {
+		r.avatarThumb = avatarThumb
+	}
+	if accountOnly {
+		r.accountOnly = true
+	} else {
+		r.accountOnly = false
+	}
+	r.mu.Unlock()
+}
+
+func (r *Room) metadataSnapshot() (string, string, string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.liveName, r.title, r.avatarThumb, r.accountOnly
+}
+
 // offlineStatusMessage 构造未开播状态通知。
 // offlineStatusMessage builds the offline status notification.
 func (r *Room) offlineStatusMessage() []byte {
-	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":false,"room_id":%s,"message":"直播间未开播","retry_interval_seconds":%d}`,
-		strconv.Quote(r.id), int(r.notifyInterval/time.Second)))
+	liveName, title, avatarThumb, accountOnly := r.metadataSnapshot()
+	if accountOnly {
+		return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","code":"ACCOUNT_OFFLINE_NO_ROOM","valid":true,"live":false,"status":"account_offline","status_text":"账号存在但当前没有直播间","room_id":%s,"live_name":%s,"title":%s,"avatar_thumb":%s,"has_room":false,"account_only":true,"message":"账号存在，但网页没有返回直播间房间对象，可能是该账号从未开播或当前未创建直播间，当前按未开播处理","suggestion":"客户端不需要重连，保持当前 WebSocket 连接；如果该账号后续开播，服务端会自动切换为直播连接","retry_interval_seconds":%d}`,
+			strconv.Quote(r.id), strconv.Quote(liveName), strconv.Quote(title), strconv.Quote(avatarThumb), int(r.notifyInterval/time.Second)))
+	}
+	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","code":"ROOM_OFFLINE","valid":true,"live":false,"status":"offline","status_text":"直播间未开播","room_id":%s,"live_name":%s,"title":%s,"avatar_thumb":%s,"has_room":true,"account_only":false,"message":"直播间当前未开播，服务端会保持连接并继续轮询","suggestion":"客户端不需要重连，保持当前 WebSocket 连接等待开播通知","retry_interval_seconds":%d}`,
+		strconv.Quote(r.id), strconv.Quote(liveName), strconv.Quote(title), strconv.Quote(avatarThumb), int(r.notifyInterval/time.Second)))
 }
 
 // offlineEndedStatusMessage 构造已下播状态通知。
 // offlineEndedStatusMessage builds the ended-offline status notification.
 func (r *Room) offlineEndedStatusMessage() []byte {
-	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":false,"room_id":%s,"message":"直播间已下播","ended":true,"retry_interval_seconds":%d}`,
-		strconv.Quote(r.id), int(r.notifyInterval/time.Second)))
+	liveName, title, avatarThumb, _ := r.metadataSnapshot()
+	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","code":"ROOM_ENDED","valid":true,"live":false,"status":"ended","status_text":"直播间已下播","room_id":%s,"live_name":%s,"title":%s,"avatar_thumb":%s,"message":"直播间已经下播，服务端会保持连接并等待再次开播","suggestion":"客户端不需要重连，保持当前 WebSocket 连接等待下一次开播","ended":true,"retry_interval_seconds":%d}`,
+		strconv.Quote(r.id), strconv.Quote(liveName), strconv.Quote(title), strconv.Quote(avatarThumb), int(r.notifyInterval/time.Second)))
 }
 
 // onlineStatusMessage 构造已开播状态通知。
 // onlineStatusMessage builds the online status notification.
 func (r *Room) onlineStatusMessage() []byte {
-	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","live":true,"room_id":%s,"message":"直播间已开播"}`,
-		strconv.Quote(r.id)))
+	liveName, title, avatarThumb, _ := r.metadataSnapshot()
+	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","code":"ROOM_ONLINE","valid":true,"live":true,"status":"online","status_text":"直播间已开播","room_id":%s,"live_name":%s,"title":%s,"avatar_thumb":%s,"message":"直播间已开播，后续将开始推送弹幕、礼物、点赞等直播消息","suggestion":"客户端可以开始正常处理直播消息"}`,
+		strconv.Quote(r.id), strconv.Quote(liveName), strconv.Quote(title), strconv.Quote(avatarThumb)))
 }
 
 // notifyOfflineStatus 广播未开播状态通知。
@@ -453,9 +547,10 @@ func (r *Room) notifyOnlineStatus() {
 	r.Broadcast(r.onlineStatusMessage())
 }
 
-// AddClient 将一个客户端添加到房间
 // AddClient 将新的下游 WebSocket 客户端接入房间，并按房间状态启动监听或返回状态。
 // AddClient attaches a downstream WebSocket client and starts listening or returns status based on room state.
+// 参数/Parameters:
+//   - socket: 下游客户端 WebSocket 连接。 Downstream client WebSocket connection.
 func (r *Room) AddClient(socket *gws.Conn) {
 	clientID := socket.RemoteAddr().String()
 	client := NewClient(clientID, socket)
@@ -503,6 +598,12 @@ func (r *Room) AddClient(socket *gws.Conn) {
 		r.removeIfIdle()
 		return
 	}
+	if errors.Is(err, douyinLive.ErrRoomNotFound) {
+		r.logger.Warn("直播间不存在，关闭客户端连接", "room_id", r.id, "err", err)
+		r.closeAllClients(roomInvalidMessage)
+		r.removeIfIdle()
+		return
+	}
 	if errors.Is(err, douyinLive.ErrLiveNotStarted) {
 		if r.clientCount() == 0 {
 			r.removeIfIdle()
@@ -516,19 +617,24 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	}
 
 	r.logger.Error("启动抖音直播监听失败", "room_id", r.id, "err", err)
-	r.closeAllClients(liveInvalidMessage)
+	r.closeAllClients(liveStartFailedMessage)
 	r.removeIfIdle()
 }
 
-// RemoveClient 从房间移除一个客户端
 // RemoveClient 从房间移除并关闭指定客户端。
 // RemoveClient removes and closes a client from the room.
+// 参数/Parameters:
+//   - clientID: 需要移除的客户端 ID。 Client ID to remove.
 func (r *Room) RemoveClient(clientID string) {
 	r.closeClient(clientID, nil)
 }
 
 // sendToClient 向指定客户端发送消息，队列满时关闭慢客户端。
 // sendToClient sends a message to one client and closes slow clients when their queue is full.
+// 参数/Parameters:
+//   - clientID: 目标客户端 ID。 Target client ID.
+//   - opcode: 要发送的 WebSocket 帧类型。 WebSocket frame opcode to send.
+//   - payload: 要发送的消息载荷。 Message payload to send.
 func (r *Room) sendToClient(clientID string, opcode gws.Opcode, payload []byte) {
 	client, ok := r.getClient(clientID)
 	if !ok {
@@ -552,6 +658,8 @@ func (r *Room) closeBackgroundWorkers() {
 
 // closeAllClients 关闭并移除房间内所有客户端。
 // closeAllClients closes and removes every client in the room.
+// 参数/Parameters:
+//   - closePayload: 可选 close 帧载荷。 Optional close-frame payload.
 func (r *Room) closeAllClients(closePayload []byte) {
 	clients := r.clearClients()
 	for _, client := range clients {
@@ -559,7 +667,6 @@ func (r *Room) closeAllClients(closePayload []byte) {
 	}
 }
 
-// closeDouyinLive 在后台关闭抖音直播连接
 // closeDouyinLive 关闭当前上游抖音直播连接。
 // closeDouyinLive closes the current upstream Douyin live connection.
 func (r *Room) closeDouyinLive() {
@@ -643,6 +750,10 @@ func (r *Room) startMonitorLoop() {
 					return
 				case errors.Is(err, errRoomInactive):
 					return
+				case errors.Is(err, douyinLive.ErrRoomNotFound):
+					r.logger.Warn("轮询发现直播间不存在，关闭客户端连接", "room_id", r.id, "err", err)
+					r.closeAllClients(roomInvalidMessage)
+					return
 				case errors.Is(err, douyinLive.ErrLiveNotStarted):
 					r.logger.Debug("房间仍未开播，继续等待", "room_id", r.id)
 				default:
@@ -680,8 +791,6 @@ func (r *Room) stopMonitorLoop() {
 }
 
 // startLiveSession 启动抖音直播监听和事件处理。
-// 该方法负责创建 DouyinLive、显式判定开播状态，并在确认开播后启动后台 WS 会话。
-// startLiveSession 创建 DouyinLive、确认开播状态并启动上游监听。
 // startLiveSession creates DouyinLive, verifies live status, and starts upstream listening.
 func (r *Room) startLiveSession() error {
 	var (
@@ -698,15 +807,24 @@ func (r *Room) startLiveSession() error {
 		return err
 	}
 
-	isLive, err := d.IsLive()
-	if err != nil {
+	if err := d.PrepareWebSocketContext(); err != nil {
+		if d.IsKnownOfflineStatus() {
+			r.updateMetadataFromDouyinLive(d)
+			d.Dispose()
+			return douyinLive.ErrLiveNotStarted
+		}
 		d.Dispose()
-		return fmt.Errorf("检查直播间 %s 状态失败: %w", r.id, err)
+		if errors.Is(err, douyinLive.ErrRoomNotFound) {
+			return err
+		}
+		return fmt.Errorf("初始化直播间 %s 连接上下文失败: %w", r.id, err)
 	}
-	if !isLive {
+	if d.IsKnownOfflineStatus() {
+		r.updateMetadataFromDouyinLive(d)
 		d.Dispose()
-		return fmt.Errorf("直播间 %s 未开播: %w", r.id, douyinLive.ErrLiveNotStarted)
+		return douyinLive.ErrLiveNotStarted
 	}
+	r.updateMetadataFromDouyinLive(d)
 
 	r.mu.Lock()
 	r.douyinLive = d
@@ -729,7 +847,11 @@ func (r *Room) startLiveSession() error {
 	}
 	r.mu.Unlock()
 
-	r.notifyOnlineStatus()
+	if d.IsKnownOfflineStatus() {
+		r.notifyOfflineStatus()
+	} else {
+		r.notifyOnlineStatus()
+	}
 	go r.runLiveSession(d)
 	r.logger.Info("抖音直播监听已成功启动", "room_id", r.id)
 	return nil
@@ -737,6 +859,8 @@ func (r *Room) startLiveSession() error {
 
 // disposePendingLive 释放尚未被房间正式接管的 DouyinLive 实例。
 // disposePendingLive disposes a DouyinLive instance that the room has not fully adopted.
+// 参数/Parameters:
+//   - d: 待释放的 DouyinLive 实例。 DouyinLive instance to dispose.
 func (r *Room) disposePendingLive(d *douyinLive.DouyinLive) {
 	r.mu.Lock()
 	if r.douyinLive == d {
@@ -768,6 +892,8 @@ func (r *Room) removeIfIdle() {
 
 // runLiveSession 运行上游直播监听，并在结束后按需切回未开播监控。
 // runLiveSession runs upstream live listening and switches back to offline monitoring when needed.
+// 参数/Parameters:
+//   - d: 已接管的上游 DouyinLive 实例。 Adopted upstream DouyinLive instance.
 func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 	if err := d.Start(); err != nil {
 		r.logger.Warn("直播监听运行结束", "room_id", r.id, "err", err)
@@ -792,9 +918,10 @@ func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 	}
 }
 
-// handleDouyinEvent 处理从抖音接收到的事件
 // handleDouyinEvent 将抖音消息解析为 JSON 并广播给房间客户端。
 // handleDouyinEvent converts a Douyin message to JSON and broadcasts it to room clients.
+// 参数/Parameters:
+//   - event: 上游抖音直播消息事件。 Upstream Douyin live message event.
 func (r *Room) handleDouyinEvent(event *douyinLive.LiveMessage) {
 	if r.clientCount() == 0 {
 		return
@@ -837,9 +964,10 @@ func (r *Room) handleDouyinEvent(event *douyinLive.LiveMessage) {
 	r.Broadcast(finalJSON)
 }
 
-// Broadcast 将消息广播到房间内的所有客户端
 // Broadcast 向房间内所有客户端广播消息。
 // Broadcast sends a message to every client in the room.
+// 参数/Parameters:
+//   - message: 要广播的消息字节。 Message bytes to broadcast.
 func (r *Room) Broadcast(message []byte) {
 	clients := r.snapshotClients()
 	for _, client := range clients {
@@ -851,7 +979,6 @@ func (r *Room) Broadcast(message []byte) {
 	}
 }
 
-// Close 关闭房间，停止监听并清理资源（优雅退出）
 // Close 关闭房间、停止后台任务并释放上游监听资源。
 // Close closes the room, stops background work, and releases upstream listener resources.
 func (r *Room) Close() {

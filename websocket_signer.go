@@ -55,12 +55,17 @@ func (localWebsocketSigner) Name() string {
 
 // Sign 使用本地 JS 生成 WebSocket 签名。
 // Sign generates a WebSocket signature using the local JavaScript implementation.
+// 参数/Parameters:
+//   - roomID: 抖音长房间 ID。 Douyin long room ID.
+//   - userUniqueID: WebSocket 签名所需的用户唯一 ID。 User unique ID required for WebSocket signing.
 func (localWebsocketSigner) Sign(_ context.Context, roomID, userUniqueID, _ string) (string, error) {
 	return jsScript.ExecuteJS(newWebsocketSignatureParams(roomID, userUniqueID).XMSStub()), nil
 }
 
 // UpdateUserAgent 保持接口一致，本地签名器的 UA 在 LoadGoja 时设置。
 // UpdateUserAgent keeps interface parity; the local signer uses the UA loaded into Goja.
+// 参数/Parameters:
+//   - string: 新的 User-Agent；本地签名器忽略该值。 New User-Agent; ignored by the local signer.
 func (localWebsocketSigner) UpdateUserAgent(string) {}
 
 // tikhubWebsocketSigner 使用 TikHub 在线 API 计算 WebSocket 签名。
@@ -72,6 +77,9 @@ type tikhubWebsocketSigner struct {
 
 // newTikHubWebsocketSigner 创建 TikHub 在线签名器。
 // newTikHubWebsocketSigner creates a TikHub-backed signature provider.
+// 参数/Parameters:
+//   - token: TikHub API Token。 TikHub API token.
+//   - userAgent: 请求 TikHub 时使用的 User-Agent。 User-Agent used when calling TikHub.
 func newTikHubWebsocketSigner(token, userAgent string) websocketSigner {
 	token = strings.TrimSpace(token)
 	return &tikhubWebsocketSigner{
@@ -88,6 +96,9 @@ func (s *tikhubWebsocketSigner) Name() string {
 
 // LogStatus 输出 TikHub API Key 的安全摘要，避免直接打印密钥。
 // LogStatus logs a safe summary of the TikHub API key without exposing the secret.
+// 参数/Parameters:
+//   - logger: 输出状态日志的日志器。 Logger used to emit status.
+//   - liveID: 当前直播间标识，用于日志定位。 Current live room identifier for log context.
 func (s *tikhubWebsocketSigner) LogStatus(logger logSink, liveID string) {
 	if logger == nil {
 		return
@@ -110,6 +121,8 @@ func (s *tikhubWebsocketSigner) LogStatus(logger logSink, liveID string) {
 
 // UpdateUserAgent 将当前 UA 同步到 TikHub HTTP 客户端。
 // UpdateUserAgent syncs the current user agent to the TikHub HTTP client.
+// 参数/Parameters:
+//   - userAgent: 新的浏览器 User-Agent。 New browser User-Agent.
 func (s *tikhubWebsocketSigner) UpdateUserAgent(userAgent string) {
 	if s.client == nil {
 		s.client = newTikHubClient(s.token, userAgent)
@@ -123,6 +136,11 @@ func (s *tikhubWebsocketSigner) UpdateUserAgent(userAgent string) {
 
 // Sign 调用 TikHub API 生成 WebSocket 签名。
 // Sign calls the TikHub API to generate a WebSocket signature.
+// 参数/Parameters:
+//   - ctx: 请求上下文。 Request context.
+//   - roomID: 抖音长房间 ID。 Douyin long room ID.
+//   - userUniqueID: WebSocket 签名所需的用户唯一 ID。 User unique ID required for WebSocket signing.
+//   - userAgent: 当前浏览器 User-Agent。 Current browser User-Agent.
 func (s *tikhubWebsocketSigner) Sign(ctx context.Context, roomID, userUniqueID, userAgent string) (string, error) {
 	token := strings.TrimSpace(s.token)
 	if token == "" {
@@ -169,12 +187,16 @@ func (s *tikhubWebsocketSigner) Sign(ctx context.Context, roomID, userUniqueID, 
 
 // isTikHubSuccessCode 判断 TikHub 业务状态码是否表示成功。
 // isTikHubSuccessCode reports whether a TikHub business code indicates success.
+// 参数/Parameters:
+//   - code: TikHub 响应中的业务状态码。 Business status code returned by TikHub.
 func isTikHubSuccessCode(code int) bool {
 	return code == 0 || code == http.StatusOK
 }
 
 // maskSecret 掩码敏感值，仅保留首尾少量字符。
 // maskSecret masks a secret value while keeping a small prefix and suffix.
+// 参数/Parameters:
+//   - value: 待掩码的敏感字符串。 Sensitive string to mask.
 func maskSecret(value string) string {
 	value = strings.TrimSpace(value)
 	switch {
@@ -189,6 +211,8 @@ func maskSecret(value string) string {
 
 // firstNonEmptyString 返回第一个去空白后非空的字符串。
 // firstNonEmptyString returns the first non-empty string after trimming spaces.
+// 参数/Parameters:
+//   - values: 候选字符串列表。 Candidate strings.
 func firstNonEmptyString(values ...string) string {
 	for _, value := range values {
 		if value = strings.TrimSpace(value); value != "" {
@@ -200,6 +224,9 @@ func firstNonEmptyString(values ...string) string {
 
 // newTikHubClient 创建带超时和 UA 的 TikHub 客户端。
 // newTikHubClient creates a TikHub client with timeout and user-agent settings.
+// 参数/Parameters:
+//   - token: TikHub API Token。 TikHub API token.
+//   - userAgent: 请求 TikHub 时使用的 User-Agent。 User-Agent used when calling TikHub.
 func newTikHubClient(token, userAgent string) *tikhub.Client {
 	return tikhub.NewClient(strings.TrimSpace(token),
 		tikhub.WithTimeout(httpRequestTimeout),
@@ -209,6 +236,8 @@ func newTikHubClient(token, userAgent string) *tikhub.Client {
 
 // extractTikHubSignature 从 TikHub JSON 响应中提取签名。
 // extractTikHubSignature extracts a signature from a TikHub JSON response.
+// 参数/Parameters:
+//   - body: TikHub JSON 响应字节。 TikHub JSON response bytes.
 func extractTikHubSignature(body []byte) string {
 	var payload interface{}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -219,6 +248,9 @@ func extractTikHubSignature(body []byte) string {
 
 // findSignatureValue 在未知 JSON 结构中递归查找签名字段。
 // findSignatureValue recursively searches unknown JSON shapes for a signature field.
+// 参数/Parameters:
+//   - value: 当前 JSON 节点。 Current JSON node.
+//   - allowRawString: 是否允许当前字符串节点直接作为签名。 Whether the current string node may be treated as the signature.
 func findSignatureValue(value interface{}, allowRawString bool) string {
 	switch v := value.(type) {
 	case string:
@@ -264,6 +296,8 @@ func findSignatureValue(value interface{}, allowRawString bool) string {
 
 // isLikelySignature 粗略判断字符串是否可能是签名值。
 // isLikelySignature heuristically reports whether a string looks like a signature value.
+// 参数/Parameters:
+//   - value: 待判断的字符串。 String to test.
 func isLikelySignature(value string) bool {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -278,6 +312,8 @@ func isLikelySignature(value string) bool {
 
 // normalizeTikHubSignature 规范化 TikHub 返回的签名文本。
 // normalizeTikHubSignature normalizes signature text returned by TikHub.
+// 参数/Parameters:
+//   - value: TikHub 返回的签名、URL 或查询片段。 Signature, URL, or query fragment returned by TikHub.
 func normalizeTikHubSignature(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -307,6 +343,8 @@ func normalizeTikHubSignature(value string) string {
 
 // signatureFromValues 从 URL 查询参数中提取签名字段。
 // signatureFromValues extracts a signature field from URL query values.
+// 参数/Parameters:
+//   - values: 已解析的 URL 查询参数。 Parsed URL query values.
 func signatureFromValues(values url.Values) string {
 	for _, key := range []string{
 		"signature",

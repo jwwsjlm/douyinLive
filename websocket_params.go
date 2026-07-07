@@ -236,19 +236,31 @@ func websocketPushURLFromResponse(response interface {
 	GetPushServer() string
 	GetProxyServer() string
 }) string {
+	pushURL, _ := websocketPushURLFromResponseWithSource(response)
+	return pushURL
+}
+
+func websocketPushURLFromResponseWithSource(response interface {
+	GetPushServerV2() string
+	GetPushServer() string
+	GetProxyServer() string
+}) (string, string) {
 	if response == nil {
-		return ""
+		return "", ""
 	}
-	for _, candidate := range []string{
-		response.GetPushServerV2(),
-		response.GetPushServer(),
-		response.GetProxyServer(),
+	for _, candidate := range []struct {
+		source string
+		value  string
+	}{
+		{source: "push_server_v2", value: response.GetPushServerV2()},
+		{source: "push_server", value: response.GetPushServer()},
+		{source: "proxy_server", value: response.GetProxyServer()},
 	} {
-		if pushURL := normalizeWebsocketPushURL(candidate); pushURL != "" {
-			return pushURL
+		if pushURL := normalizeWebsocketPushURL(candidate.value); pushURL != "" {
+			return pushURL, candidate.source
 		}
 	}
-	return ""
+	return "", ""
 }
 
 func normalizeWebsocketPushURL(candidate string) string {

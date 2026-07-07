@@ -22,6 +22,35 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+type captureLogSink struct {
+	messages []string
+	args     [][]interface{}
+}
+
+func (l *captureLogSink) Print(v ...interface{})                 {}
+func (l *captureLogSink) Printf(format string, v ...interface{}) {}
+func (l *captureLogSink) Println(v ...interface{})               {}
+
+func (l *captureLogSink) Debug(msg string, args ...interface{}) {
+	l.messages = append(l.messages, msg)
+	l.args = append(l.args, args)
+}
+
+func (l *captureLogSink) Info(msg string, args ...interface{}) {
+	l.messages = append(l.messages, msg)
+	l.args = append(l.args, args)
+}
+
+func (l *captureLogSink) Warn(msg string, args ...interface{}) {
+	l.messages = append(l.messages, msg)
+	l.args = append(l.args, args)
+}
+
+func (l *captureLogSink) Error(msg string, args ...interface{}) {
+	l.messages = append(l.messages, msg)
+	l.args = append(l.args, args)
+}
+
 func TestQueryEscapeValuePreservesSignatureCharacters(t *testing.T) {
 	got := queryEscapeValue("ab+c/d e")
 	want := "ab%2Bc%2Fd%20e"
@@ -103,6 +132,140 @@ func TestParseRoomIDFromLivePageSupportsRoomStoreState(t *testing.T) {
 	}
 }
 
+func TestParseRoomIDFromLivePageSupportsStatusOnlyPayload(t *testing.T) {
+	html := `self.__pace_f.push([1,"{\"id_str\":\"7659631024187493163\",\"status\":2,\"status_str\":\"2\",\"title\":\"直播标题\",\"user_count_str\":\"68\","])`
+	if got := parseRoomIDFromLivePage(html); got != "7659631024187493163" {
+		t.Fatalf("parseRoomIDFromLivePage() = %q", got)
+	}
+}
+
+func TestParseRoomIDFromLivePageSupportsEndedGiftEffectID(t *testing.T) {
+	html := `<div id="gift_effect_bg_7659772543859215154"></div><span>直播已结束</span>`
+	if got := parseRoomIDFromLivePage(html); got != "7659772543859215154" {
+		t.Fatalf("parseRoomIDFromLivePage() = %q", got)
+	}
+}
+
+func TestParseRoomInfoFromLivePageSupportsEmbeddedRoomStore(t *testing.T) {
+	html := `self.__pace_f.push([1,"{\"roomStore\":{\"roomInfo\":{\"room\":{\"id_str\":\"7659786040097426226\",\"status\":2,\"status_str\":\"2\",\"title\":\"梦三国娱乐解说\",\"owner\":{\"id_str\":\"101220697463\",\"nickname\":\"走秀（梦三国解说）\",\"avatar_thumb\":{\"url_list\":[\"https://p3.douyinpic.com/avatar.jpeg\",\"https://p11.douyinpic.com/avatar.jpeg\"]}}}}}}"])`
+
+	info := parseRoomInfoFromLivePage(html)
+	if info.roomID != "7659786040097426226" {
+		t.Fatalf("roomID = %q", info.roomID)
+	}
+	if info.pushID != "101220697463" {
+		t.Fatalf("pushID = %q", info.pushID)
+	}
+	if info.liveName != "走秀（梦三国解说）" {
+		t.Fatalf("liveName = %q", info.liveName)
+	}
+	if info.title != "梦三国娱乐解说" {
+		t.Fatalf("title = %q", info.title)
+	}
+	if info.avatarThumb != "https://p11.douyinpic.com/avatar.jpeg" {
+		t.Fatalf("avatarThumb = %q", info.avatarThumb)
+	}
+}
+
+func TestParseRoomInfoFromLivePageUsesRoomInfoAnchorSibling(t *testing.T) {
+	html := `self.__pace_f.push([1,"{\"roomStore\":{\"roomInfo\":{\"room\":{\"id_str\":\"7659772543859215154\",\"status\":4,\"status_str\":\"4\",\"title\":\"offline-room-title\"},\"roomId\":\"7659772543859215154\",\"web_rid\":\"386395296025\",\"anchor\":{\"id_str\":\"68252455312\",\"nickname\":\"CACA-anchor\",\"avatar_thumb\":{\"url_list\":[\"https://p3.douyinpic.com/a.jpeg\",\"https://p11.douyinpic.com/b.jpeg\",\"https://p26.douyinpic.com/c.jpeg\"]}}}}}"])`
+
+	info := parseRoomInfoFromLivePage(html)
+	if info.roomID != "7659772543859215154" {
+		t.Fatalf("roomID = %q", info.roomID)
+	}
+	if info.pushID != "68252455312" {
+		t.Fatalf("pushID = %q", info.pushID)
+	}
+	if info.liveName != "CACA-anchor" {
+		t.Fatalf("liveName = %q", info.liveName)
+	}
+	if info.title != "offline-room-title" {
+		t.Fatalf("title = %q", info.title)
+	}
+	if info.avatarThumb != "https://p26.douyinpic.com/c.jpeg" {
+		t.Fatalf("avatarThumb = %q", info.avatarThumb)
+	}
+}
+
+func TestParseRoomInfoFromLivePageSkipsEmptyRoomInfoBeforeValidState(t *testing.T) {
+	html := `self.__pace_f.push([1,"{\"roomStore\":{\"roomInfo\":{},\"liveStatus\":\"normal\"}}"])
+self.__pace_f.push([1,"{\"roomStore\":{\"roomInfo\":{\"room\":{\"id_str\":\"7659772543859215154\",\"status\":4,\"status_str\":\"4\",\"title\":\"offline-room-title\"},\"roomId\":\"7659772543859215154\",\"web_rid\":\"386395296025\",\"anchor\":{\"id_str\":\"68252455312\",\"nickname\":\"CACA-anchor\",\"avatar_thumb\":{\"url_list\":[\"https://p3.douyinpic.com/a.jpeg\",\"https://p11.douyinpic.com/b.jpeg\",\"https://p26.douyinpic.com/c.jpeg\"]}}}}}"])`
+
+	info := parseRoomInfoFromLivePage(html)
+	if info.roomID != "7659772543859215154" {
+		t.Fatalf("roomID = %q", info.roomID)
+	}
+	if info.liveName != "CACA-anchor" {
+		t.Fatalf("liveName = %q", info.liveName)
+	}
+	if info.title != "offline-room-title" {
+		t.Fatalf("title = %q", info.title)
+	}
+}
+
+func TestParseLivePageStateAcceptsAnchorOnlyRoomInfoAsOfflineAccount(t *testing.T) {
+	html := `self.__pace_f.push([1,"{\"roomStore\":{\"roomInfo\":{},\"liveStatus\":\"normal\"}}"])
+self.__pace_f.push([1,"{\"roomStore\":{\"roomInfo\":{\"roomId\":\"\",\"web_rid\":\"32536162943\",\"anchor\":{\"id_str\":\"3872957772872119\",\"nickname\":\"anchor-only-name\",\"avatar_thumb\":{\"url_list\":[\"https://p3.douyinpic.com/a.jpeg\"]}}}}}"])`
+
+	state := parseLivePageState(html)
+	if state.hasRoomIdentity() {
+		t.Fatalf("hasRoomIdentity() = true, want false for anchor-only page: %#v", state)
+	}
+	if !state.hasKnownPageIdentity() {
+		t.Fatalf("hasKnownPageIdentity() = false, want true for anchor-only page: %#v", state)
+	}
+	if !state.hasAnchorIdentity {
+		t.Fatalf("hasAnchorIdentity = false, want true: %#v", state)
+	}
+	if !state.statusKnown || state.isLive {
+		t.Fatalf("status = (%v, %v), want known offline", state.isLive, state.statusKnown)
+	}
+	if state.info.liveName != "anchor-only-name" {
+		t.Fatalf("liveName = %q", state.info.liveName)
+	}
+	if state.info.roomID != "" {
+		t.Fatalf("roomID = %q, want empty until room appears", state.info.roomID)
+	}
+}
+
+func TestParseLivePageStateTreatsAnchorWithoutRoomObjectAsAccountOffline(t *testing.T) {
+	html := `self.__pace_f.push([1,"{\"roomStore\":{\"roomInfo\":{\"roomId\":\"7659700000000000000\",\"web_rid\":\"32536162943\",\"anchor\":{\"id_str\":\"3872957772872119\",\"nickname\":\"?????\",\"avatar_thumb\":{\"url_list\":[\"https://p3.douyinpic.com/a.jpeg\"]}}}}}"])`
+
+	state := parseLivePageState(html)
+	if state.hasRoomIdentity() {
+		t.Fatalf("hasRoomIdentity() = true, want false when roomInfo.room is missing: %#v", state)
+	}
+	if !state.info.anchorOnly || !state.hasAnchorIdentity {
+		t.Fatalf("anchor-only identity not detected: %#v", state)
+	}
+	if !state.statusKnown || state.isLive {
+		t.Fatalf("status = (%v, %v), want known offline account", state.isLive, state.statusKnown)
+	}
+	if state.info.roomID != "" {
+		t.Fatalf("roomID = %q, want empty because roomInfo.room is missing", state.info.roomID)
+	}
+	if state.info.liveName != "?????" {
+		t.Fatalf("liveName = %q", state.info.liveName)
+	}
+}
+
+func TestParseRoomInfoFromLivePagePrefersRoomObjectOverEarlierAnchorOnlyState(t *testing.T) {
+	html := `self.__pace_f.push([1,"{\"roomStore\":{\"roomInfo\":{\"web_rid\":\"386395296025\",\"anchor\":{\"id_str\":\"68252455312\",\"nickname\":\"CACA??\"}}}}"])
+self.__pace_f.push([1,"{\"roomStore\":{\"roomInfo\":{\"room\":{\"id_str\":\"7659772543859215154\",\"status\":4,\"status_str\":\"4\",\"title\":\"?????\"},\"anchor\":{\"id_str\":\"68252455312\",\"nickname\":\"CACA??\"}}}}}"])`
+
+	state := parseLivePageState(html)
+	if !state.hasRoomIdentity() {
+		t.Fatalf("hasRoomIdentity() = false, want room object to win: %#v", state)
+	}
+	if state.info.anchorOnly {
+		t.Fatalf("anchorOnly = true, want false when later roomInfo.room exists: %#v", state)
+	}
+	if state.info.roomID != "7659772543859215154" || state.info.liveName != "CACA??" || state.info.title != "?????" {
+		t.Fatalf("unexpected parsed room info: %#v", state.info)
+	}
+}
+
 func TestParseUserUniqueIDFromLivePageSupportsLogState(t *testing.T) {
 	html := `setPageViewLog({"odin":"{\"user_id\":\"1561766825835499\",\"user_unique_id\":\"7659797852999091746\"}"});`
 	if got := parseUserUniqueIDFromLivePage(html); got != "7659797852999091746" {
@@ -115,6 +278,61 @@ func TestParseLiveStatusFromLivePageSupportsRoomStoreState(t *testing.T) {
 	status, ok := parseLiveStatusFromLivePage(html, "7659792511015177001")
 	if !ok || !status {
 		t.Fatalf("parseLiveStatusFromLivePage() = (%v, %v), want (true, true)", status, ok)
+	}
+}
+
+func TestParseLiveStatusFromLivePageSupportsIssue14EscapedStatusRegex(t *testing.T) {
+	html := `self.__pace_f.push([1,"{\"id_str\":\"7659831978830154559\",\"status\":2,\"status_str\":\"2\",\"title\":\"3070ti 到货\",\"user_count_str\":\"68\","])`
+	status, ok := parseLiveStatusFromLivePage(html, "7659831978830154559")
+	if !ok || !status {
+		t.Fatalf("parseLiveStatusFromLivePage() = (%v, %v), want (true, true)", status, ok)
+	}
+}
+
+func TestParseLiveStatusFromLivePageTreatsNonTwoStatusAsOffline(t *testing.T) {
+	html := `self.__pace_f.push([1,"{\"id_str\":\"7659772543859215154\",\"status\":4,\"status_str\":\"4\",\"title\":\"CACA呆夫\",\"user_count_str\":\"\","])`
+	status, ok := parseLiveStatusFromLivePage(html, "7659772543859215154")
+	if !ok || status {
+		t.Fatalf("parseLiveStatusFromLivePage() = (%v, %v), want (false, true)", status, ok)
+	}
+}
+
+func TestParseLiveStatusFromLivePageDetectsEndedRoomText(t *testing.T) {
+	html := `<title>CACA呆夫（无畏契约）的抖音直播间 - 抖音直播</title><div id="gift_effect_bg_7659772543859215154"></div><span>直播已结束</span>`
+	status, ok := parseLiveStatusFromLivePage(html, "7659772543859215154")
+	if !ok || status {
+		t.Fatalf("parseLiveStatusFromLivePage() = (%v, %v), want (false, true)", status, ok)
+	}
+}
+
+func TestInvalidLivePageWithOnlyUserUniqueIDIsNotAValidRoom(t *testing.T) {
+	html := `<html><script>window.__log={"user_unique_id":"7659776308930922010"}; window.endpoint="/webcast/room/web/enter/";</script><body></body></html>`
+	if got := parseRoomIDFromLivePage(html); got != "" {
+		t.Fatalf("parseRoomIDFromLivePage() = %q, want empty for invalid page without room state", got)
+	}
+	if _, ok := parseLiveStatusFromLivePage(html, ""); ok {
+		t.Fatal("parseLiveStatusFromLivePage() reported a known status for an invalid page without room state")
+	}
+	state := parseLivePageState(html)
+	if state.hasRoomIdentity() {
+		t.Fatalf("parseLivePageState() marked invalid page as valid: %#v", state)
+	}
+	if state.userUniqueID != "7659776308930922010" {
+		t.Fatalf("userUniqueID = %q", state.userUniqueID)
+	}
+}
+
+func TestParseLivePageStateAcceptsEndedRoomStatusAsExistingRoom(t *testing.T) {
+	html := `self.__pace_f.push([1,"{\"id_str\":\"7659772543859215154\",\"status\":4,\"status_str\":\"4\",\"title\":\"CACA呆夫\",\"user_count_str\":\"\","])`
+	state := parseLivePageState(html)
+	if !state.hasRoomIdentity() {
+		t.Fatalf("parseLivePageState() did not mark ended room as valid: %#v", state)
+	}
+	if state.info.roomID != "7659772543859215154" {
+		t.Fatalf("roomID = %q", state.info.roomID)
+	}
+	if !state.statusKnown || state.isLive {
+		t.Fatalf("status = (%v, %v), want known offline", state.isLive, state.statusKnown)
 	}
 }
 
@@ -153,6 +371,33 @@ func TestRoomEnterUpdatePreservesLivePageUserUniqueID(t *testing.T) {
 	}
 }
 
+func TestRoomEnterUpdatePreservesLivePageMetadataWhenEnterMissingDisplayFields(t *testing.T) {
+	dl := &DouyinLive{}
+	dl.updateRoomInfoFromLivePage(roomInfoSnapshot{
+		roomID:      "page-room-id",
+		pushID:      "page-user-unique-id",
+		liveName:    "CACA-anchor",
+		title:       "offline-room-title",
+		avatarThumb: "page-avatar",
+	})
+
+	dl.updateRoomInfoFromEnter(roomInfoSnapshot{
+		roomID: "enter-room-id",
+		pushID: "enter-user-id",
+	})
+
+	info := dl.roomInfoSnapshot()
+	if info.roomID != "enter-room-id" {
+		t.Fatalf("roomID = %q", info.roomID)
+	}
+	if info.pushID != "page-user-unique-id" {
+		t.Fatalf("pushID = %q, want page user_unique_id", info.pushID)
+	}
+	if info.liveName != "CACA-anchor" || info.title != "offline-room-title" || info.avatarThumb != "page-avatar" {
+		t.Fatalf("metadata was overwritten by empty web/enter fields: %#v", info)
+	}
+}
+
 func TestRoomEnterEmptyResponseDoesNotRetryWhenFallbackAvailable(t *testing.T) {
 	dl := &DouyinLive{}
 	dl.setLiveStatus(true)
@@ -173,6 +418,60 @@ func TestRoomEnterEmptyResponseDoesNotRetryWhenFallbackAvailable(t *testing.T) {
 	}
 	if info.roomID != "7659792511015177001" || info.pushID != "7601036345435309606" {
 		t.Fatalf("fallback ids = (%q, %q)", info.roomID, info.pushID)
+	}
+}
+
+func TestRoomEnterEmptyResponseDoesNotRetryWhenKnownOffline(t *testing.T) {
+	dl := &DouyinLive{}
+	dl.liveID = "386395296025"
+	dl.setLivePageIDs("7659772543859215154", "")
+	dl.setLiveStatus(false)
+
+	err := fmt.Errorf("%w status=200 content_type=%q content_length=0 raw_len=0", errRoomInfoEmpty, "application/json")
+	if dl.shouldRetryRoomEnter(err) {
+		t.Fatal("shouldRetryRoomEnter() = true, want false when live page confirms ended/offline status")
+	}
+	if _, ok := dl.roomEnterFallbackBody(err); ok {
+		t.Fatal("roomEnterFallbackBody() returned live fallback for a known offline room")
+	}
+}
+
+func TestRoomEnterEmptyAfterMissingLivePageStateIsRoomNotFound(t *testing.T) {
+	dl := &DouyinLive{}
+	err := fmt.Errorf("%w status=200 content_type=%q content_length=0 raw_len=0", errRoomInfoEmpty, "application/json")
+	livePageErr := fmt.Errorf("%w: %s", errLivePageStateNotFound, "9122185334341")
+
+	if got := dl.roomNotFoundErrorAfterRoomEnter(err, livePageErr); !errors.Is(got, ErrRoomNotFound) {
+		t.Fatalf("roomNotFoundErrorAfterRoomEnter() = %v, want ErrRoomNotFound", got)
+	}
+}
+
+func TestRoomEnterEmptyAfterKnownOfflineIsNotRoomNotFound(t *testing.T) {
+	dl := &DouyinLive{}
+	dl.setLivePageIDs("7659772543859215154", "")
+	dl.setLiveStatus(false)
+	err := fmt.Errorf("%w status=200 content_type=%q content_length=0 raw_len=0", errRoomInfoEmpty, "application/json")
+
+	if got := dl.roomNotFoundErrorAfterRoomEnter(err, nil); got != nil {
+		t.Fatalf("roomNotFoundErrorAfterRoomEnter() = %v, want nil for known offline room", got)
+	}
+}
+
+func TestLiveStatusSnapshotDistinguishesUnknownAndKnownOffline(t *testing.T) {
+	dl := &DouyinLive{}
+	if _, known := dl.liveStatusSnapshot(); known {
+		t.Fatal("new DouyinLive zero state should not have a known live status")
+	}
+
+	dl.setLiveStatus(false)
+	isLive, known := dl.liveStatusSnapshot()
+	if !known || isLive {
+		t.Fatalf("liveStatusSnapshot() = (%v, %v), want (false, true)", isLive, known)
+	}
+
+	dl.clearLiveStatus()
+	if _, known := dl.liveStatusSnapshot(); known {
+		t.Fatal("clearLiveStatus() did not clear known status")
 	}
 }
 
@@ -372,6 +671,64 @@ func TestRoomEnterFallbackBodyUsesLivePageState(t *testing.T) {
 	}
 }
 
+func TestRoomEnterFallbackBodyDoesNotUseLiveIDAsNickname(t *testing.T) {
+	dl, err := newDouyinLive("1144632524", nil, "", staticWebsocketSigner{signature: "sig"})
+	if err != nil {
+		t.Fatalf("newDouyinLive() failed: %v", err)
+	}
+	defer dl.Dispose()
+	dl.setLivePageIDs("7659786040097426226", "7601036345435309606")
+	dl.setLiveStatus(true)
+
+	body, ok := dl.roomEnterFallbackBody(fmt.Errorf("%w status=200 raw_len=0", errRoomInfoEmpty))
+	if !ok {
+		t.Fatalf("roomEnterFallbackBody() ok = false")
+	}
+	info, err := parseRoomInfo(body)
+	if err != nil {
+		t.Fatalf("parseRoomInfo(fallback) failed: %v body=%s", err, body)
+	}
+	if info.liveName == dl.liveID {
+		t.Fatalf("fallback liveName = liveID %q, should stay empty when nickname is unknown", info.liveName)
+	}
+}
+
+func TestLogMissingLiveNameWarnsWithRoomContext(t *testing.T) {
+	logger := &captureLogSink{}
+	dl := &DouyinLive{liveID: "1144632524", logger: logger}
+
+	dl.logMissingLiveName("live_page_fallback", roomInfoSnapshot{
+		roomID: "7659786040097426226",
+		pushID: "7601036345435309606",
+	})
+
+	if len(logger.messages) != 1 {
+		t.Fatalf("log count = %d, want 1", len(logger.messages))
+	}
+	if logger.messages[0] != "直播间名称未获取到，已继续连接" {
+		t.Fatalf("message = %q", logger.messages[0])
+	}
+	args := logger.args[0]
+	want := map[string]interface{}{
+		"live_id":        "1144632524",
+		"room_id":        "7659786040097426226",
+		"user_unique_id": "7601036345435309606",
+		"source":         "live_page_fallback",
+	}
+	for i := 0; i+1 < len(args); i += 2 {
+		key, ok := args[i].(string)
+		if !ok {
+			continue
+		}
+		if value, exists := want[key]; exists && args[i+1] == value {
+			delete(want, key)
+		}
+	}
+	if len(want) > 0 {
+		t.Fatalf("log args %#v missing %v", args, want)
+	}
+}
+
 func TestBrowserClientHintHeadersUseChromeMajorVersion(t *testing.T) {
 	ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
 	headers := browserClientHintHeaders(ua)
@@ -438,6 +795,26 @@ func TestApplyWebsocketResponseStateTracksCursorInternalExtAndHeartbeat(t *testi
 	})
 	if got := dl.currentHeartbeatInterval(); got != 15*time.Second {
 		t.Fatalf("currentHeartbeatInterval() = %v, want %v", got, 15*time.Second)
+	}
+}
+
+func TestWebsocketPushURLFromResponsePrefersDynamicServer(t *testing.T) {
+	pushURL, source := websocketPushURLFromResponseWithSource(&new_douyin.Webcast_Im_Response{
+		PushServerV2: "wss://webcast100-ws-web-hl.douyin.com/webcast/im/push/v2/",
+		PushServer:   "wss://webcast100-ws-web-lf.douyin.com/webcast/im/push/v2/",
+		ProxyServer:  "wss://webcast100-ws-web-lq.douyin.com/webcast/im/push/v2/",
+	})
+	if source != "push_server_v2" {
+		t.Fatalf("source = %q, want push_server_v2", source)
+	}
+	if pushURL != "wss://webcast100-ws-web-hl.douyin.com/webcast/im/push/v2/" {
+		t.Fatalf("pushURL = %q", pushURL)
+	}
+}
+
+func TestDefaultWebsocketPushURLUsesCurrentWebHostFamily(t *testing.T) {
+	if !strings.HasPrefix(websocketPushURL, "wss://webcast100-ws-web-") {
+		t.Fatalf("websocketPushURL = %q, want webcast100 fallback", websocketPushURL)
 	}
 }
 

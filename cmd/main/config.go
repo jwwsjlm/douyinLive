@@ -34,15 +34,13 @@ const (
 	signProviderTikHub = "tikhub"
 )
 
-// CookieConfig 存储 Cookie 配置
 // CookieConfig 保存默认 Cookie 和按房间覆盖的 Cookie。
 // CookieConfig stores the default cookie and per-room cookie overrides.
 type CookieConfig struct {
-	Douyin string            // 抖音默认 Cookie
-	Rooms  map[string]string // 按直播间 ID 配置的 Cookie
+	Douyin string            // 抖音默认 Cookie。 Default Douyin Cookie.
+	Rooms  map[string]string // 按直播间 ID 配置的 Cookie。 Per-room Cookie overrides keyed by room ID.
 }
 
-// MonitorConfig 存储未开播监控相关配置
 // MonitorConfig 保存未开播轮询和通知间隔配置。
 // MonitorConfig stores polling and notification intervals for offline-room monitoring.
 type MonitorConfig struct {
@@ -50,28 +48,24 @@ type MonitorConfig struct {
 	NotifyInterval time.Duration
 }
 
-// LogConfig 存储日志配置
 // LogConfig 保存日志配置。
 // LogConfig stores logging configuration.
 type LogConfig struct {
 	Level string
 }
 
-// SignConfig 存储 WebSocket 签名来源配置
 // SignConfig 保存 WebSocket 签名来源配置。
 // SignConfig stores WebSocket signature provider configuration.
 type SignConfig struct {
 	Provider string
 }
 
-// TikHubConfig 存储 TikHub API 配置
 // TikHubConfig 保存 TikHub API 配置。
 // TikHubConfig stores TikHub API configuration.
 type TikHubConfig struct {
 	Key string
 }
 
-// Config 存储应用的所有配置
 // Config 保存应用运行所需的全部配置。
 // Config stores all runtime configuration for the application.
 type Config struct {
@@ -86,6 +80,8 @@ type Config struct {
 
 // firstNonEmpty 返回第一个去空白后非空的字符串。
 // firstNonEmpty returns the first non-empty string after trimming spaces.
+// 参数/Parameters:
+//   - values: 候选字符串列表。 Candidate strings.
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
@@ -97,6 +93,8 @@ func firstNonEmpty(values ...string) string {
 
 // normalizeSignProvider 规范化签名来源配置并校验合法性。
 // normalizeSignProvider normalizes and validates the configured signature provider.
+// 参数/Parameters:
+//   - provider: 配置或命令行传入的签名来源名称。 Sign provider name from config or CLI.
 func normalizeSignProvider(provider string) (string, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
@@ -113,30 +111,32 @@ func normalizeSignProvider(provider string) (string, error) {
 	}
 }
 
-// NewConfig 创建并加载应用配置
 // NewConfig 读取命令行、环境变量和配置文件并生成应用配置。
 // NewConfig reads flags, environment variables, and config files into application configuration.
 func NewConfig() (*Config, error) {
-	// 绑定命令行参数
+	// 绑定命令行参数。
+	// Bind command-line flags.
 	pflag.String("port", "1088", "WebSocket 服务端口")
 	pflag.Bool("unknown", false, "是否输出未知源的 pb 消息")
 	pflag.String("log-level", "info", "日志级别: debug, info, warn, error")
 	pflag.String("sign-provider", defaultSignProvider, "WebSocket 签名来源: local, tikhub")
 	pflag.String("tikhub-key", "", "TikHub API Key，用于在线生成 WebSocket xb 签名")
 	configFile := pflag.String("config", "", "指定配置文件路径")
-	pflag.BoolVar(&showVersion, "version", false, "Print version information")
+	pflag.BoolVar(&showVersion, "version", false, "输出版本信息")
 	pflag.Parse()
 	if showVersion {
 		fmt.Println(VersionString())
 		os.Exit(0)
 	}
 
-	// 绑定到 viper
+	// 绑定到 viper。
+	// Bind flags to viper.
 	if err := viper.BindPFlags(pflag.CommandLine); err != nil {
 		return nil, err
 	}
 
-	// 配置文件设置
+	// 配置文件设置。
+	// Configure config file lookup.
 	if *configFile != "" {
 		viper.SetConfigFile(*configFile)
 	} else {
@@ -144,6 +144,7 @@ func NewConfig() (*Config, error) {
 		viper.SetConfigType("yaml")
 
 		// 优先从可执行文件所在目录读取配置，避免双击启动时找不到 config.yaml。
+		// Prefer the executable directory so double-click startup can find config.yaml.
 		exePath, err := os.Executable()
 		if err == nil {
 			exeDir := filepath.Dir(exePath)
@@ -155,12 +156,14 @@ func NewConfig() (*Config, error) {
 		viper.AddConfigPath("/etc/app/")
 	}
 
-	// 环境变量支持
+	// 环境变量支持。
+	// Enable environment variable support.
 	viper.SetEnvPrefix("APP")
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 
-	// 设置默认值
+	// 设置默认值。
+	// Set defaults.
 	viper.SetDefault("port", "1088")
 	viper.SetDefault("unknown", false)
 	viper.SetDefault("cookie.douyin", "")
@@ -170,13 +173,15 @@ func NewConfig() (*Config, error) {
 	viper.SetDefault("log.level", "info")
 	viper.SetDefault("sign.provider", defaultSignProvider)
 	viper.SetDefault("tikhub.key", "")
-	// 读取配置
+	// 读取配置。
+	// Read configuration.
 	if err := viper.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
 		if !errors.As(err, &configFileNotFoundError) {
 			return nil, fmt.Errorf("读取配置文件失败：%w", err)
 		}
-		// 配置文件不存在时给出提示
+		// 配置文件不存在时给出提示。
+		// Print a hint when the config file does not exist.
 		fmt.Println("⚠️  配置文件未找到，使用默认值或命令行参数")
 		fmt.Println("💡 建议在同目录下创建 config.yaml 文件")
 	} else {
@@ -222,7 +227,8 @@ func NewConfig() (*Config, error) {
 		tikHubKey = flag.Value.String()
 	}
 
-	// 填充 Config 结构体
+	// 填充 Config 结构体。
+	// Populate the Config struct.
 	cfg := &Config{
 		Port:    viper.GetString("port"),
 		Unknown: viper.GetBool("unknown"),

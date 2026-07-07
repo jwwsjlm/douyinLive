@@ -39,4 +39,5 @@ const (
 	WebcastRoomRankMessage = "WebcastRoomRankMessage"
 )
 
+// 核心运行时类型定义在 douyin.go 和 live_message.go。
 // Core runtime types are defined in douyin.go and live_message.go.

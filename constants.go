@@ -21,10 +21,12 @@ const (
 	liveStatusPollInterval  = 30 * time.Second
 	controlActionLiveEnd    = 3
 	webcastSDKVersion       = "1.0.15"
-	websocketPushURL        = "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/"
+	websocketPushURL        = "wss://webcast100-ws-web-lf.douyin.com/webcast/im/push/v2/"
 )
 
 var (
-	ErrLiveNotStarted = errors.New("直播间未开播")
-	errRoomInfoEmpty  = errors.New("直播间信息响应为空")
+	ErrLiveNotStarted        = errors.New("直播间未开播")
+	ErrRoomNotFound          = errors.New("直播间不存在")
+	errRoomInfoEmpty         = errors.New("直播间信息响应为空")
+	errLivePageStateNotFound = errors.New("直播页状态不存在")
 )

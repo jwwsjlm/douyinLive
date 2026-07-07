@@ -19,6 +19,8 @@ import (
 
 // HasGzipEncoding 判断消息头中是否包含 gzip 编码。
 // HasGzipEncoding reports whether the push headers declare gzip compression.
+// 参数/Parameters:
+//   - headers: PushFrame 头部列表。 PushFrame header list.
 func HasGzipEncoding(headers []*new_douyin.Webcast_Im_PushHeader) bool {
 	for _, header := range headers {
 		if header.Key == "compress_type" && header.Value == "gzip" {
@@ -30,6 +32,8 @@ func HasGzipEncoding(headers []*new_douyin.Webcast_Im_PushHeader) bool {
 
 // GetxMSStub 拼接有序参数并返回 MD5 十六进制摘要。
 // GetxMSStub joins ordered parameters and returns their MD5 hex digest.
+// 参数/Parameters:
+//   - params: 需要按插入顺序拼接的参数表。 Parameter map that must be joined in insertion order.
 func GetxMSStub(params *orderedmap.OrderedMap) string {
 	var sigParams strings.Builder
 	for i, key := range params.Keys() {
@@ -45,6 +49,8 @@ func GetxMSStub(params *orderedmap.OrderedMap) string {
 
 // randomIndex 返回 [0, max) 范围内的安全随机索引。
 // randomIndex returns a cryptographically random index in the [0, max) range.
+// 参数/Parameters:
+//   - max: 随机索引上限，不包含该值。 Exclusive upper bound for the random index.
 func randomIndex(max int) int {
 	if max <= 1 {
 		return 0
@@ -59,6 +65,8 @@ func randomIndex(max int) int {
 
 // randomInt64 返回 [0, max) 范围内的安全随机 int64。
 // randomInt64 returns a cryptographically random int64 in the [0, max) range.
+// 参数/Parameters:
+//   - max: 随机数上限，不包含该值。 Exclusive upper bound for the random number.
 func randomInt64(max int64) int64 {
 	if max <= 1 {
 		return 0
@@ -73,6 +81,8 @@ func randomInt64(max int64) int64 {
 
 // GenerateJitterNanos 生成不超过最大时长的随机抖动纳秒数。
 // GenerateJitterNanos returns random jitter in nanoseconds up to the maximum duration.
+// 参数/Parameters:
+//   - maxDuration: 抖动时长上限。 Maximum jitter duration.
 func GenerateJitterNanos(maxDuration time.Duration) int64 {
 	if maxDuration <= 0 {
 		return 0
@@ -82,6 +92,8 @@ func GenerateJitterNanos(maxDuration time.Duration) int64 {
 
 // GenerateMsToken 生成随机 msToken。
 // GenerateMsToken generates a random msToken value.
+// 参数/Parameters:
+//   - length: 生成 token 的字符长度。 Character length of the generated token.
 func GenerateMsToken(length int) string {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 	b := make([]byte, length)
@@ -93,6 +105,8 @@ func GenerateMsToken(length int) string {
 
 // GzipCompressAndBase64Encode 将数据 gzip 压缩后进行 Base64 编码。
 // GzipCompressAndBase64Encode gzip-compresses data and encodes it as Base64.
+// 参数/Parameters:
+//   - data: 待压缩编码的原始字节。 Raw bytes to compress and encode.
 func GzipCompressAndBase64Encode(data []byte) (string, error) {
 	var b bytes.Buffer
 	w := gzip.NewWriter(&b)
@@ -109,6 +123,9 @@ func GzipCompressAndBase64Encode(data []byte) (string, error) {
 
 // NewOrderedMap 创建 WebSocket 签名所需的有序参数表。
 // NewOrderedMap creates the ordered parameter map required for WebSocket signing.
+// 参数/Parameters:
+//   - roomID: 抖音长房间 ID。 Douyin long room ID.
+//   - pushID: WebSocket 签名所需的用户唯一 ID。 User unique ID required for WebSocket signing.
 func NewOrderedMap(roomID, pushID string) *orderedmap.OrderedMap {
 	smap := orderedmap.NewOrderedMap()
 	smap.Set("live_id", "1")

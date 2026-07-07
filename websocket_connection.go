@@ -14,7 +14,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// startWebSocket 基于当前上下文建立 WebSocket 连接。
 // startWebSocket 建立上游 WebSocket 连接并启动心跳。
 // startWebSocket establishes the upstream WebSocket connection and starts heartbeats.
 func (dl *DouyinLive) startWebSocket() error {
@@ -50,18 +49,21 @@ func (dl *DouyinLive) startWebSocket() error {
 		statusCode = resp.StatusCode
 	}
 	roomInfo := dl.roomInfoSnapshot()
-	dl.logger.Info("WebSocket 连接成功", logFlowArgs("ws", "dial", "live_id", roomInfo.liveID, "room_id", roomInfo.roomID, "live_name", roomInfo.liveName, "status_code", statusCode, "host", websocketHostForLog(url))...)
-	dl.logger.Info("WebSocket 连接成功", "live_id", roomInfo.liveID, "room_id", roomInfo.roomID, "live_name", roomInfo.liveName, "status_code", statusCode)
+	dl.logger.Info("WebSocket 连接成功", logFlowArgs("ws", "dial", "live_id", roomInfo.liveID, "room_id", roomInfo.roomID, "live_name", roomInfo.liveName, "title", roomInfo.title, "status_code", statusCode, "host", websocketHostForLog(url))...)
+	dl.logger.Info("WebSocket 连接成功", "live_id", roomInfo.liveID, "room_id", roomInfo.roomID, "live_name", roomInfo.liveName, "title", roomInfo.title, "status_code", statusCode)
 	dl.mu.Lock()
 	dl.conn = conn
 	dl.mu.Unlock()
 	dl.configureWebSocket(conn)
+	dl.setLiveStatus(true)
 	dl.startHeartbeatLoop()
 	return nil
 }
 
 // configureWebSocket 设置 WebSocket 读取限制和 pong 处理。
 // configureWebSocket configures WebSocket read limits and pong handling.
+// 参数/Parameters:
+//   - conn: 已建立的 WebSocket 连接。 Established WebSocket connection.
 func (dl *DouyinLive) configureWebSocket(conn *websocket.Conn) {
 	if conn == nil {
 		return
@@ -87,7 +89,6 @@ func (dl *DouyinLive) refreshCurrentReadDeadline() error {
 	return setWebSocketReadDeadline(conn)
 }
 
-// buildWebsocketURL 基于当前上下文构建 WebSocket URL
 // buildWebsocketURL 生成带签名的抖音 WebSocket URL。
 // buildWebsocketURL builds the signed Douyin WebSocket URL.
 func (dl *DouyinLive) buildWebsocketURL() (string, error) {
@@ -161,6 +162,8 @@ func (dl *DouyinLive) buildInitialIMFetchParams(roomInfo roomInfoSnapshot, msTok
 	return newInitialIMFetchParams(roomInfo, dl.userAgent, msToken).QueryString()
 }
 
+// initialIMFetchMSToken 返回 im/fetch 使用的 msToken，优先使用用户 Cookie 中的值。
+// initialIMFetchMSToken returns the msToken for im/fetch, preferring the value from user cookies.
 func (dl *DouyinLive) initialIMFetchMSToken() string {
 	if msToken := strings.TrimSpace(dl.cookieValue("msToken")); msToken != "" {
 		return msToken
@@ -173,6 +176,8 @@ func (dl *DouyinLive) initialIMFetchMSToken() string {
 	return dl.msToken
 }
 
+// fetchInitialIMState 请求 im/fetch 并保存 protobuf 返回的动态 WS 状态。
+// fetchInitialIMState requests im/fetch and stores dynamic WS state returned by protobuf.
 func (dl *DouyinLive) fetchInitialIMState() error {
 	roomInfo := dl.roomInfoSnapshot()
 	if roomInfo.roomID == "" || roomInfo.pushID == "" {
@@ -236,6 +241,14 @@ func (dl *DouyinLive) fetchInitialIMState() error {
 			err,
 		)
 	}
+	pushURL, pushURLSource := websocketPushURLFromResponseWithSource(response)
+	if pushURL == "" {
+		return fmt.Errorf("im fetch response missing websocket push server status=%d content_type=%q raw_len=%d",
+			resp.GetStatusCode(),
+			resp.GetHeader("Content-Type"),
+			len(body),
+		)
+	}
 	dl.applyWebsocketResponseState(response)
 	dl.logger.Debug("预取 IM 状态成功",
 		logFlowArgs("im_fetch", "prefetch",
@@ -251,11 +264,18 @@ func (dl *DouyinLive) fetchInitialIMState() error {
 			"push_server_v2", response.PushServerV2,
 			"push_server", response.PushServer,
 			"proxy_server", response.ProxyServer,
+			"push_url_source", pushURLSource,
+			"push_url_host", websocketHostForLog(pushURL),
 		)...,
 	)
 	return nil
 }
 
+// websocketURLState 返回构造 WS URL 所需的 cursor、internal_ext 和动态 push URL。
+// websocketURLState returns cursor, internal_ext, and dynamic push URL needed to build the WS URL.
+// 参数/Parameters:
+//   - fetchTime: 当前毫秒时间戳，用于缺省 internal_ext。 Current millisecond timestamp used for default internal_ext.
+//   - roomInfo: 房间信息快照。 Room metadata snapshot.
 func (dl *DouyinLive) websocketURLState(fetchTime int64, roomInfo roomInfoSnapshot) (cursor string, internalExt string, pushURL string) {
 	cursor, internalExt, pushURL = dl.websocketStateSnapshot()
 	if cursor == "" {
@@ -288,6 +308,9 @@ func (dl *DouyinLive) websocketDialContext() (string, http.Header, error) {
 
 // reconnectDialContext 准备重连所需的 URL 和请求头。
 // reconnectDialContext prepares the URL and headers for a reconnect dial.
+// 参数/Parameters:
+//   - changeUA: 是否更换浏览器 User-Agent。 Whether to rotate the browser User-Agent.
+//   - rebuildHTTP: 是否重建 HTTP 客户端。 Whether to rebuild the HTTP client.
 func (dl *DouyinLive) reconnectDialContext(changeUA bool, rebuildHTTP bool) (string, http.Header, error) {
 	dl.contextMu.Lock()
 	defer dl.contextMu.Unlock()
@@ -302,7 +325,6 @@ func (dl *DouyinLive) reconnectDialContext(changeUA bool, rebuildHTTP bool) (str
 	return url, dl.headers.Clone(), nil
 }
 
-// processMessages 处理消息
 // processMessages 持续读取上游 WebSocket 消息并按编码类型分发解析。
 // processMessages continuously reads upstream WebSocket messages and dispatches decoding by encoding type.
 func (dl *DouyinLive) processMessages() {
@@ -344,7 +366,6 @@ func (dl *DouyinLive) processMessages() {
 	}
 }
 
-// readMessage 读取消息
 // readMessage 从当前 WebSocket 连接读取一条消息。
 // readMessage reads one message from the current WebSocket connection.
 func (dl *DouyinLive) readMessage() (int, []byte, error) {
@@ -367,6 +388,8 @@ func (dl *DouyinLive) readMessage() (int, []byte, error) {
 
 // writeBinaryMessage 串行写入二进制 WebSocket 消息。
 // writeBinaryMessage serially writes a binary WebSocket message.
+// 参数/Parameters:
+//   - data: 要发送的二进制消息体。 Binary message payload to send.
 func (dl *DouyinLive) writeBinaryMessage(data []byte) error {
 	dl.writeMu.Lock()
 	defer dl.writeMu.Unlock()
@@ -387,6 +410,9 @@ func (dl *DouyinLive) writeBinaryMessage(data []byte) error {
 
 // closeCurrentConnection 关闭当前 WebSocket 连接并发送 close 控制帧。
 // closeCurrentConnection closes the current WebSocket connection and sends a close control frame.
+// 参数/Parameters:
+//   - code: WebSocket close 状态码。 WebSocket close status code.
+//   - reason: close 控制帧原因文本。 Close-frame reason text.
 func (dl *DouyinLive) closeCurrentConnection(code int, reason string) {
 	dl.mu.Lock()
 	conn := dl.conn

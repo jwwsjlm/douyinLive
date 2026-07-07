@@ -3,8 +3,11 @@ package main
 import (
 	"encoding/base64"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	douyinLive "github.com/jwwsjlm/douyinLive/v2"
 )
 
 func TestRoomManagerCookieForRoomPriority(t *testing.T) {
@@ -143,7 +146,7 @@ func TestRoomCloseAllClientsClosesEveryWaitingClient(t *testing.T) {
 	room.addClient(first)
 	room.addClient(second)
 
-	room.closeAllClients(liveInvalidMessage)
+	room.closeAllClients(roomInvalidMessage)
 
 	if got := room.clientCount(); got != 0 {
 		t.Fatalf("client count after closeAllClients = %d, want 0", got)
@@ -153,6 +156,77 @@ func TestRoomCloseAllClientsClosesEveryWaitingClient(t *testing.T) {
 		case <-client.stopCh:
 		default:
 			t.Fatalf("client %s was not closed", client.id)
+		}
+	}
+}
+
+func TestRoomLiveStatusMessagesExposeValidityAndStatus(t *testing.T) {
+	room := NewRoom("386395296025", nil, false, "", signProviderLocal, "", time.Second, 30*time.Second, nil)
+	room.liveName = "CACA-anchor"
+	room.title = "offline-room-title"
+	room.avatarThumb = "https://example.test/avatar.jpeg"
+
+	offline := string(room.offlineStatusMessage())
+	for _, want := range []string{`"event":"live_status"`, `"code":"ROOM_OFFLINE"`, `"valid":true`, `"live":false`, `"status":"offline"`, `"status_text":"直播间未开播"`, `"live_name":"CACA-anchor"`, `"title":"offline-room-title"`, `"avatar_thumb":"https://example.test/avatar.jpeg"`, `"suggestion":"客户端不需要重连`, `"retry_interval_seconds":30`} {
+		if !strings.Contains(offline, want) {
+			t.Fatalf("offlineStatusMessage() = %s, missing %s", offline, want)
+		}
+	}
+
+	ended := string(room.offlineEndedStatusMessage())
+	for _, want := range []string{`"event":"live_status"`, `"code":"ROOM_ENDED"`, `"valid":true`, `"live":false`, `"status":"ended"`, `"status_text":"直播间已下播"`, `"live_name":"CACA-anchor"`, `"title":"offline-room-title"`, `"avatar_thumb":"https://example.test/avatar.jpeg"`, `"suggestion":"客户端不需要重连`, `"retry_interval_seconds":30`} {
+		if !strings.Contains(ended, want) {
+			t.Fatalf("offlineEndedStatusMessage() = %s, missing %s", ended, want)
+		}
+	}
+
+	online := string(room.onlineStatusMessage())
+	for _, want := range []string{`"event":"live_status"`, `"code":"ROOM_ONLINE"`, `"valid":true`, `"live":true`, `"status":"online"`, `"status_text":"直播间已开播"`, `"live_name":"CACA-anchor"`, `"title":"offline-room-title"`, `"avatar_thumb":"https://example.test/avatar.jpeg"`, `"suggestion":"客户端可以开始正常处理直播消息"`} {
+		if !strings.Contains(online, want) {
+			t.Fatalf("onlineStatusMessage() = %s, missing %s", online, want)
+		}
+	}
+}
+
+func TestRoomAnchorOnlyStatusMessageExplainsAccountExistsButNoRoom(t *testing.T) {
+	room := NewRoom("32536162943", nil, false, "", signProviderLocal, "", time.Second, 30*time.Second, nil)
+	room.liveName = "一只喵动漫"
+	room.avatarThumb = "https://example.test/avatar.jpeg"
+	room.accountOnly = true
+
+	offline := string(room.offlineStatusMessage())
+	for _, want := range []string{`"code":"ACCOUNT_OFFLINE_NO_ROOM"`, `"status":"account_offline"`, `"status_text":"账号存在但当前没有直播间"`, `"has_room":false`, `"account_only":true`, `"live_name":"一只喵动漫"`, `"message":"账号存在，但网页没有返回直播间房间对象，可能是该账号从未开播或当前未创建直播间，当前按未开播处理"`, `"suggestion":"客户端不需要重连`} {
+		if !strings.Contains(offline, want) {
+			t.Fatalf("offlineStatusMessage() = %s, missing %s", offline, want)
+		}
+	}
+}
+
+func TestRoomMetadataUpdatePreservesExistingWhenSourceFieldsEmpty(t *testing.T) {
+	room := NewRoom("386395296025", nil, false, "", signProviderLocal, "", time.Second, 30*time.Second, nil)
+	room.liveName = "CACA-anchor"
+	room.title = "offline-room-title"
+	room.avatarThumb = "https://example.test/avatar.jpeg"
+
+	room.updateMetadataFromDouyinLive(&douyinLive.DouyinLive{})
+
+	liveName, title, avatarThumb, _ := room.metadataSnapshot()
+	if liveName != "CACA-anchor" || title != "offline-room-title" || avatarThumb != "https://example.test/avatar.jpeg" {
+		t.Fatalf("metadata was overwritten by empty DouyinLive fields: liveName=%q title=%q avatarThumb=%q", liveName, title, avatarThumb)
+	}
+}
+
+func TestRoomCloseMessagesUseReadableChineseCodes(t *testing.T) {
+	for name, payload := range map[string]string{
+		"roomInvalidMessage":       string(roomInvalidMessage),
+		"liveStartFailedMessage":   string(liveStartFailedMessage),
+		"serviceClosingMessage":    string(serviceClosingMessage),
+		"slowClientClosingMessage": string(slowClientClosingMessage),
+	} {
+		for _, want := range []string{`"code":`, `"message":`, `"suggestion":`} {
+			if !strings.Contains(payload, want) {
+				t.Fatalf("%s = %s, missing %s", name, payload, want)
+			}
 		}
 	}
 }

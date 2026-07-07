@@ -86,18 +86,26 @@ func (dl *DouyinLive) eventBus() *messageBus {
 
 // SubscribeMessage 订阅所有标准化直播消息。
 // SubscribeMessage subscribes to all normalized live messages.
+// 参数/Parameters:
+//   - handler: 接收标准化直播消息的回调。 Callback that receives normalized live messages.
 func (dl *DouyinLive) SubscribeMessage(handler LiveMessageHandler) string {
 	return dl.eventBus().subscribe(handler)
 }
 
 // SubscribeMethod 订阅单个抖音直播消息方法，例如 WebcastChatMessage。
 // SubscribeMethod subscribes to one Douyin webcast method, for example WebcastChatMessage.
+// 参数/Parameters:
+//   - method: 要订阅的抖音消息方法名。 Douyin message method to subscribe to.
+//   - handler: 接收匹配消息的回调。 Callback that receives matching messages.
 func (dl *DouyinLive) SubscribeMethod(method string, handler LiveMessageHandler) string {
 	return dl.eventBus().subscribe(handler, method)
 }
 
 // SubscribeMethods 订阅一组抖音直播消息方法。
 // SubscribeMethods subscribes to a set of Douyin webcast methods.
+// 参数/Parameters:
+//   - methods: 要订阅的抖音消息方法名列表。 Douyin message methods to subscribe to.
+//   - handler: 接收匹配消息的回调。 Callback that receives matching messages.
 func (dl *DouyinLive) SubscribeMethods(methods []string, handler LiveMessageHandler) string {
 	if len(methods) == 0 {
 		return ""
@@ -107,6 +115,9 @@ func (dl *DouyinLive) SubscribeMethods(methods []string, handler LiveMessageHand
 
 // subscribe 注册一个标准化消息订阅者并返回订阅 ID。
 // subscribe registers a normalized-message subscriber and returns its subscription ID.
+// 参数/Parameters:
+//   - handler: 订阅回调。 Subscription callback.
+//   - methods: 可选方法过滤列表；为空表示接收全部消息。 Optional method filters; empty means all messages.
 func (b *messageBus) subscribe(handler LiveMessageHandler, methods ...string) string {
 	if handler == nil {
 		return ""
@@ -140,6 +151,8 @@ func (b *messageBus) subscribe(handler LiveMessageHandler, methods ...string) st
 
 // unsubscribe 按订阅 ID 移除标准化消息订阅者。
 // unsubscribe removes a normalized-message subscriber by subscription ID.
+// 参数/Parameters:
+//   - id: 要取消的订阅 ID。 Subscription ID to remove.
 func (b *messageBus) unsubscribe(id string) {
 	if id == "" {
 		return
@@ -158,6 +171,8 @@ func (b *messageBus) unsubscribe(id string) {
 
 // hasSubscriber 判断订阅 ID 当前是否仍然有效。
 // hasSubscriber reports whether a subscription ID is still active.
+// 参数/Parameters:
+//   - id: 要检查的订阅 ID。 Subscription ID to check.
 func (b *messageBus) hasSubscriber(id string) bool {
 	if id == "" {
 		return false
@@ -176,6 +191,10 @@ func (b *messageBus) hasSubscriber(id string) bool {
 
 // publishWithLoggerUntil 分发消息，并在停止条件触发时中止。
 // publishWithLoggerUntil dispatches a message and stops when the stop condition fires.
+// 参数/Parameters:
+//   - logger: 用于记录订阅回调 panic 的日志器。 Logger used to record subscriber callback panics.
+//   - message: 要分发的标准化直播消息。 Normalized live message to dispatch.
+//   - stop: 可选停止条件；返回 true 时中止分发。 Optional stop condition; true aborts dispatch.
 func (b *messageBus) publishWithLoggerUntil(logger logSink, message *LiveMessage, stop func() bool) {
 	if message == nil {
 		return
@@ -208,6 +227,8 @@ func (b *messageBus) publishWithLoggerUntil(logger logSink, message *LiveMessage
 
 // accepts 判断订阅者是否接收指定方法名的消息。
 // accepts reports whether the subscriber accepts messages for the given method.
+// 参数/Parameters:
+//   - method: 待判断的抖音消息方法名。 Douyin message method to test.
 func (s messageSubscriber) accepts(method string) bool {
 	if len(s.methods) == 0 {
 		return true

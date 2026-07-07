@@ -1,6 +1,6 @@
 module github.com/jwwsjlm/douyinLive/v2
 
-go 1.26.5
+go 1.26.4
 
 require (
 	github.com/codeGROOVE-dev/retry v1.3.1

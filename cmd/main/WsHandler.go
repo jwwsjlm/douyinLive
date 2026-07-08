@@ -1,6 +1,10 @@
 package main
 
-import "github.com/lxzan/gws"
+import (
+	"strings"
+
+	"github.com/lxzan/gws"
+)
 
 // WsHandler 实现 gws.EventInterfaces，并把连接事件转交给 Room。
 // WsHandler implements gws.EventInterfaces and delegates connection events to a Room.
@@ -43,14 +47,14 @@ func (c *WsHandler) OnPing(socket *gws.Conn, payload []byte) {
 	_ = socket.WritePong(payload)
 }
 
-// OnMessage 处理客户端文本消息，目前仅响应 ping。
-// OnMessage handles client text messages and currently responds to ping.
+// OnMessage 处理客户端文本消息：ping 心跳或发送弹幕 JSON 指令。
+// OnMessage handles client text messages: ping heartbeat only.
 // 参数/Parameters:
 //   - socket: 发送消息的客户端连接。 Client connection that sent the message.
 //   - message: 收到的 WebSocket 消息。 Received WebSocket message.
 func (c *WsHandler) OnMessage(socket *gws.Conn, message *gws.Message) {
 	defer message.Close()
-	if message.Data.String() == "ping" {
+	if strings.TrimSpace(message.Data.String()) == "ping" {
 		c.room.sendToClient(socket.RemoteAddr().String(), gws.OpcodeText, pongMessage)
 	}
 }

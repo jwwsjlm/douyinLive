@@ -3,8 +3,8 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 

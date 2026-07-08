@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/jwwsjlm/douyinLive/v2/sign"
 	"github.com/jwwsjlm/douyinLive/v2/utils"
 	"github.com/jwwsjlm/douyinlive-proto/generated/new_douyin"
 	"google.golang.org/protobuf/proto"
@@ -189,8 +188,13 @@ func (dl *DouyinLive) fetchInitialIMState() error {
 	}
 	msToken := dl.initialIMFetchMSToken()
 	params := dl.buildInitialIMFetchParams(roomInfo, msToken)
-	aBogus := sign.AbSign(params, dl.userAgent)
-	initialURL := fmt.Sprintf("https://live.douyin.com/webcast/im/fetch/?%s&a_bogus=%s", params, queryEscapeURLSearchParamsValue(aBogus))
+	ctx, cancel := dl.requestContext()
+	defer cancel()
+	signed, err := dl.signWebcastURL(ctx, "https://live.douyin.com/webcast/im/fetch/?"+params, msToken)
+	if err != nil {
+		return fmt.Errorf("sign im/fetch url failed: %w", err)
+	}
+	initialURL := signed.SignedURL
 	dl.logger.Debug("请求 IM 初始状态",
 		logFlowArgs("im_fetch", "prefetch",
 			"live_id", roomInfo.liveID,
@@ -199,11 +203,10 @@ func (dl *DouyinLive) fetchInitialIMState() error {
 			"endpoint", "/webcast/im/fetch/",
 			"query_len", len(params),
 			"ms_token_source", msTokenSource,
-			"abogus_len", len(aBogus),
+			"abogus_len", signed.Lengths["a_bogus"],
+			"mstoken_len", signed.Lengths["msToken"],
 		)...,
 	)
-	ctx, cancel := dl.requestContext()
-	defer cancel()
 
 	headers := map[string]string{
 		"Accept":          "*/*",

@@ -102,6 +102,7 @@ go build -o douyinLive ./cmd/main
 ./douyinLive
 ```
 
+
 查看当前二进制的构建信息：
 
 ```bash
@@ -485,7 +486,12 @@ APP_SIGN_PROVIDER=tikhub APP_TIKHUB_KEY=YOUR_TIKHUB_KEY ./douyinLive
 3. 配置文件：`sign.provider`、`tikhub.key`
 4. 程序默认值：`local`
 
-如果多个地方同时配置，以优先级最高的为准。`sign.provider=local` 时会使用内置本地 JS 签名，`tikhub.key` 即使存在也不会被使用；只有 `sign.provider=tikhub` 时才会调用 TikHub 在线 API，并且必须提供 `tikhub.key`。
+如果多个地方同时配置，以优先级最高的为准。`sign.provider=local` 时：
+
+- WebSocket `signature` 仍使用项目原来的 `webmssdk.js` / `X-MS-STUB` 链路。
+- `/webcast/room/web/enter/` and `/webcast/im/fetch/` generate `msToken` / `a_bogus` locally with embedded `jsScript/bdms.js` through Goja.
+
+只有 `sign.provider=tikhub` 时才会调用 TikHub 在线 API，并且必须提供 `tikhub.key`。
 
 TikHub API Key 可以在 [TikHub 注册页](https://user.tikhub.io/register) 注册账号后，到 [TikHub 用户中心](https://user.tikhub.io/) 创建 API Key / API Token。Key 属于敏感信息，不要提交到仓库。
 

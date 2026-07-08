@@ -54,13 +54,11 @@ type LogConfig struct {
 	Level string
 }
 
-// SignConfig 保存 WebSocket 签名来源配置。
 // SignConfig stores WebSocket signature provider configuration.
 type SignConfig struct {
 	Provider string
 }
 
-// TikHubConfig 保存 TikHub API 配置。
 // TikHubConfig stores TikHub API configuration.
 type TikHubConfig struct {
 	Key string

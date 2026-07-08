@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/retry"
-	"github.com/jwwsjlm/douyinLive/v2/sign"
 	"github.com/tidwall/gjson"
 )
 
@@ -803,8 +802,13 @@ func (dl *DouyinLive) doRequest() (string, error) {
 	for key, value := range browserClientHintHeaders(dl.userAgent) {
 		headers[key] = value
 	}
-	aBogus := sign.AbSign(params, dl.userAgent)
-	url := fmt.Sprintf("https://live.douyin.com/webcast/room/web/enter/?%s&a_bogus=%s", params, queryEscapeURLSearchParamsValue(aBogus))
+	ctx, cancel := dl.requestContext()
+	defer cancel()
+	signed, err := dl.signWebcastURL(ctx, "https://live.douyin.com/webcast/room/web/enter/?"+params, dl.initialIMFetchMSToken())
+	if err != nil {
+		return "", fmt.Errorf("sign web/enter url failed: %w", err)
+	}
+	url := signed.SignedURL
 	roomInfo := dl.roomInfoSnapshot()
 	dl.logger.Debug("请求直播间 web/enter",
 		logFlowArgs("room_info", "web_enter",
@@ -812,11 +816,10 @@ func (dl *DouyinLive) doRequest() (string, error) {
 			"room_id", roomInfo.roomID,
 			"endpoint", "/webcast/room/web/enter/",
 			"query_len", len(params),
-			"abogus_len", len(aBogus),
+			"abogus_len", signed.Lengths["a_bogus"],
+			"mstoken_len", signed.Lengths["msToken"],
 		)...,
 	)
-	ctx, cancel := dl.requestContext()
-	defer cancel()
 
 	resp, err := dl.client.R().
 		SetContext(ctx).

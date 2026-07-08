@@ -42,3 +42,6 @@ config*.local.yaml
 *.out
 /.gocache/
 /.gomodcache/
+
+# Node signer runtime
+/node_modules/

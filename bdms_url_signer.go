@@ -16,14 +16,14 @@ import (
 //go:embed jsScript/bdms.js
 var bdmsJS string
 
-// BDMSURLSignResult 闁哄嫷鍨卞﹢浼村捶?BDMS 缂佹稒鍎抽幃鏇㈠闯閵娿劎绠查柛銉у仧濞?URL 缂佹稒鍎抽幃鏇犵磼閹惧浜柕?// BDMSURLSignResult contains the locally signed webcast URL and safe diagnostics.
+// BDMSURLSignResult 表示 BDMS 本地签名后的 webcast URL 以及安全诊断信息。
 type BDMSURLSignResult struct {
 	SignedURL         string         `json:"signedUrl"`
 	SignedURLRedacted string         `json:"signedUrlRedacted"`
 	Lengths           map[string]int `json:"lengths"`
 }
 
-// signWebcastURL 濞达綀娉曢弫?Goja 闁告劕鎳庣粊?bdms.js 缂?/webcast/* URL 閻炴稏鍎电紞?msToken 濞?a_bogus闁?// signWebcastURL signs /webcast/* URLs with the embedded bdms.js Goja runtime.
+// signWebcastURL 使用 Goja 运行内嵌 bdms.js，为 /webcast/* URL 生成 msToken 与 a_bogus。
 func (dl *DouyinLive) signWebcastURL(ctx context.Context, unsignedURL string, msToken string) (*BDMSURLSignResult, error) {
 	if dl == nil {
 		return nil, errors.New("nil DouyinLive")

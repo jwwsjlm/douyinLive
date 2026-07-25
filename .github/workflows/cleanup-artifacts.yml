@@ -1,0 +1,94 @@
+name: Cleanup Artifacts
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: cleanup-artifacts
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Keep latest three artifact runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Delete historical artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          temp_dir="$(mktemp -d)"
+          trap 'rm -rf "${temp_dir}"' EXIT
+          pages_file="${temp_dir}/pages.json"
+          artifacts_file="${temp_dir}/artifacts.json"
+          plan_file="${temp_dir}/plan.json"
+
+          gh api --paginate "/repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" >"${pages_file}"
+          jq -s '[.[].artifacts[]]' "${pages_file}" >"${artifacts_file}"
+          jq '
+            . as $artifacts
+            | [
+                $artifacts[]
+                | select(.expired != true and .workflow_run.id != null)
+              ]
+              | group_by(.workflow_run.id)
+              | map({
+                  run_id: .[0].workflow_run.id,
+                  created_at: (map(.created_at) | max)
+                })
+              | sort_by(.created_at)
+              | reverse
+              | .[0:3]
+              | map(.run_id) as $keep_runs
+            | {
+                keep_runs: $keep_runs,
+                orphaned: [
+                  $artifacts[] | select(.workflow_run.id == null)
+                ],
+                delete: [
+                  $artifacts[]
+                  | select(.workflow_run.id != null)
+                  | select(
+                      .expired == true
+                      or (.workflow_run.id as $run_id | $keep_runs | index($run_id) | not)
+                    )
+                ]
+              }
+          ' "${artifacts_file}" >"${plan_file}"
+
+          total_count="$(jq 'length' "${artifacts_file}")"
+          total_bytes="$(jq 'map(.size_in_bytes) | add // 0' "${artifacts_file}")"
+          delete_count="$(jq '.delete | length' "${plan_file}")"
+          delete_bytes="$(jq '.delete | map(.size_in_bytes) | add // 0' "${plan_file}")"
+          orphaned_count="$(jq '.orphaned | length' "${plan_file}")"
+
+          echo "Artifacts found: ${total_count} (${total_bytes} bytes)"
+          echo "Kept workflow runs: $(jq -c '.keep_runs' "${plan_file}")"
+          echo "Artifacts planned for deletion: ${delete_count} (${delete_bytes} bytes)"
+          echo "Artifacts skipped without workflow_run.id: ${orphaned_count}"
+
+          deleted_count=0
+          missing_count=0
+          while IFS= read -r artifact_id; do
+            if output="$(gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}" 2>&1)"; then
+              deleted_count=$((deleted_count + 1))
+            elif grep -Fq "HTTP 404" <<<"${output}"; then
+              missing_count=$((missing_count + 1))
+            else
+              printf '%s\n' "${output}" >&2
+              exit 1
+            fi
+          done < <(jq -r '.delete[].id' "${plan_file}")
+
+          echo "Artifacts deleted: ${deleted_count}"
+          echo "Artifacts already absent: ${missing_count}"

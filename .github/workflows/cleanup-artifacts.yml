@@ -79,7 +79,21 @@ jobs:
           delete_count="$(jq '.delete | length' "${plan_file}")"
           delete_bytes="$(jq '.delete | map(.size_in_bytes) | add // 0' "${plan_file}")"
           orphaned_count="$(jq '.orphaned | length' "${plan_file}")"
-          jq -r '.delete[] | [.id, .size_in_bytes] | @tsv' "${plan_file}" >"${delete_targets_file}"
+          jq -r '
+            .delete
+            | if all(.[];
+                (.id | if type == "number" then . > 0 and floor == . else false end)
+                and
+                (.size_in_bytes
+                  | if type == "number" then . >= 0 and floor == . else false end)
+              )
+              then .[] | [.id, .size_in_bytes] | @tsv
+              else error(
+                "invalid delete target: id must be a positive integer and "
+                + "size_in_bytes must be a non-negative integer"
+              )
+              end
+          ' "${plan_file}" >"${delete_targets_file}"
 
           echo "Artifacts found: ${total_count} (${total_bytes} bytes)"
           echo "Kept workflow runs: $(jq -c '.keep_runs' "${plan_file}")"

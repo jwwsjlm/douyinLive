@@ -4,6 +4,13 @@ on:
   schedule:
     - cron: "23 3 * * *"
   workflow_dispatch:
+    inputs:
+      verification_id:
+        description: Verification correlation ID
+        required: false
+        type: string
+
+run-name: Cleanup Artifacts${{ inputs.verification_id && format(' [{0}]', inputs.verification_id) || '' }}
 
 permissions:
   actions: write
@@ -32,6 +39,7 @@ jobs:
           pages_file="${temp_dir}/pages.json"
           artifacts_file="${temp_dir}/artifacts.json"
           plan_file="${temp_dir}/plan.json"
+          delete_targets_file="${temp_dir}/delete-targets.tsv"
 
           gh api --paginate "/repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" >"${pages_file}"
           jq -s '[.[].artifacts[]]' "${pages_file}" >"${artifacts_file}"
@@ -71,6 +79,7 @@ jobs:
           delete_count="$(jq '.delete | length' "${plan_file}")"
           delete_bytes="$(jq '.delete | map(.size_in_bytes) | add // 0' "${plan_file}")"
           orphaned_count="$(jq '.orphaned | length' "${plan_file}")"
+          jq -r '.delete[] | [.id, .size_in_bytes] | @tsv' "${plan_file}" >"${delete_targets_file}"
 
           echo "Artifacts found: ${total_count} (${total_bytes} bytes)"
           echo "Kept workflow runs: $(jq -c '.keep_runs' "${plan_file}")"
@@ -78,17 +87,19 @@ jobs:
           echo "Artifacts skipped without workflow_run.id: ${orphaned_count}"
 
           deleted_count=0
+          deleted_bytes=0
           missing_count=0
-          while IFS= read -r artifact_id; do
+          while IFS=$'\t' read -r artifact_id artifact_bytes; do
             if output="$(gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}" 2>&1)"; then
               deleted_count=$((deleted_count + 1))
+              deleted_bytes=$((deleted_bytes + artifact_bytes))
             elif grep -Fq "HTTP 404" <<<"${output}"; then
               missing_count=$((missing_count + 1))
             else
               printf '%s\n' "${output}" >&2
               exit 1
             fi
-          done < <(jq -r '.delete[].id' "${plan_file}")
+          done <"${delete_targets_file}"
 
-          echo "Artifacts deleted: ${deleted_count}"
+          echo "Artifacts deleted: ${deleted_count} (${deleted_bytes} bytes)"
           echo "Artifacts already absent: ${missing_count}"

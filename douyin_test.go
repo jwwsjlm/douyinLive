@@ -111,6 +111,26 @@ func TestParseRoomInfoSupportsRoomObject(t *testing.T) {
 	}
 }
 
+func TestParseLiveStatusFromRoomEnterSupportsDataList(t *testing.T) {
+	isLive, known := parseLiveStatusFromRoomEnter(`{"data":{"data":[{"status":2}]}}`)
+	if !known || !isLive {
+		t.Fatalf("parseLiveStatusFromRoomEnter() = (%v, %v), want (true, true)", isLive, known)
+	}
+}
+
+func TestParseLiveStatusFromRoomEnterSupportsRoomObject(t *testing.T) {
+	isLive, known := parseLiveStatusFromRoomEnter(`{"data":{"room":{"status":4}}}`)
+	if !known || isLive {
+		t.Fatalf("parseLiveStatusFromRoomEnter() = (%v, %v), want (false, true)", isLive, known)
+	}
+}
+
+func TestParseLiveStatusFromRoomEnterKeepsMissingStatusUnknown(t *testing.T) {
+	if isLive, known := parseLiveStatusFromRoomEnter(`{"data":{"data":[{"id_str":"room-id"}]}}`); known || isLive {
+		t.Fatalf("parseLiveStatusFromRoomEnter() = (%v, %v), want (false, false)", isLive, known)
+	}
+}
+
 func TestParseRoomIDFromLivePageSupportsHTMLQueryState(t *testing.T) {
 	html := `anchor_id_str=64995611209&amp;enter_method=direct_open&amp;room_id=7659792511015177001&amp;sec_anchor_id=abc`
 	if got := parseRoomIDFromLivePage(html); got != "7659792511015177001" {
@@ -472,6 +492,36 @@ func TestLiveStatusSnapshotDistinguishesUnknownAndKnownOffline(t *testing.T) {
 	dl.clearLiveStatus()
 	if _, known := dl.liveStatusSnapshot(); known {
 		t.Fatal("clearLiveStatus() did not clear known status")
+	}
+}
+
+func TestKnownLiveStatusRequiresKnownOnlineState(t *testing.T) {
+	dl := &DouyinLive{}
+	if dl.IsKnownLiveStatus() {
+		t.Fatal("zero state must not be treated as known live")
+	}
+
+	dl.setLiveStatus(false)
+	if dl.IsKnownLiveStatus() {
+		t.Fatal("known offline state must not be treated as known live")
+	}
+
+	dl.setLiveStatus(true)
+	if !dl.IsKnownLiveStatus() {
+		t.Fatal("known online state was not reported as known live")
+	}
+}
+
+func TestStartRejectsKnownOfflineStatusBeforeDial(t *testing.T) {
+	dl, err := newDouyinLive("live-id", nil, "ttwid=test", staticWebsocketSigner{signature: "sig"})
+	if err != nil {
+		t.Fatalf("newDouyinLive() failed: %v", err)
+	}
+	dl.setLiveStatus(false)
+
+	err = dl.Start()
+	if !errors.Is(err, ErrLiveNotStarted) {
+		t.Fatalf("Start() error = %v, want ErrLiveNotStarted", err)
 	}
 }
 

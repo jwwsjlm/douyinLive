@@ -819,10 +819,10 @@ func (r *Room) startLiveSession() error {
 		}
 		return fmt.Errorf("初始化直播间 %s 连接上下文失败: %w", r.id, err)
 	}
-	if d.IsKnownOfflineStatus() {
+	if err := confirmLiveSessionStatus(d); err != nil {
 		r.updateMetadataFromDouyinLive(d)
 		d.Dispose()
-		return douyinLive.ErrLiveNotStarted
+		return err
 	}
 	r.updateMetadataFromDouyinLive(d)
 
@@ -854,6 +854,34 @@ func (r *Room) startLiveSession() error {
 	}
 	go r.runLiveSession(d)
 	r.logger.Info("抖音直播监听已成功启动", "room_id", r.id)
+	return nil
+}
+
+// liveSessionStatusChecker 描述启动在线会话前所需的直播状态检查能力。
+// liveSessionStatusChecker describes the live-status checks required before starting an online session.
+type liveSessionStatusChecker interface {
+	IsKnownOfflineStatus() bool
+	IsKnownLiveStatus() bool
+	IsLive() (bool, error)
+}
+
+// confirmLiveSessionStatus 确保只有明确确认开播的房间才能进入在线会话。
+// confirmLiveSessionStatus ensures only explicitly confirmed live rooms enter an online session.
+func confirmLiveSessionStatus(checker liveSessionStatusChecker) error {
+	if checker.IsKnownOfflineStatus() {
+		return douyinLive.ErrLiveNotStarted
+	}
+	if checker.IsKnownLiveStatus() {
+		return nil
+	}
+
+	isLive, err := checker.IsLive()
+	if err != nil {
+		return fmt.Errorf("确认直播状态失败: %w", err)
+	}
+	if !isLive {
+		return douyinLive.ErrLiveNotStarted
+	}
 	return nil
 }
 

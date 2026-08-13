@@ -77,6 +77,13 @@ func (dl *DouyinLive) IsKnownOfflineStatus() bool {
 	return dl.isKnownOfflineStatus()
 }
 
+// IsKnownLiveStatus 返回直播页或接口是否已明确确认房间正在直播。
+// IsKnownLiveStatus reports whether the page or API explicitly confirmed the room is live.
+func (dl *DouyinLive) IsKnownLiveStatus() bool {
+	isLive, known := dl.liveStatusSnapshot()
+	return known && isLive
+}
+
 // shouldCloseAfterStatusCheck 根据连续状态检查结果判断是否应关闭连接。
 // shouldCloseAfterStatusCheck decides whether to close the connection based on repeated status checks.
 // 参数/Parameters:

@@ -232,7 +232,7 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() error {
 					"title", roomInfo.title,
 				)...,
 			)
-			return nil
+			return ErrLiveNotStarted
 		}
 	}
 
@@ -252,6 +252,12 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() error {
 			return err
 		}
 		dl.logger.Debug("web/enter 返回空响应，已使用直播间页面状态继续", logFlowArgs("room_info", "web_enter", "live_id", dl.liveID, "room_id", roomInfo.roomID, "user_unique_id", roomInfo.pushID, "fallback", "live_page_state", "err", err)...)
+	}
+	if dl.isKnownOfflineStatus() {
+		return ErrLiveNotStarted
+	}
+	if !dl.IsKnownLiveStatus() {
+		return fmt.Errorf("%w: live_id=%s", errLiveStatusUnknown, dl.liveID)
 	}
 
 	if dl.signer == nil || dl.signer.Name() == SignProviderLocal {

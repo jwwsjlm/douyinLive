@@ -226,6 +226,18 @@ func parseRoomInfo(body string) (roomInfoSnapshot, error) {
 	}, nil
 }
 
+// parseLiveStatusFromRoomEnter 从 web/enter 响应的兼容路径中读取直播状态。
+// parseLiveStatusFromRoomEnter reads live status from compatible web/enter response paths.
+func parseLiveStatusFromRoomEnter(body string) (bool, bool) {
+	for _, path := range []string{"data.data.0.status", "data.room.status"} {
+		status := gjson.Get(body, path)
+		if status.Exists() {
+			return status.Int() == 2, true
+		}
+	}
+	return false, false
+}
+
 // parseRoomInfoFromLivePage 从直播页 SSR 内嵌状态中提取房间展示信息。
 // parseRoomInfoFromLivePage extracts display metadata from the live page's embedded SSR state.
 // 参数/Parameters:
@@ -750,6 +762,9 @@ func (dl *DouyinLive) refreshRoomEnterData() (string, error) {
 		dl.logRoomInfoResponseSummary(body)
 		return "", err
 	}
+	if isLive, known := parseLiveStatusFromRoomEnter(body); known {
+		dl.setLiveStatus(isLive)
+	}
 	if strings.TrimSpace(roomInfo.liveName) == "" {
 		dl.logMissingLiveName(missingNameSource, roomInfo)
 	}
@@ -1010,8 +1025,11 @@ func (dl *DouyinLive) fetchLiveStatusFromAPI() (bool, error) {
 		return false, err
 	}
 
-	status := gjson.Get(body, "data.data.0.status").Int()
-	return status == 2, nil
+	isLive, known := parseLiveStatusFromRoomEnter(body)
+	if !known {
+		return false, fmt.Errorf("%w: web/enter 未返回 status", errLiveStatusUnknown)
+	}
+	return isLive, nil
 }
 
 // IsLive 检查直播间当前是否开播。

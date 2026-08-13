@@ -29,4 +29,5 @@ var (
 	ErrRoomNotFound          = errors.New("直播间不存在")
 	errRoomInfoEmpty         = errors.New("直播间信息响应为空")
 	errLivePageStateNotFound = errors.New("直播页状态不存在")
+	errLiveStatusUnknown     = errors.New("直播状态未知")
 )

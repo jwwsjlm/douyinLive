@@ -2,6 +2,7 @@ package douyinLive
 
 import (
 	"context"
+	"errors"
 
 	"github.com/gorilla/websocket"
 )
@@ -82,7 +83,13 @@ func (dl *DouyinLive) Start() error {
 	dl.logger.Info("开始连接抖音直播间", logFlowArgs("startup", "start_room", "live_id", dl.liveID)...)
 
 	dl.logger.Info("开始连接抖音直播间", "live_id", dl.liveID)
+	if dl.isKnownOfflineStatus() {
+		return ErrLiveNotStarted
+	}
 	if err := dl.startWebSocket(); err != nil {
+		if errors.Is(err, ErrLiveNotStarted) {
+			return ErrLiveNotStarted
+		}
 		dl.logger.Warn("WebSocket 连接失败，准备重连", "live_id", dl.liveID, "err", err)
 		if dl.reconnect(defaultMaxRetries, true, false) {
 			dl.processMessages()

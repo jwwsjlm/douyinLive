@@ -55,8 +55,32 @@ func (dl *DouyinLive) startWebSocket() error {
 	dl.mu.Unlock()
 	dl.configureWebSocket(conn)
 	dl.setLiveStatus(true)
+	dl.markReady()
 	dl.startHeartbeatLoop()
 	return nil
+}
+
+// Ready 返回首次上游 WebSocket 握手成功时关闭的通道。
+// Ready returns a channel closed after the first upstream WebSocket handshake succeeds.
+func (dl *DouyinLive) Ready() <-chan struct{} {
+	dl.readyMu.Lock()
+	defer dl.readyMu.Unlock()
+	if dl.readyCh == nil {
+		dl.readyCh = make(chan struct{})
+	}
+	return dl.readyCh
+}
+
+// markReady 标记上游 WebSocket 已经完成首次握手。
+// markReady marks the upstream WebSocket as ready after its first handshake.
+func (dl *DouyinLive) markReady() {
+	dl.readyMu.Lock()
+	defer dl.readyMu.Unlock()
+	if dl.readyClosed || dl.readyCh == nil {
+		return
+	}
+	close(dl.readyCh)
+	dl.readyClosed = true
 }
 
 // configureWebSocket 设置 WebSocket 读取限制和 pong 处理。
@@ -299,8 +323,12 @@ func (dl *DouyinLive) websocketDialContext() (string, http.Header, error) {
 	dl.contextMu.Lock()
 	defer dl.contextMu.Unlock()
 
-	if err := dl.prepareWebSocketContextLocked(); err != nil {
-		return "", nil, fmt.Errorf("初始化失败: %w", err)
+	if !dl.contextPrepared {
+		if err := dl.prepareWebSocketContextLocked(); err != nil {
+			return "", nil, fmt.Errorf("初始化失败: %w", err)
+		}
+	} else {
+		dl.logger.Debug("复用已准备的 WebSocket 上下文", logFlowArgs("ws", "prepare", "live_id", dl.liveID, "reused", true)...)
 	}
 	url, err := dl.buildWebsocketURL()
 	if err != nil {

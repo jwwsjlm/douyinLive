@@ -213,7 +213,21 @@ func (dl *DouyinLive) prepareRequestContextLocked() error {
 
 // prepareWebSocketContextLocked 准备 WebSocket 建连所需的房间信息和签名运行时。
 // prepareWebSocketContextLocked prepares room data and signer runtime needed for WebSocket dialing.
-func (dl *DouyinLive) prepareWebSocketContextLocked() error {
+
+func (dl *DouyinLive) prepareWebSocketContextLocked() (err error) {
+	startedAt := time.Now()
+	dl.contextPrepared = false
+	defer func() {
+		dl.contextPrepared = err == nil
+		dl.logger.Debug("WebSocket 上下文准备完成",
+			"live_id", dl.liveID,
+			"success", err == nil,
+			"reused", false,
+			"duration", time.Since(startedAt).Round(time.Millisecond),
+			"err", err,
+		)
+	}()
+
 	if err := dl.prepareRequestContextLocked(); err != nil {
 		return err
 	}

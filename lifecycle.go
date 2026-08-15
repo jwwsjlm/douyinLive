@@ -106,6 +106,9 @@ func (dl *DouyinLive) Start() error {
 // cleanup releases the current connection, heartbeat loop, and cache resources.
 func (dl *DouyinLive) cleanup() {
 	dl.stopHeartbeatLoop()
+	dl.contextMu.Lock()
+	dl.contextPrepared = false
+	dl.contextMu.Unlock()
 
 	dl.mu.Lock()
 	conn := dl.conn

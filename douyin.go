@@ -34,6 +34,7 @@ type DouyinLive struct {
 	eventHandlers          []eventHandler
 	mu                     sync.Mutex
 	contextMu              sync.Mutex
+	contextPrepared        bool
 	isLiveClosed           bool
 	manualClose            bool
 	lastUserAgentChange    time.Time
@@ -58,6 +59,9 @@ type DouyinLive struct {
 	closeSignalClosed      bool
 	closeCtx               context.Context
 	closeCancel            context.CancelFunc
+	readyMu                sync.Mutex
+	readyCh                chan struct{}
+	readyClosed            bool
 }
 
 // NewDouyinLive 创建使用本地签名的抖音直播监听实例。
@@ -124,6 +128,7 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string, signer webso
 		closeCh:             make(chan struct{}),
 		closeCtx:            closeCtx,
 		closeCancel:         closeCancel,
+		readyCh:             make(chan struct{}),
 	}
 
 	dl.cookieManager = sign.NewCookieManager()

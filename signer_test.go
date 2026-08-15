@@ -107,6 +107,29 @@ func TestBuildWebsocketURLUsesCurrentWebcastSDKVersion(t *testing.T) {
 	}
 }
 
+func TestWebsocketDialContextReusesPreparedContext(t *testing.T) {
+	dl, err := newDouyinLive("live-id", nil, "", staticWebsocketSigner{signature: "sig"})
+	if err != nil {
+		t.Fatalf("newDouyinLive() failed: %v", err)
+	}
+	defer dl.Dispose()
+
+	dl.updateRoomInfo("room-id", "user-id", "live-name", "title", "avatar")
+	dl.headers.Set("User-Agent", dl.userAgent)
+	dl.contextPrepared = true
+
+	wsURL, headers, err := dl.websocketDialContext()
+	if err != nil {
+		t.Fatalf("websocketDialContext() failed with prepared context: %v", err)
+	}
+	if wsURL == "" {
+		t.Fatal("websocketDialContext() returned an empty URL")
+	}
+	if headers.Get("User-Agent") == "" {
+		t.Fatal("websocketDialContext() returned headers without User-Agent")
+	}
+}
+
 func TestBuildWebsocketURLUsesTrackedCursorAndInternalExt(t *testing.T) {
 	dl, err := newDouyinLive("live-id", nil, "", staticWebsocketSigner{signature: "sig"})
 	if err != nil {

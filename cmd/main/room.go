@@ -312,6 +312,7 @@ type Room struct {
 	accountOnly    bool
 	starting       bool
 	closed         bool
+	upstreamReady  bool
 	monitorStopCh  chan struct{}
 	monitorDoneCh  chan struct{}
 }
@@ -568,8 +569,11 @@ func (r *Room) AddClient(socket *gws.Conn) {
 		r.closeClient(clientID, serviceClosingMessage)
 		return
 	case r.douyinLive != nil:
+		upstreamReady := r.upstreamReady
 		r.mu.Unlock()
-		r.sendToClient(clientID, gws.OpcodeText, r.onlineStatusMessage())
+		if upstreamReady {
+			r.sendToClient(clientID, gws.OpcodeText, r.onlineStatusMessage())
+		}
 		return
 	case r.monitorStopCh != nil:
 		r.mu.Unlock()
@@ -591,7 +595,7 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	r.mu.Unlock()
 
 	if err == nil {
-		r.logger.Info("直播连接已成功启动", "room_id", r.id)
+		r.logger.Info("直播连接初始化已提交，等待上游 WebSocket 握手", "room_id", r.id)
 		return
 	}
 	if errors.Is(err, errRoomInactive) {
@@ -828,6 +832,7 @@ func (r *Room) startLiveSession() error {
 
 	r.mu.Lock()
 	r.douyinLive = d
+	r.upstreamReady = false
 	r.mu.Unlock()
 
 	d.SubscribeMessage(func(message *douyinLive.LiveMessage) {
@@ -847,13 +852,8 @@ func (r *Room) startLiveSession() error {
 	}
 	r.mu.Unlock()
 
-	if d.IsKnownOfflineStatus() {
-		r.notifyOfflineStatus()
-	} else {
-		r.notifyOnlineStatus()
-	}
 	go r.runLiveSession(d)
-	r.logger.Info("抖音直播监听已成功启动", "room_id", r.id)
+	r.logger.Info("抖音直播监听后台任务已启动，等待上游 WebSocket 握手", "room_id", r.id)
 	return nil
 }
 
@@ -923,13 +923,39 @@ func (r *Room) removeIfIdle() {
 // 参数/Parameters:
 //   - d: 已接管的上游 DouyinLive 实例。 Adopted upstream DouyinLive instance.
 func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
-	if err := d.Start(); err != nil {
-		r.logger.Warn("直播监听运行结束", "room_id", r.id, "err", err)
+	readyCh := d.Ready()
+	startErrCh := make(chan error, 1)
+	go func() {
+		startErrCh <- d.Start()
+	}()
+
+	connected := false
+	select {
+	case <-readyCh:
+		connected = r.markUpstreamReady(d)
+	case err := <-startErrCh:
+		if err != nil {
+			r.logger.Warn("直播监听运行结束", "room_id", r.id, "err", err)
+		}
+	}
+
+	var startErr error
+	if connected {
+		startErr = <-startErrCh
+	} else {
+		select {
+		case startErr = <-startErrCh:
+		default:
+		}
+	}
+	if startErr != nil {
+		r.logger.Warn("直播监听运行结束", "room_id", r.id, "err", startErr)
 	}
 
 	r.mu.Lock()
 	if r.douyinLive == d {
 		r.douyinLive = nil
+		r.upstreamReady = false
 	}
 	closed := r.closed
 	monitorRunning := r.monitorStopCh != nil
@@ -939,11 +965,33 @@ func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 		return
 	}
 
-	r.notifyOfflineEndedStatus()
+	if connected {
+		r.notifyOfflineEndedStatus()
+	} else {
+		r.notifyOfflineStatus()
+	}
 	if !monitorRunning {
-		r.logger.Info("直播连接已结束，切回未开播监控模式", "room_id", r.id)
+		r.logger.Info("直播连接已结束，切回未开播监控模式", "room_id", r.id, "connected", connected)
 		r.startMonitorLoop()
 	}
+}
+
+// markUpstreamReady 在上游 WebSocket 握手成功后更新房间状态并通知客户端。
+// markUpstreamReady updates room state and notifies clients after the upstream handshake succeeds.
+func (r *Room) markUpstreamReady(d *douyinLive.DouyinLive) bool {
+	r.mu.Lock()
+	if r.closed || r.douyinLive != d {
+		r.mu.Unlock()
+		return false
+	}
+	r.upstreamReady = true
+	r.mu.Unlock()
+
+	r.logger.Info("上游 WebSocket 已就绪，开始推送直播消息", "room_id", r.id)
+	if r.clientCount() > 0 {
+		r.notifyOnlineStatus()
+	}
+	return true
 }
 
 // handleDouyinEvent 将抖音消息解析为 JSON 并广播给房间客户端。

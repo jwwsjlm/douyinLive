@@ -224,6 +224,7 @@ func (dl *DouyinLive) reconnect(attempts int, changeUA bool, rebuildHTTP bool) b
 		dl.mu.Unlock()
 		dl.configureWebSocket(conn)
 		dl.setLiveStatus(true)
+		dl.markReady()
 		dl.startHeartbeatLoop()
 		dl.resetReconnectTracking()
 		return nil

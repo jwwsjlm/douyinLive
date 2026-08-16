@@ -603,6 +603,21 @@ func TestShouldFetchTTWIDSkipsWhenUserCookieProvided(t *testing.T) {
 	}
 }
 
+func TestGetCookieStringSortsFetchedCookies(t *testing.T) {
+	dl, err := newDouyinLive("live-id", nil, "", staticWebsocketSigner{signature: "sig"})
+	if err != nil {
+		t.Fatalf("newDouyinLive() failed: %v", err)
+	}
+	defer dl.Dispose()
+
+	dl.ttwid = "ttwid-value"
+	dl.additionalCookies["z_cookie"] = "z"
+	dl.additionalCookies["a_cookie"] = "a"
+	if got, want := dl.getCookieString(), "ttwid=ttwid-value; a_cookie=a; z_cookie=z"; got != want {
+		t.Fatalf("getCookieString() = %q, want %q", got, want)
+	}
+}
+
 func TestBuildRoomEnterParamsUsesCurrentUserAgentAndCookieToken(t *testing.T) {
 	dl, err := newDouyinLive("161022647108", nil, "ttwid=user-ttwid; msToken=COOKIE_MS_TOKEN", staticWebsocketSigner{signature: "sig"})
 	if err != nil {

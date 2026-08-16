@@ -21,6 +21,14 @@ var bdmsEnvJS string
 //go:embed jsScript/bdms_sign_url.js
 var bdmsSignURLJS string
 
+// 将大体积脚本在进程启动时预编译，避免首个直播间请求重复解析。
+// Precompile embedded scripts at process startup to avoid reparsing them for the first live-room request.
+var (
+	bdmsEnvProgram     = goja.MustCompile("bdms_env.js", bdmsEnvJS, false)
+	bdmsProgram        = goja.MustCompile("bdms.js", bdmsJS, false)
+	bdmsSignURLProgram = goja.MustCompile("bdms_sign_url.js", bdmsSignURLJS, false)
+)
+
 // BDMSURLSignResult 表示 BDMS 本地签名后的 webcast URL 以及安全诊断信息。
 type BDMSURLSignResult struct {
 	SignedURL         string         `json:"signedUrl"`
@@ -28,18 +36,44 @@ type BDMSURLSignResult struct {
 	Lengths           map[string]int `json:"lengths"`
 }
 
+// localBDMSRuntime 保存一个已加载 bdms.js 的 Goja 运行时。
+// localBDMSRuntime keeps a Goja runtime with bdms.js already loaded.
+type localBDMSRuntime struct {
+	cookie    string
+	userAgent string
+	vm        *goja.Runtime
+	signURL   func(goja.Value, ...goja.Value) (goja.Value, error)
+}
+
 // signWebcastURL 使用 Goja 运行内嵌 bdms.js，为 /webcast/* URL 生成 msToken 与 a_bogus。
 func (dl *DouyinLive) signWebcastURL(ctx context.Context, unsignedURL string, msToken string) (*BDMSURLSignResult, error) {
 	if dl == nil {
 		return nil, errors.New("nil DouyinLive")
 	}
-	return signURLWithLocalBDMS(ctx, unsignedURL, dl.getCookieString(), msToken, dl.userAgent)
+
+	cookie := dl.getCookieString()
+	dl.bdmsMu.Lock()
+	defer dl.bdmsMu.Unlock()
+	return signURLWithBDMS(ctx, unsignedURL, cookie, msToken, dl.userAgent, dl.signURLWithCachedGojaBDMSLocked)
 }
 
+// signURLWithLocalBDMS 使用临时 Goja 运行时签名，供独立调用与测试使用。
+// signURLWithLocalBDMS signs with a temporary Goja runtime for standalone callers and tests.
 func signURLWithLocalBDMS(ctx context.Context, unsignedURL string, cookie string, msToken string, userAgent string) (*BDMSURLSignResult, error) {
+	return signURLWithBDMS(ctx, unsignedURL, cookie, msToken, userAgent, signURLWithGojaBDMS)
+}
+
+type bdmsURLSigner func(unsignedURL string, cookie string, userAgent string) (string, error)
+
+// signURLWithBDMS 执行 URL 参数补齐、签名及结果校验。
+// signURLWithBDMS completes URL parameters, signs the URL, and validates the result.
+func signURLWithBDMS(ctx context.Context, unsignedURL string, cookie string, msToken string, userAgent string, signer bdmsURLSigner) (*BDMSURLSignResult, error) {
 	unsignedURL = strings.TrimSpace(unsignedURL)
 	if unsignedURL == "" {
 		return nil, errors.New("unsigned url is empty")
+	}
+	if signer == nil {
+		return nil, errors.New("bdms signer is nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -67,7 +101,7 @@ func signURLWithLocalBDMS(ctx context.Context, unsignedURL string, cookie string
 		default:
 		}
 		candidateURL := ensureBDMSMsTokenInURL(unsignedURL, cookie, externalMsToken)
-		signedURL, err := signURLWithGojaBDMS(candidateURL, cookie, userAgent)
+		signedURL, err := signer(candidateURL, cookie, userAgent)
 		if err != nil {
 			lastErr = err
 			continue
@@ -92,22 +126,63 @@ func signURLWithLocalBDMS(ctx context.Context, unsignedURL string, cookie string
 	return result, nil
 }
 
+// signURLWithCachedGojaBDMSLocked 复用与当前 Cookie、UA 对应的 BDMS 运行时。
+// signURLWithCachedGojaBDMSLocked reuses the BDMS runtime matching the current cookie and user agent.
+// 调用方必须持有 dl.bdmsMu。
+// The caller must hold dl.bdmsMu.
+func (dl *DouyinLive) signURLWithCachedGojaBDMSLocked(unsignedURL string, cookie string, userAgent string) (string, error) {
+	runtime := dl.bdmsRuntime
+	if runtime == nil || runtime.cookie != cookie || runtime.userAgent != userAgent {
+		var err error
+		runtime, err = newLocalBDMSRuntime(cookie, userAgent)
+		if err != nil {
+			return "", err
+		}
+		dl.bdmsRuntime = runtime
+	}
+	return runtime.sign(unsignedURL)
+}
+
 func signURLWithGojaBDMS(unsignedURL string, cookie string, userAgent string) (string, error) {
-	vm := goja.New()
-	if err := installGojaBDMSEnvironment(vm, cookie, userAgent); err != nil {
+	runtime, err := newLocalBDMSRuntime(cookie, userAgent)
+	if err != nil {
 		return "", err
 	}
-	if _, err := vm.RunString(bdmsJS); err != nil {
-		return "", fmt.Errorf("load bdms.js into goja failed: %w", err)
+	return runtime.sign(unsignedURL)
+}
+
+// newLocalBDMSRuntime 创建并预加载一个 BDMS Goja 运行时。
+// newLocalBDMSRuntime creates and preloads a BDMS Goja runtime.
+func newLocalBDMSRuntime(cookie string, userAgent string) (*localBDMSRuntime, error) {
+	vm := goja.New()
+	if err := installGojaBDMSEnvironment(vm, cookie, userAgent); err != nil {
+		return nil, err
 	}
-	if _, err := vm.RunString(bdmsSignURLJS); err != nil {
-		return "", fmt.Errorf("load bdms sign helper into goja failed: %w", err)
+	if _, err := vm.RunProgram(bdmsProgram); err != nil {
+		return nil, fmt.Errorf("load bdms.js into goja failed: %w", err)
+	}
+	if _, err := vm.RunProgram(bdmsSignURLProgram); err != nil {
+		return nil, fmt.Errorf("load bdms sign helper into goja failed: %w", err)
 	}
 	signURL, ok := goja.AssertFunction(vm.Get("__signBDMSURL"))
 	if !ok {
-		return "", errors.New("__signBDMSURL is not available")
+		return nil, errors.New("__signBDMSURL is not available")
 	}
-	value, err := signURL(goja.Undefined(), vm.ToValue(unsignedURL))
+	return &localBDMSRuntime{
+		cookie:    cookie,
+		userAgent: userAgent,
+		vm:        vm,
+		signURL:   signURL,
+	}, nil
+}
+
+// sign 在已加载的 BDMS 运行时中对 URL 签名。
+// sign signs a URL in an already loaded BDMS runtime.
+func (runtime *localBDMSRuntime) sign(unsignedURL string) (string, error) {
+	if runtime == nil || runtime.vm == nil || runtime.signURL == nil {
+		return "", errors.New("bdms runtime is not initialized")
+	}
+	value, err := runtime.signURL(goja.Undefined(), runtime.vm.ToValue(unsignedURL))
 	if err != nil {
 		return "", fmt.Errorf("execute bdms goja signer failed: %w", err)
 	}
@@ -122,7 +197,7 @@ func installGojaBDMSEnvironment(vm *goja.Runtime, cookie string, userAgent strin
 	if strings.TrimSpace(userAgent) == "" {
 		userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
 	}
-	if _, err := vm.RunString(bdmsEnvJS); err != nil {
+	if _, err := vm.RunProgram(bdmsEnvProgram); err != nil {
 		return fmt.Errorf("load bdms env into goja failed: %w", err)
 	}
 	install, ok := goja.AssertFunction(vm.Get("__installBDMSEnvironment"))

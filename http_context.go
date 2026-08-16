@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,6 +21,8 @@ var impersonatedUserAgents = []string{
 	"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
 	"Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
 }
+
+const slowWebSocketPreparationStep = 2 * time.Second
 
 // newHTTPUserAgent 随机选择一个用于 HTTP 伪装的浏览器 UA。
 // newHTTPUserAgent randomly selects a browser user agent for HTTP impersonation.
@@ -228,12 +231,19 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() (err error) {
 		)
 	}()
 
+	stepStartedAt := time.Now()
 	if err := dl.prepareRequestContextLocked(); err != nil {
+		dl.logWebSocketPreparationStep("request_context", stepStartedAt, err)
 		return err
 	}
+	dl.logWebSocketPreparationStep("request_context", stepStartedAt, nil)
 
+	stepStartedAt = time.Now()
 	if err := dl.fetchLivePageState(); err != nil {
 		dl.logger.Debug("从直播间页面预取状态失败，继续请求 web/enter", logFlowArgs("room_info", "live_page_state", "live_id", dl.liveID, "endpoint", "live_page", "fallback", "web_enter", "err", err)...)
+		dl.logWebSocketPreparationStep("live_page", stepStartedAt, err)
+	} else {
+		dl.logWebSocketPreparationStep("live_page", stepStartedAt, nil)
 	}
 	if dl.isKnownOfflineStatus() {
 		roomInfo := dl.roomInfoSnapshot()
@@ -253,19 +263,26 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() (err error) {
 	initialIMFetched := false
 	roomInfo := dl.roomInfoSnapshot()
 	if roomInfo.roomID != "" && roomInfo.pushID != "" {
+		stepStartedAt = time.Now()
 		if err := dl.fetchInitialIMState(); err != nil {
 			dl.logger.Debug("预取 IM cursor 失败，继续使用 web/enter 后兜底", logFlowArgs("im_fetch", "prefetch", "live_id", dl.liveID, "room_id", roomInfo.roomID, "user_unique_id", roomInfo.pushID, "fallback", "web_enter", "err", err)...)
+			dl.logWebSocketPreparationStep("initial_im_fetch", stepStartedAt, err)
 		} else {
 			initialIMFetched = true
+			dl.logWebSocketPreparationStep("initial_im_fetch", stepStartedAt, nil)
 		}
 	}
 
+	stepStartedAt = time.Now()
 	if _, err := dl.fetchRoomEnterData(); err != nil {
+		dl.logWebSocketPreparationStep("room_enter", stepStartedAt, err)
 		roomInfo := dl.roomInfoSnapshot()
 		if !isRoomInfoEmptyError(err) || roomInfo.roomID == "" || roomInfo.pushID == "" {
 			return err
 		}
 		dl.logger.Debug("web/enter 返回空响应，已使用直播间页面状态继续", logFlowArgs("room_info", "web_enter", "live_id", dl.liveID, "room_id", roomInfo.roomID, "user_unique_id", roomInfo.pushID, "fallback", "live_page_state", "err", err)...)
+	} else {
+		dl.logWebSocketPreparationStep("room_enter", stepStartedAt, nil)
 	}
 	if dl.isKnownOfflineStatus() {
 		return ErrLiveNotStarted
@@ -275,19 +292,41 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() (err error) {
 	}
 
 	if dl.signer == nil || dl.signer.Name() == SignProviderLocal {
+		stepStartedAt = time.Now()
 		if err := jsScript.LoadGojaWithCookie(dl.userAgent, dl.getCookieString()); err != nil {
+			dl.logWebSocketPreparationStep("websocket_signer_runtime", stepStartedAt, err)
 			return fmt.Errorf("加载JavaScript脚本失败: %w", err)
 		}
+		dl.logWebSocketPreparationStep("websocket_signer_runtime", stepStartedAt, nil)
 
 	}
 	if !initialIMFetched {
+		stepStartedAt = time.Now()
 		if err := dl.fetchInitialIMState(); err != nil {
 			roomInfo := dl.roomInfoSnapshot()
 			dl.logger.Debug("预取 IM cursor 失败，继续使用兜底 WebSocket 参数", logFlowArgs("im_fetch", "prefetch", "live_id", dl.liveID, "room_id", roomInfo.roomID, "user_unique_id", roomInfo.pushID, "fallback", "default_ws_params", "err", err)...)
+			dl.logWebSocketPreparationStep("initial_im_fetch", stepStartedAt, err)
+		} else {
+			dl.logWebSocketPreparationStep("initial_im_fetch", stepStartedAt, nil)
 		}
 	}
 
 	return nil
+}
+
+// logWebSocketPreparationStep 记录连接准备步骤的耗时；慢步骤会在 info 日志级别下以 WARN 输出。
+// logWebSocketPreparationStep records preparation timing and emits slow steps as warnings at the info log level.
+func (dl *DouyinLive) logWebSocketPreparationStep(step string, startedAt time.Time, err error) {
+	duration := time.Since(startedAt).Round(time.Millisecond)
+	args := logFlowArgs("ws", "prepare", "live_id", dl.liveID, "step", step, "duration", duration)
+	if err != nil {
+		args = append(args, "err", err)
+	}
+	if duration >= slowWebSocketPreparationStep {
+		dl.logger.Warn("WebSocket 上下文准备步骤耗时较长", args...)
+		return
+	}
+	dl.logger.Debug("WebSocket 上下文准备步骤完成", args...)
 }
 
 // PrepareWebSocketContext 按网页流程预取直播页、im/fetch 和签名上下文。
@@ -346,8 +385,13 @@ func (dl *DouyinLive) getCookieParts() []string {
 	}
 
 	parts := []string{fmt.Sprintf("ttwid=%s", dl.ttwid)}
-	for name, value := range dl.additionalCookies {
-		parts = append(parts, fmt.Sprintf("%s=%s", name, value))
+	names := make([]string, 0, len(dl.additionalCookies))
+	for name := range dl.additionalCookies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s=%s", name, dl.additionalCookies[name]))
 	}
 	return parts
 }

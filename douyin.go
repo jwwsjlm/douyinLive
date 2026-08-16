@@ -35,6 +35,8 @@ type DouyinLive struct {
 	mu                     sync.Mutex
 	contextMu              sync.Mutex
 	contextPrepared        bool
+	bdmsMu                 sync.Mutex
+	bdmsRuntime            *localBDMSRuntime
 	isLiveClosed           bool
 	manualClose            bool
 	lastUserAgentChange    time.Time

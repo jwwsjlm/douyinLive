@@ -21,16 +21,7 @@ func (dl *DouyinLive) Close() {
 // Dispose releases resources for instances that will not enter Start.
 func (dl *DouyinLive) Dispose() {
 	dl.Close()
-	dl.releaseBDMSRuntime()
 	dl.releaseCache()
-}
-
-// releaseBDMSRuntime 清除本地 BDMS Goja 运行时，允许其关联内存及时回收。
-// releaseBDMSRuntime clears the local BDMS Goja runtime so its memory can be collected promptly.
-func (dl *DouyinLive) releaseBDMSRuntime() {
-	dl.bdmsMu.Lock()
-	dl.bdmsRuntime = nil
-	dl.bdmsMu.Unlock()
 }
 
 // releaseCache 幂等释放房间信息缓存。
@@ -118,7 +109,6 @@ func (dl *DouyinLive) cleanup() {
 	dl.contextMu.Lock()
 	dl.contextPrepared = false
 	dl.contextMu.Unlock()
-	dl.releaseBDMSRuntime()
 
 	dl.mu.Lock()
 	conn := dl.conn

@@ -212,13 +212,8 @@ func (dl *DouyinLive) fetchInitialIMState() error {
 	}
 	msToken := dl.initialIMFetchMSToken()
 	params := dl.buildInitialIMFetchParams(roomInfo, msToken)
-	ctx, cancel := dl.requestContext()
-	defer cancel()
-	signed, err := dl.signWebcastURL(ctx, "https://live.douyin.com/webcast/im/fetch/?"+params, msToken)
-	if err != nil {
-		return fmt.Errorf("sign im/fetch url failed: %w", err)
-	}
-	initialURL := signed.SignedURL
+	signed := signWebcastHTTPURL("https://live.douyin.com/webcast/im/fetch/", params, dl.userAgent)
+	initialURL := signed.URL
 	dl.logger.Debug("请求 IM 初始状态",
 		logFlowArgs("im_fetch", "prefetch",
 			"live_id", roomInfo.liveID,
@@ -227,10 +222,13 @@ func (dl *DouyinLive) fetchInitialIMState() error {
 			"endpoint", "/webcast/im/fetch/",
 			"query_len", len(params),
 			"ms_token_source", msTokenSource,
-			"abogus_len", signed.Lengths["a_bogus"],
-			"mstoken_len", signed.Lengths["msToken"],
+			"sign_provider", signed.Provider,
+			"abogus_len", signed.ABogusLength,
+			"sign_duration", signed.Duration,
 		)...,
 	)
+	ctx, cancel := dl.requestContext()
+	defer cancel()
 
 	headers := map[string]string{
 		"Accept":          "*/*",

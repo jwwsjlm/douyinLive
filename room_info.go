@@ -819,11 +819,8 @@ func (dl *DouyinLive) doRequest() (string, error) {
 	}
 	ctx, cancel := dl.requestContext()
 	defer cancel()
-	signed, err := dl.signWebcastURL(ctx, "https://live.douyin.com/webcast/room/web/enter/?"+params, dl.initialIMFetchMSToken())
-	if err != nil {
-		return "", fmt.Errorf("sign web/enter url failed: %w", err)
-	}
-	url := signed.SignedURL
+	signed := signWebcastHTTPURL("https://live.douyin.com/webcast/room/web/enter/", params, dl.userAgent)
+	url := signed.URL
 	roomInfo := dl.roomInfoSnapshot()
 	dl.logger.Debug("请求直播间 web/enter",
 		logFlowArgs("room_info", "web_enter",
@@ -831,8 +828,9 @@ func (dl *DouyinLive) doRequest() (string, error) {
 			"room_id", roomInfo.roomID,
 			"endpoint", "/webcast/room/web/enter/",
 			"query_len", len(params),
-			"abogus_len", signed.Lengths["a_bogus"],
-			"mstoken_len", signed.Lengths["msToken"],
+			"sign_provider", signed.Provider,
+			"abogus_len", signed.ABogusLength,
+			"sign_duration", signed.Duration,
 		)...,
 	)
 

@@ -489,7 +489,9 @@ APP_SIGN_PROVIDER=tikhub APP_TIKHUB_KEY=YOUR_TIKHUB_KEY ./douyinLive
 如果多个地方同时配置，以优先级最高的为准。`sign.provider=local` 时：
 
 - WebSocket `signature` 仍使用项目原来的 `webmssdk.js` / `X-MS-STUB` 链路。
-- `/webcast/room/web/enter/` and `/webcast/im/fetch/` generate `msToken` / `a_bogus` locally with embedded `jsScript/bdms.js` through Goja.
+- `/webcast/room/web/enter/` 和 `/webcast/im/fetch/` 使用轻量原生 `AbSign`（SM3 + RC4）计算 `a_bogus`，不会启动大体积 JavaScript 运行时。
+
+为了兼顾稳定性和启动速度，HTTP 请求的 `a_bogus` 与 WebSocket 的 `signature` 分开处理：`a_bogus` 固定使用原生算法，`signature` 才根据 `sign.provider` 选择本地 `webmssdk.js` 或 TikHub 在线 API。两者用途不同，不应混用。
 
 只有 `sign.provider=tikhub` 时才会调用 TikHub 在线 API，并且必须提供 `tikhub.key`。
 

@@ -3,6 +3,7 @@ package jsScript
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"sync"
 
 	"github.com/dop251/goja"
@@ -15,10 +16,111 @@ import (
 var jsScript string
 
 var (
-	vm       *goja.Runtime
-	fGetSign func(string) string
-	mu       sync.Mutex
+	programOnce sync.Once
+	program     *goja.Program
+	programErr  error
+
+	// 以下变量仅用于兼容旧版 LoadGoja/ExecuteJS API。
+	// 生产签名流程使用每个直播会话独立的 Signer，不再共享此 Runtime。
+	legacyMu     sync.Mutex
+	legacySigner *Signer
+	vm           *goja.Runtime
 )
+
+// Signer 封装一个直播会话独享的 Goja Runtime。
+// Signer owns one Goja runtime for a single live session.
+//
+// Goja Runtime 不支持并发调用，因此 Sign 会在实例内部串行执行。
+// A Goja Runtime is not goroutine-safe, so Sign serializes calls per instance.
+type Signer struct {
+	mu        sync.Mutex
+	vm        *goja.Runtime
+	fGetSign  func(string) string
+	userAgent string
+	cookie    string
+	closed    bool
+}
+
+// compiledProgram 返回全局预编译的 webmssdk.js 程序。
+// compiledProgram returns the process-wide precompiled webmssdk.js program.
+func compiledProgram() (*goja.Program, error) {
+	programOnce.Do(func() {
+		program, programErr = goja.Compile("webmssdk.js", jsScript, false)
+	})
+	return program, programErr
+}
+
+// NewSigner 创建一个使用指定 UA 和 Cookie 的独立签名运行时。
+// NewSigner creates an isolated signing runtime for the supplied UA and cookie.
+func NewSigner(ua, cookie string) (*Signer, error) {
+	compiled, err := compiledProgram()
+	if err != nil {
+		return nil, err
+	}
+
+	runtime := goja.New()
+	if _, err := runtime.RunString(browserEnvironmentScript(ua, cookie)); err != nil {
+		return nil, err
+	}
+	if _, err := runtime.RunProgram(compiled); err != nil {
+		return nil, err
+	}
+
+	var getSign func(string) string
+	if err := runtime.ExportTo(runtime.Get("get_sign"), &getSign); err != nil {
+		return nil, err
+	}
+	if getSign == nil {
+		return nil, errors.New("get_sign is not available")
+	}
+
+	return &Signer{
+		vm:        runtime,
+		fGetSign:  getSign,
+		userAgent: ua,
+		cookie:    cookie,
+	}, nil
+}
+
+// Sign 反复调用当前会话 Runtime 中的 get_sign。
+// Sign repeatedly invokes get_sign in this session's runtime.
+func (s *Signer) Sign(signature string) (string, error) {
+	if s == nil {
+		return "", errors.New("signer is nil")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.vm == nil || s.fGetSign == nil {
+		return "", errors.New("signer is closed")
+	}
+	return s.fGetSign(signature), nil
+}
+
+// ProfileMatches 判断 Runtime 是否与当前连接的 UA/Cookie 一致。
+// ProfileMatches reports whether the runtime matches the current connection profile.
+func (s *Signer) ProfileMatches(ua, cookie string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.closed && s.vm != nil && s.userAgent == ua && s.cookie == cookie
+}
+
+// Close 解除 Runtime 和 JS 函数引用，使其可由 Go GC 回收。
+// Close drops runtime and function references so Go's GC can reclaim them.
+func (s *Signer) Close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.closed = true
+	s.fGetSign = nil
+	s.vm = nil
+	s.userAgent = ""
+	s.cookie = ""
+	s.mu.Unlock()
+}
 
 // LoadGoja 将 JavaScript 加载到 Goja 运行时，并设置签名所需的浏览器环境。
 // LoadGoja loads JavaScript into the Goja runtime and prepares the browser-like signing environment.
@@ -29,15 +131,20 @@ func LoadGoja(ua string) error {
 }
 
 func LoadGojaWithCookie(ua, cookie string) error {
-	mu.Lock()
-	defer mu.Unlock()
-	vm = goja.New()
-
-	if _, err := vm.RunString(browserEnvironmentScript(ua, cookie) + jsScript); err != nil {
+	signer, err := NewSigner(ua, cookie)
+	if err != nil {
 		return err
 	}
 
-	return vm.ExportTo(vm.Get("get_sign"), &fGetSign)
+	legacyMu.Lock()
+	oldSigner := legacySigner
+	legacySigner = signer
+	vm = signer.vm
+	legacyMu.Unlock()
+	if oldSigner != nil {
+		oldSigner.Close()
+	}
+	return nil
 }
 
 // ExecuteJS 调用 JavaScript 中的 get_sign 函数生成签名。
@@ -45,9 +152,16 @@ func LoadGojaWithCookie(ua, cookie string) error {
 // 参数/Parameters:
 //   - signature: 传入 get_sign 的 X-MS-STUB 字符串。 X-MS-STUB string passed to get_sign.
 func ExecuteJS(signature string) string {
-	mu.Lock()
-	defer mu.Unlock()
-	return fGetSign(signature)
+	legacyMu.Lock()
+	defer legacyMu.Unlock()
+	if legacySigner == nil {
+		return ""
+	}
+	value, err := legacySigner.Sign(signature)
+	if err != nil {
+		return ""
+	}
+	return value
 }
 
 func browserEnvironmentScript(ua, cookie string) string {

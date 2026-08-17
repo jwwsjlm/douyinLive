@@ -135,6 +135,12 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string, signer webso
 	if cookie != "" {
 		dl.cookieManager.SetDouyinCookie(cookie)
 	}
+	dl.logger.Debug(
+		"浏览器会话画像已创建",
+		"live_id", dl.liveID,
+		"user_agent", dl.userAgent,
+		"sign_provider", signer.Name(),
+	)
 	if statusLogger, ok := signer.(interface {
 		LogStatus(logSink, string)
 	}); ok {

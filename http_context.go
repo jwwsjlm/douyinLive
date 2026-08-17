@@ -10,16 +10,25 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/jwwsjlm/douyinLive/v2/jsScript"
 	"github.com/jwwsjlm/req/v3"
 )
 
 var impersonatedUserAgents = []string{
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
 	"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+}
+
+var userAgentSelector struct {
+	sync.Mutex
+	order  []int
+	cursor int
 }
 
 const slowWebSocketPreparationStep = 2 * time.Second
@@ -27,14 +36,51 @@ const slowWebSocketPreparationStep = 2 * time.Second
 // newHTTPUserAgent 随机选择一个用于 HTTP 伪装的浏览器 UA。
 // newHTTPUserAgent randomly selects a browser user agent for HTTP impersonation.
 func newHTTPUserAgent() string {
+	return newHTTPUserAgentExcept("")
+}
+
+// newHTTPUserAgentExcept 随机选择 UA，并在存在其他候选项时避免继续使用旧值。
+// newHTTPUserAgentExcept selects a random UA and avoids the previous value when alternatives exist.
+func newHTTPUserAgentExcept(excluded string) string {
+	userAgentSelector.Lock()
+	defer userAgentSelector.Unlock()
+
 	if len(impersonatedUserAgents) == 0 {
 		return ""
 	}
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(impersonatedUserAgents))))
-	if err != nil {
-		return impersonatedUserAgents[0]
+
+	for range len(impersonatedUserAgents) {
+		if userAgentSelector.cursor >= len(userAgentSelector.order) {
+			userAgentSelector.order = shuffledUserAgentIndexes(len(impersonatedUserAgents))
+			userAgentSelector.cursor = 0
+		}
+		index := userAgentSelector.order[userAgentSelector.cursor]
+		userAgentSelector.cursor++
+		candidate := impersonatedUserAgents[index]
+		if candidate != excluded || len(impersonatedUserAgents) == 1 {
+			return candidate
+		}
 	}
-	return impersonatedUserAgents[n.Int64()]
+
+	return impersonatedUserAgents[0]
+}
+
+// shuffledUserAgentIndexes 为一个选择周期生成随机且不重复的 UA 顺序。
+// shuffledUserAgentIndexes creates a randomized, non-repeating UA order for one selection cycle.
+func shuffledUserAgentIndexes(count int) []int {
+	order := make([]int, count)
+	for index := range order {
+		order[index] = index
+	}
+	for index := count - 1; index > 0; index-- {
+		randomIndex, err := rand.Int(rand.Reader, big.NewInt(int64(index+1)))
+		if err != nil {
+			continue
+		}
+		swapIndex := int(randomIndex.Int64())
+		order[index], order[swapIndex] = order[swapIndex], order[index]
+	}
+	return order
 }
 
 // newHTTPClient 创建带浏览器伪装和超时设置的 HTTP 客户端。
@@ -79,10 +125,23 @@ func responseBytes(resp *req.Response) ([]byte, error) {
 // rebuildHTTPClientAndHeaders 重建 HTTP 客户端并刷新基础请求头。
 // rebuildHTTPClientAndHeaders rebuilds the HTTP client and refreshes base headers.
 func (dl *DouyinLive) rebuildHTTPClientAndHeaders() {
+	oldClient := dl.client
 	dl.client = newHTTPClient(dl.userAgent)
 	dl.headers = make(http.Header)
 	dl.headers.Set("User-Agent", dl.userAgent)
 	dl.refreshSignerUserAgent()
+	closeHTTPClientIdleConnections(oldClient)
+}
+
+// closeHTTPClientIdleConnections 关闭 req 客户端保留的 HTTP/1.1、HTTP/2 和 HTTP/3 空闲连接。
+// closeHTTPClientIdleConnections closes idle HTTP/1.1, HTTP/2, and HTTP/3 connections retained by req.
+func closeHTTPClientIdleConnections(client *req.Client) {
+	if client == nil {
+		return
+	}
+	if transport := client.GetTransport(); transport != nil {
+		transport.CloseIdleConnections()
+	}
 }
 
 // refreshSignerUserAgent 将当前 UA 同步给签名器。
@@ -291,14 +350,13 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() (err error) {
 		return fmt.Errorf("%w: live_id=%s", errLiveStatusUnknown, dl.liveID)
 	}
 
-	if dl.signer == nil || dl.signer.Name() == SignProviderLocal {
+	if preparer, ok := dl.signer.(websocketSignerPreparer); ok {
 		stepStartedAt = time.Now()
-		if err := jsScript.LoadGojaWithCookie(dl.userAgent, dl.getCookieString()); err != nil {
+		if err := preparer.Prepare(dl.userAgent, dl.getCookieString()); err != nil {
 			dl.logWebSocketPreparationStep("websocket_signer_runtime", stepStartedAt, err)
 			return fmt.Errorf("加载JavaScript脚本失败: %w", err)
 		}
 		dl.logWebSocketPreparationStep("websocket_signer_runtime", stepStartedAt, nil)
-
 	}
 	if !initialIMFetched {
 		stepStartedAt = time.Now()
@@ -347,7 +405,7 @@ func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP b
 	if changeUA {
 		now := time.Now()
 		if now.Sub(dl.lastUserAgentChange) >= minUAChangeInterval {
-			newUserAgent := newHTTPUserAgent()
+			newUserAgent := newHTTPUserAgentExcept(oldUserAgent)
 			dl.userAgent = newUserAgent
 			dl.lastUserAgentChange = now
 			dl.logger.Info("重连前刷新 UA", "live_id", dl.liveID, "old_user_agent", oldUserAgent, "new_user_agent", newUserAgent)

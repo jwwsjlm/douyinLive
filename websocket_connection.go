@@ -124,6 +124,11 @@ func (dl *DouyinLive) buildWebsocketURL() (string, error) {
 		dl.signer = signer
 		signer.UpdateUserAgent(dl.userAgent)
 	}
+	if preparer, ok := signer.(websocketSignerPreparer); ok {
+		if err := preparer.Prepare(dl.userAgent, dl.getCookieString()); err != nil {
+			return "", fmt.Errorf("初始化本地 WebSocket 签名器失败: %w", err)
+		}
+	}
 	ctx, cancel := dl.requestContext()
 	defer cancel()
 	signatureParams := newWebsocketSignatureParams(roomInfo.roomID, roomInfo.pushID)

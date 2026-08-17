@@ -31,6 +31,136 @@ func TestNewDouyinLiveDefaultsLocalSigner(t *testing.T) {
 	}
 }
 
+func TestLocalWebsocketSignerKeepsRoomProfilesIsolated(t *testing.T) {
+	signerA := newLocalWebsocketSigner().(*localWebsocketSigner)
+	signerB := newLocalWebsocketSigner().(*localWebsocketSigner)
+	defer signerA.Close()
+	defer signerB.Close()
+
+	const (
+		uaA     = "Mozilla/5.0 room-a Chrome/150.0.0.0 Safari/537.36"
+		uaB     = "Mozilla/5.0 room-b Chrome/150.0.0.0 Safari/537.36"
+		cookieA = "ttwid=room-a; msToken=token-a"
+		cookieB = "ttwid=room-b; msToken=token-b"
+	)
+	if err := signerA.Prepare(uaA, cookieA); err != nil {
+		t.Fatalf("signerA.Prepare() failed: %v", err)
+	}
+	if err := signerB.Prepare(uaB, cookieB); err != nil {
+		t.Fatalf("signerB.Prepare() failed: %v", err)
+	}
+	if signerA.runtime == signerB.runtime {
+		t.Fatal("different rooms share the same JS runtime")
+	}
+	if signerA.userAgent != uaA || signerA.cookie != cookieA {
+		t.Fatalf("signer A profile changed: ua=%q cookie=%q", signerA.userAgent, signerA.cookie)
+	}
+	if signerB.userAgent != uaB || signerB.cookie != cookieB {
+		t.Fatalf("signer B profile changed: ua=%q cookie=%q", signerB.userAgent, signerB.cookie)
+	}
+
+	firstA, err := signerA.Sign(context.Background(), "room-a", "user-a", uaA)
+	if err != nil || firstA == "" {
+		t.Fatalf("signerA.Sign() = %q, %v", firstA, err)
+	}
+	if _, err := signerB.Sign(context.Background(), "room-b", "user-b", uaB); err != nil {
+		t.Fatalf("signerB.Sign() failed: %v", err)
+	}
+	secondA, err := signerA.Sign(context.Background(), "room-a", "user-a", uaA)
+	if err != nil {
+		t.Fatalf("second signerA.Sign() failed: %v", err)
+	}
+	if secondA == "" {
+		t.Fatal("second signerA.Sign() returned an empty signature")
+	}
+	if signerA.userAgent != uaA || signerA.cookie != cookieA {
+		t.Fatalf("signer A profile changed after signer B use: ua=%q cookie=%q", signerA.userAgent, signerA.cookie)
+	}
+}
+
+func TestLocalWebsocketSignerReusesAndRotatesRuntimeByProfile(t *testing.T) {
+	signer := newLocalWebsocketSigner().(*localWebsocketSigner)
+	defer signer.Close()
+
+	if err := signer.Prepare("ua-a", "ttwid=a"); err != nil {
+		t.Fatalf("Prepare(first) failed: %v", err)
+	}
+	firstRuntime := signer.runtime
+	if err := signer.Prepare("ua-a", "ttwid=a"); err != nil {
+		t.Fatalf("Prepare(reuse) failed: %v", err)
+	}
+	if signer.runtime != firstRuntime {
+		t.Fatal("unchanged profile rebuilt the JS runtime")
+	}
+
+	if err := signer.Prepare("ua-b", "ttwid=a"); err != nil {
+		t.Fatalf("Prepare(rotated) failed: %v", err)
+	}
+	if signer.runtime == firstRuntime {
+		t.Fatal("changed UA did not rotate the JS runtime")
+	}
+	if firstRuntime.ProfileMatches("ua-a", "ttwid=a") {
+		t.Fatal("old runtime remained active after rotation")
+	}
+}
+
+func TestLocalWebsocketSignerRejectsMismatchedUserAgent(t *testing.T) {
+	signer := newLocalWebsocketSigner().(*localWebsocketSigner)
+	defer signer.Close()
+	if err := signer.Prepare("ua-a", "ttwid=a"); err != nil {
+		t.Fatalf("Prepare() failed: %v", err)
+	}
+	if _, err := signer.Sign(context.Background(), "room", "user", "ua-b"); !errors.Is(err, ErrLocalSignerProfile) {
+		t.Fatalf("Sign() err = %v, want ErrLocalSignerProfile", err)
+	}
+}
+
+func TestDisposeClosesLocalWebsocketSigner(t *testing.T) {
+	dl, err := NewDouyinLive("live-id", nil, "ttwid=dispose-test")
+	if err != nil {
+		t.Fatalf("NewDouyinLive() failed: %v", err)
+	}
+	signer := dl.signer.(*localWebsocketSigner)
+	if err := signer.Prepare(dl.userAgent, dl.getCookieString()); err != nil {
+		t.Fatalf("Prepare() failed: %v", err)
+	}
+	dl.Dispose()
+	if _, err := signer.Sign(context.Background(), "room", "user", dl.userAgent); !errors.Is(err, ErrLocalSignerClosed) {
+		t.Fatalf("Sign() after Dispose err = %v, want ErrLocalSignerClosed", err)
+	}
+}
+
+func TestNewHTTPUserAgentExceptAvoidsPreviousValue(t *testing.T) {
+	if len(impersonatedUserAgents) < 2 {
+		t.Skip("requires at least two UA candidates")
+	}
+	excluded := impersonatedUserAgents[0]
+	for range 100 {
+		if got := newHTTPUserAgentExcept(excluded); got == excluded {
+			t.Fatalf("newHTTPUserAgentExcept() returned excluded UA %q", got)
+		}
+	}
+}
+
+func TestNewHTTPUserAgentUsesNonRepeatingRandomCycle(t *testing.T) {
+	userAgentSelector.Lock()
+	userAgentSelector.order = nil
+	userAgentSelector.cursor = 0
+	userAgentSelector.Unlock()
+
+	seen := make(map[string]struct{}, len(impersonatedUserAgents))
+	for range len(impersonatedUserAgents) {
+		userAgent := newHTTPUserAgent()
+		if _, exists := seen[userAgent]; exists {
+			t.Fatalf("UA repeated before selection cycle completed: %q", userAgent)
+		}
+		seen[userAgent] = struct{}{}
+	}
+	if len(seen) != len(impersonatedUserAgents) {
+		t.Fatalf("selected %d unique UAs, want %d", len(seen), len(impersonatedUserAgents))
+	}
+}
+
 func TestNewDouyinLiveWithTikHubUsesTikHubSigner(t *testing.T) {
 	dl, err := NewDouyinLiveWithTikHub("live-id", nil, "", "api-key")
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	tikhub "github.com/jwwsjlm/Tikhub"
 	"github.com/jwwsjlm/douyinLive/v2/jsScript"
@@ -25,8 +26,11 @@ const (
 )
 
 var (
-	ErrTikHubTokenEmpty  = errors.New("tikhub token 未配置")
-	ErrTikHubSignInvalid = errors.New("tikhub 签名响应无效")
+	ErrLocalSignerNotPrepared = errors.New("本地 WebSocket 签名器尚未初始化")
+	ErrLocalSignerClosed      = errors.New("本地 WebSocket 签名器已关闭")
+	ErrLocalSignerProfile     = errors.New("本地 WebSocket 签名器画像不匹配")
+	ErrTikHubTokenEmpty       = errors.New("tikhub token 未配置")
+	ErrTikHubSignInvalid      = errors.New("tikhub 签名响应无效")
 )
 
 // websocketSigner 抽象 WebSocket 签名来源。
@@ -37,20 +41,72 @@ type websocketSigner interface {
 	UpdateUserAgent(userAgent string)
 }
 
-// localWebsocketSigner 使用内置 JavaScript 计算 WebSocket 签名。
-// localWebsocketSigner generates WebSocket signatures with the embedded JavaScript runtime.
-type localWebsocketSigner struct{}
+// websocketSignerPreparer 描述需要按直播会话 UA/Cookie 初始化的签名器。
+// websocketSignerPreparer describes signers initialized from a session UA/cookie profile.
+type websocketSignerPreparer interface {
+	Prepare(userAgent, cookie string) error
+}
+
+// websocketSignerCloser 描述持有独立运行时或网络资源的签名器。
+// websocketSignerCloser describes signers that own runtime or network resources.
+type websocketSignerCloser interface {
+	Close()
+}
+
+// localWebsocketSigner 使用当前直播会话独享的 Goja Runtime 计算 WebSocket 签名。
+// localWebsocketSigner generates signatures with a Goja runtime isolated to one live session.
+type localWebsocketSigner struct {
+	mu        sync.Mutex
+	runtime   *jsScript.Signer
+	userAgent string
+	cookie    string
+	closed    bool
+}
 
 // newLocalWebsocketSigner 创建本地签名器。
 // newLocalWebsocketSigner creates a local signature provider.
 func newLocalWebsocketSigner() websocketSigner {
-	return localWebsocketSigner{}
+	return &localWebsocketSigner{}
 }
 
 // Name 返回本地签名器名称。
 // Name returns the local signature provider name.
-func (localWebsocketSigner) Name() string {
+func (*localWebsocketSigner) Name() string {
 	return SignProviderLocal
+}
+
+// Prepare 使用当前直播会话的 UA/Cookie 初始化或刷新独立 JS Runtime。
+// Prepare initializes or refreshes the isolated JS runtime for the current session profile.
+func (s *localWebsocketSigner) Prepare(userAgent, cookie string) error {
+	if s == nil {
+		return ErrLocalSignerClosed
+	}
+
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return ErrLocalSignerClosed
+	}
+	if s.runtime != nil && s.userAgent == userAgent && s.cookie == cookie && s.runtime.ProfileMatches(userAgent, cookie) {
+		s.mu.Unlock()
+		return nil
+	}
+
+	runtime, err := jsScript.NewSigner(userAgent, cookie)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	oldRuntime := s.runtime
+	s.runtime = runtime
+	s.userAgent = userAgent
+	s.cookie = cookie
+	s.mu.Unlock()
+
+	if oldRuntime != nil {
+		oldRuntime.Close()
+	}
+	return nil
 }
 
 // Sign 使用本地 JS 生成 WebSocket 签名。
@@ -58,15 +114,51 @@ func (localWebsocketSigner) Name() string {
 // 参数/Parameters:
 //   - roomID: 抖音长房间 ID。 Douyin long room ID.
 //   - userUniqueID: WebSocket 签名所需的用户唯一 ID。 User unique ID required for WebSocket signing.
-func (localWebsocketSigner) Sign(_ context.Context, roomID, userUniqueID, _ string) (string, error) {
-	return jsScript.ExecuteJS(newWebsocketSignatureParams(roomID, userUniqueID).XMSStub()), nil
+func (s *localWebsocketSigner) Sign(_ context.Context, roomID, userUniqueID, userAgent string) (string, error) {
+	if s == nil {
+		return "", ErrLocalSignerClosed
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return "", ErrLocalSignerClosed
+	}
+	if s.runtime == nil {
+		return "", ErrLocalSignerNotPrepared
+	}
+	if userAgent != "" && s.userAgent != userAgent {
+		return "", fmt.Errorf("%w: prepared=%q current=%q", ErrLocalSignerProfile, s.userAgent, userAgent)
+	}
+	return s.runtime.Sign(newWebsocketSignatureParams(roomID, userUniqueID).XMSStub())
 }
 
-// UpdateUserAgent 保持接口一致，本地签名器的 UA 在 LoadGoja 时设置。
-// UpdateUserAgent keeps interface parity; the local signer uses the UA loaded into Goja.
+// UpdateUserAgent 保持接口一致；本地签名器会在 Prepare 时原子绑定完整 UA/Cookie 画像。
+// UpdateUserAgent keeps interface parity; Prepare atomically binds the full UA/cookie profile.
 // 参数/Parameters:
 //   - string: 新的 User-Agent；本地签名器忽略该值。 New User-Agent; ignored by the local signer.
-func (localWebsocketSigner) UpdateUserAgent(string) {}
+func (*localWebsocketSigner) UpdateUserAgent(string) {}
+
+// Close 释放当前直播会话的 Goja Runtime 引用。
+// Close releases this live session's Goja runtime references.
+func (s *localWebsocketSigner) Close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.closed = true
+	runtime := s.runtime
+	s.runtime = nil
+	s.userAgent = ""
+	s.cookie = ""
+	s.mu.Unlock()
+	if runtime != nil {
+		runtime.Close()
+	}
+}
 
 // tikhubWebsocketSigner 使用 TikHub 在线 API 计算 WebSocket 签名。
 // tikhubWebsocketSigner generates WebSocket signatures through TikHub's online API.

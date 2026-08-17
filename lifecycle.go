@@ -21,13 +21,17 @@ func (dl *DouyinLive) Close() {
 // Dispose releases resources for instances that will not enter Start.
 func (dl *DouyinLive) Dispose() {
 	dl.Close()
-	dl.releaseCache()
+	dl.releaseResources()
 }
 
-// releaseCache 幂等释放房间信息缓存。
-// releaseCache idempotently releases the room-info cache.
-func (dl *DouyinLive) releaseCache() {
+// releaseResources 幂等释放缓存、HTTP 空闲连接和会话级签名 Runtime。
+// releaseResources idempotently releases cache, idle HTTP connections, and the session signer runtime.
+func (dl *DouyinLive) releaseResources() {
 	dl.releaseOnce.Do(func() {
+		if closer, ok := dl.signer.(websocketSignerCloser); ok {
+			closer.Close()
+		}
+		closeHTTPClientIdleConnections(dl.client)
 		if dl.ristretto != nil {
 			dl.ristretto.Close()
 		}
@@ -118,6 +122,6 @@ func (dl *DouyinLive) cleanup() {
 	if conn != nil {
 		_ = conn.Close()
 	}
-	dl.releaseCache()
+	dl.releaseResources()
 	dl.logger.Info("抖音直播连接资源已释放", "live_id", dl.liveID)
 }

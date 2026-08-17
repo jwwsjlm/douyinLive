@@ -116,8 +116,16 @@ func appLogHandlerOptions(level string) *slog.HandlerOptions {
 	}
 }
 
-// formatLogTime 将日志时间转换为本地时区的 RFC 3339 毫秒格式。
-// formatLogTime formats log timestamps in local time using RFC 3339 milliseconds.
+var logLocation = func() *time.Location {
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*60*60)
+	}
+	return location
+}()
+
+// formatLogTime 将日志时间转换为统一的 Asia/Shanghai 时区并保留毫秒。
+// formatLogTime formats log timestamps in a stable Asia/Shanghai timezone with milliseconds.
 func formatLogTime(t time.Time) string {
-	return t.Local().Format(logTimeFormat)
+	return t.In(logLocation).Format(logTimeFormat)
 }

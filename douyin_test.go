@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
@@ -11,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -1012,15 +1012,18 @@ func newRecordingWebsocketConn(t *testing.T) (*websocket.Conn, *recordingConn, f
 		_, _ = io.Copy(io.Discard, reader)
 	}()
 
-	u, err := url.Parse("ws://example.test/webcast/im/push/v2/")
-	if err != nil {
-		t.Fatalf("parse websocket URL: %v", err)
+	dialer := websocket.Dialer{
+		NetDialContext: func(context.Context, string, string) (net.Conn, error) {
+			return recorder, nil
+		},
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
 	}
-	wsConn, _, err := websocket.NewClient(recorder, u, nil, 1024, 1024)
+	wsConn, _, err := dialer.Dial("ws://example.test/webcast/im/push/v2/", nil)
 	if err != nil {
 		serverSide.Close()
 		clientSide.Close()
-		t.Fatalf("NewClient() failed: %v", err)
+		t.Fatalf("Dial() failed: %v", err)
 	}
 
 	cleanup := func() {

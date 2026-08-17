@@ -1,4 +1,4 @@
-﻿FROM golang:1.26.4-alpine3.22 AS builder
+﻿FROM golang:1.26.6-alpine3.22 AS builder
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
@@ -26,5 +26,8 @@ COPY --from=builder /out/douyinLive /app/douyinLive
 COPY config.example.yaml /app/config.example.yaml
 
 EXPOSE 1088
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -q -O - http://127.0.0.1:1088/healthz >/dev/null || exit 1
 
 ENTRYPOINT ["/app/douyinLive"]

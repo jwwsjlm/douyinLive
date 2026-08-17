@@ -224,11 +224,20 @@ func NewConfig() (*Config, error) {
 	if flag := pflag.Lookup("tikhub-key"); flag != nil && flag.Changed {
 		tikHubKey = flag.Value.String()
 	}
+	tikHubKey = strings.TrimSpace(tikHubKey)
+	if signProvider == signProviderTikHub && tikHubKey == "" {
+		return nil, errors.New("sign.provider=tikhub 时必须配置 tikhub.key、APP_TIKHUB_KEY 或 --tikhub-key")
+	}
+
+	port := viper.GetString("port")
+	if _, err := parseConfiguredPort(port); err != nil {
+		return nil, err
+	}
 
 	// 填充 Config 结构体。
 	// Populate the Config struct.
 	cfg := &Config{
-		Port:    viper.GetString("port"),
+		Port:    port,
 		Unknown: viper.GetBool("unknown"),
 		Cookie: CookieConfig{
 			Douyin: viper.GetString("cookie.douyin"),
@@ -245,7 +254,7 @@ func NewConfig() (*Config, error) {
 			Provider: signProvider,
 		},
 		TikHub: TikHubConfig{
-			Key: strings.TrimSpace(tikHubKey),
+			Key: tikHubKey,
 		},
 	}
 

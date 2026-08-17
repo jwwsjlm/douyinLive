@@ -386,10 +386,6 @@ func roomInfoObjectFromLivePageState(body string) string {
 	return anchorOnlyFallback
 }
 
-func roomInfoObjectHasIdentity(obj string) bool {
-	return roomInfoObjectHasRoomIdentity(obj) || roomInfoObjectHasAnchorIdentity(obj)
-}
-
 func roomInfoObjectHasRoomIdentity(obj string) bool {
 	return firstNonEmptyGJSON(obj, "room.id_str", "room.id") != ""
 }

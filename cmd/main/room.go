@@ -39,6 +39,7 @@ type Room struct {
 	title          string
 	avatarThumb    string
 	accountOnly    bool
+	knownValid     bool
 	starting       bool
 	closed         bool
 	upstreamReady  bool
@@ -86,6 +87,22 @@ func (r *Room) isClosed() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.closed
+}
+
+// markKnownValid 记录该房间曾经被抖音页面或接口明确识别为有效房间。
+// markKnownValid records that Douyin previously confirmed this room identity.
+func (r *Room) markKnownValid() {
+	r.mu.Lock()
+	r.knownValid = true
+	r.mu.Unlock()
+}
+
+// hasKnownValidRoom 返回该连接周期内是否曾确认过有效房间身份。
+// hasKnownValidRoom reports whether this room identity was confirmed during the current lifecycle.
+func (r *Room) hasKnownValidRoom() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.knownValid
 }
 
 // closeBackgroundWorkers 停止房间后台监控和上游直播监听。

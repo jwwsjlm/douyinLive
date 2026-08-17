@@ -78,6 +78,10 @@ func (r *Room) startMonitorLoop() {
 				case errors.Is(err, errRoomInactive):
 					return
 				case errors.Is(err, douyinLive.ErrRoomNotFound):
+					if r.hasKnownValidRoom() {
+						r.logger.Warn("已确认过的直播间本次查询暂时不可用，保留客户端并继续轮询", "room_id", r.id, "err", err)
+						continue
+					}
 					r.logger.Warn("轮询发现直播间不存在，关闭客户端连接", "room_id", r.id, "err", err)
 					r.closeAllClients(roomInvalidMessage)
 					return

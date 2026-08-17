@@ -155,6 +155,17 @@ func TestRoomCloseIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestRoomRemembersPreviouslyValidatedIdentity(t *testing.T) {
+	room := NewRoom("1001", nil, false, "", signProviderLocal, "", time.Second, time.Second, nil)
+	if room.hasKnownValidRoom() {
+		t.Fatal("new room unexpectedly starts as validated")
+	}
+	room.markKnownValid()
+	if !room.hasKnownValidRoom() {
+		t.Fatal("room did not retain validated identity")
+	}
+}
+
 func TestRoomCloseAllClientsClosesEveryWaitingClient(t *testing.T) {
 	room := NewRoom("1001", nil, false, "", signProviderLocal, "", time.Second, time.Second, nil)
 	first := NewClient("client-1", nil)

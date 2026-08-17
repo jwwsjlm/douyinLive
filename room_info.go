@@ -748,7 +748,7 @@ func (dl *DouyinLive) refreshRoomEnterData() (string, error) {
 			missingNameSource = "live_page_fallback"
 			body = fallbackBody
 		} else {
-			dl.logger.Error("请求直播间信息失败，重试结束", "live_id", dl.liveID, "err", err)
+			dl.logger.Warn("请求直播间信息失败，重试结束", "live_id", dl.liveID, "err", err)
 			return "", err
 		}
 	}

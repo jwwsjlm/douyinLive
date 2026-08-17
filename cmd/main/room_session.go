@@ -30,6 +30,7 @@ func (r *Room) startLiveSession() error {
 	if err := d.PrepareWebSocketContext(); err != nil {
 		if d.IsKnownOfflineStatus() {
 			r.updateMetadataFromDouyinLive(d)
+			r.markKnownValid()
 			d.Dispose()
 			return douyinLive.ErrLiveNotStarted
 		}
@@ -41,10 +42,14 @@ func (r *Room) startLiveSession() error {
 	}
 	if err := confirmLiveSessionStatus(d); err != nil {
 		r.updateMetadataFromDouyinLive(d)
+		if errors.Is(err, douyinLive.ErrLiveNotStarted) {
+			r.markKnownValid()
+		}
 		d.Dispose()
 		return err
 	}
 	r.updateMetadataFromDouyinLive(d)
+	r.markKnownValid()
 
 	r.mu.Lock()
 	r.douyinLive = d

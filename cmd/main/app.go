@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -83,7 +82,6 @@ func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error
 func (a *App) Run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws/", a.handleWebSocket)
-	mux.HandleFunc("/healthz", a.handleHealth)
 
 	port, err := parseConfiguredPort(a.config.Port)
 	if err != nil {
@@ -149,17 +147,6 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 		IdleTimeout:       httpIdleTimeout,
 		MaxHeaderBytes:    httpMaxHeaderBytes,
 	}
-}
-
-// handleHealth 返回进程健康状态和当前构建版本。
-// handleHealth returns process health and current build metadata.
-func (a *App) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"status":  "ok",
-		"version": VersionString(),
-	})
 }
 
 // Shutdown 优雅关闭房间管理器和 HTTP 服务。

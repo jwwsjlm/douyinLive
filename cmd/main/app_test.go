@@ -5,9 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -122,25 +120,6 @@ func TestListenOnAvailablePortStopsAtMaximumPort(t *testing.T) {
 	}
 }
 
-func TestHealthEndpoint(t *testing.T) {
-	app, err := NewApp(context.Background(), &Config{}, nil)
-	if err != nil {
-		t.Fatalf("NewApp() error = %v", err)
-	}
-	recorder := httptest.NewRecorder()
-	app.handleHealth(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
-	}
-	if got := recorder.Header().Get("Content-Type"); got != "application/json; charset=utf-8" {
-		t.Fatalf("Content-Type = %q", got)
-	}
-	if body := recorder.Body.String(); body == "" || !containsAll(body, `"status":"ok"`, `"version":`) {
-		t.Fatalf("health response = %q", body)
-	}
-}
-
 func TestNewAppRejectsNilConfig(t *testing.T) {
 	if _, err := NewApp(context.Background(), nil, nil); err == nil {
 		t.Fatal("NewApp() unexpectedly accepted nil config")
@@ -180,14 +159,12 @@ func TestAppRunAndShutdownGracefully(t *testing.T) {
 		t.Fatal("App.Run() did not become ready")
 	}
 
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get("http://127.0.0.1:" + app.runningPort + "/healthz")
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+app.runningPort, 3*time.Second)
 	if err != nil {
-		t.Fatalf("GET /healthz: %v", err)
+		t.Fatalf("dial running server: %v", err)
 	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("health status = %d, want %d", resp.StatusCode, http.StatusOK)
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close probe connection: %v", err)
 	}
 
 	if err := app.Shutdown(); err != nil {
@@ -201,13 +178,4 @@ func TestAppRunAndShutdownGracefully(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("App.Run() did not exit after Shutdown()")
 	}
-}
-
-func containsAll(value string, parts ...string) bool {
-	for _, part := range parts {
-		if !strings.Contains(value, part) {
-			return false
-		}
-	}
-	return true
 }

@@ -60,6 +60,22 @@ func TestRoomManagerKeySeparatesCookie(t *testing.T) {
 	}
 }
 
+func TestRoomManagerSharesOnlyMatchingRoomProfiles(t *testing.T) {
+	rm := NewRoomManager(nil, false, "", nil, signProviderLocal, "", time.Second, time.Second)
+	first := rm.GetOrCreateRoom("1001", "cookie-a")
+	shared := rm.GetOrCreateRoom("1001", "cookie-a")
+	isolated := rm.GetOrCreateRoom("1001", "cookie-b")
+
+	if first != shared {
+		t.Fatal("matching room and Cookie did not reuse the same upstream room")
+	}
+	if first == isolated {
+		t.Fatal("different Cookies unexpectedly shared one upstream room")
+	}
+
+	rm.CloseAll()
+}
+
 func TestRoomRemoveIfIdleRemovesRoomFromManager(t *testing.T) {
 	rm := NewRoomManager(nil, false, "", nil, signProviderLocal, "", time.Second, time.Second)
 	room := rm.GetOrCreateRoom("1001", "")

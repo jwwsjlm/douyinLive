@@ -147,6 +147,62 @@ func TestNewAppRejectsNilConfig(t *testing.T) {
 	}
 }
 
+func TestAppRunAndShutdownGracefully(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve test port: %v", err)
+	}
+	port := probe.Addr().(*net.TCPAddr).Port
+	if err := probe.Close(); err != nil {
+		t.Fatalf("release test port: %v", err)
+	}
+
+	app, err := NewApp(context.Background(), &Config{
+		Port: strconv.Itoa(port),
+		Monitor: MonitorConfig{
+			PollInterval:   time.Second,
+			NotifyInterval: time.Second,
+		},
+		Sign: SignConfig{Provider: signProviderLocal},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewApp() error = %v", err)
+	}
+
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- app.Run()
+	}()
+
+	select {
+	case <-app.ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("App.Run() did not become ready")
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:" + app.runningPort + "/healthz")
+	if err != nil {
+		t.Fatalf("GET /healthz: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("health status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	select {
+	case err := <-runErrCh:
+		if !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("Run() error = %v, want http.ErrServerClosed", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("App.Run() did not exit after Shutdown()")
+	}
+}
+
 func containsAll(value string, parts ...string) bool {
 	for _, part := range parts {
 		if !strings.Contains(value, part) {

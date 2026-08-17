@@ -21,3 +21,5 @@ image
 *.test
 *.out
 cmd/main/build-*
+/docs
+/examples

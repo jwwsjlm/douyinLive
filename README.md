@@ -146,6 +146,7 @@ cp config.example.yaml config.yaml
 douyinLive/
 ├── cmd/main/                 # 独立服务入口
 ├── docs/                     # 详细使用文档
+├── examples/                 # 调试示例数据
 ├── internal/webcastsign/     # 内部签名实现
 ├── jsScript/                 # Goja 兼容回退脚本
 ├── sign/                     # HTTP 签名与 Cookie 逻辑

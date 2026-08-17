@@ -34,7 +34,7 @@ archives:
       {{ .ProjectName }}-{{ .Tag }}-{{ envOrDefault "BUILD_COMMIT" .ShortCommit }}-{{ .Os }}-{{ .Arch }}
     files:
       - README.md
-      - docs/*.md
+      - docs/**/*.md
       - LICENSE
       - config.example.yaml
       - compose.yaml

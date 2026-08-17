@@ -10,7 +10,7 @@ import (
 const (
 	// logTimeFormat 使用带毫秒和时区偏移的 RFC 3339 格式，便于排序和跨时区排查。
 	// logTimeFormat uses RFC 3339 with milliseconds and a timezone offset for sorting and cross-zone diagnostics.
-	logTimeFormat = "2006-01-02T15:04:05.000Z07:00"
+	logTimeFormat = "2006-01-02 15:04:05.000 -07:00"
 )
 
 // appLogger 包装 slog.Logger，并兼容 douyinLive 库需要的日志接口。
@@ -113,12 +113,6 @@ func slogLevel(level string) slog.Level {
 func appLogHandlerOptions(level string) *slog.HandlerOptions {
 	return &slog.HandlerOptions{
 		Level: slogLevel(level),
-		ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
-			if attr.Key == slog.TimeKey && attr.Value.Kind() == slog.KindTime {
-				attr.Value = slog.StringValue(formatLogTime(attr.Value.Time()))
-			}
-			return attr
-		},
 	}
 }
 

@@ -467,7 +467,14 @@ log:
   level: "debug"
 ```
 
-日志使用 Go `slog` 文本格式，时间统一为带毫秒和时区偏移的 RFC 3339 格式，例如 `2026-08-17T20:37:59.428+08:00`。每行会带上 `time`、`level`、`msg` 以及 `room_id`、`live_id`、`err` 等结构化字段，方便排序、检索以及长时间挂机时排查连接和重连状态。
+日志使用 Go `slog`，并针对终端和 Docker 做了单行可读格式化。时间包含毫秒和时区偏移，级别保持对齐，其他上下文继续使用 `key=value` 结构化字段：
+
+```text
+2026-08-17 20:37:59.428 +08:00  INFO   DouyinLive 启动  tag=v2.0.26-beta.4 commit=abcdef12 sign_provider=local
+2026-08-17 20:38:05.672 +08:00  WARN   准备重新连接  room_id=123456 attempt=2
+```
+
+这种格式方便人眼阅读，也可以按 `room_id`、`live_id`、`stage`、`step`、`err` 等字段检索，适合长时间挂机时排查连接和重连状态。
 
 ### 查看版本和构建来源
 

@@ -22,7 +22,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "解决方法: 在同目录下创建 config.yaml，或使用命令行参数 douyinLive --port 1088")
 		os.Exit(1)
 	}
-	logger := newAppLogger(slog.New(slog.NewTextHandler(os.Stdout, appLogHandlerOptions(cfg.Log.Level))))
+	logger := newAppLogger(slog.New(newPrettyTextHandler(os.Stdout, appLogHandlerOptions(cfg.Log.Level))))
 
 	// 创建应用实例。
 	// Create the application instance.

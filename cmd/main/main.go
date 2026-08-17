@@ -26,7 +26,16 @@ func main() {
 
 	// 创建应用实例。
 	// Create the application instance.
-	logger.Info("版本信息", "stage", "startup", "step", "version", "version", VersionString())
+	logger.Info(
+		"DouyinLive 启动",
+		"stage", "startup",
+		"step", "version",
+		"tag", buildTag,
+		"commit", buildCommit,
+		"build_date", buildDate,
+		"build_source", buildSource,
+		"sign_provider", defaultSignProvider,
+	)
 
 	app, err := NewApp(context.Background(), cfg, logger)
 	if err != nil {

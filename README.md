@@ -467,7 +467,7 @@ log:
   level: "debug"
 ```
 
-日志使用 Go `slog` 文本格式，会带上 `level`、`time` 以及 `room_id`、`live_id`、`err` 等字段，方便长时间挂机时排查连接和重连状态。
+日志使用 Go `slog` 文本格式，时间统一为带毫秒和时区偏移的 RFC 3339 格式，例如 `2026-08-17T20:37:59.428+08:00`。每行会带上 `time`、`level`、`msg` 以及 `room_id`、`live_id`、`err` 等结构化字段，方便排序、检索以及长时间挂机时排查连接和重连状态。
 
 ### 查看版本和构建来源
 
@@ -550,7 +550,7 @@ Windows：
 
 提交 Issue 时建议贴这几段日志：
 
-- 程序启动后的版本行：包含 `version`、`source`、`signProvider`。
+- 程序启动后的版本行：包含 `tag`、`commit`、`build_date`、`build_source`、`sign_provider`。
 - 第一次出现 `stage=room_info` 到 `stage=ws step=dial` 的完整日志。
 - 发生断线时，从第一条 `读取 WebSocket 消息失败` 到后续 `检测到需重连`、`重连成功` 或 `连接最终失败` 的日志。
 - 如果是签名问题，请贴 `stage=ws step=signature` 和 `stage=ws step=build_url`，但不要贴完整 Cookie、完整 URL、完整 `signature`、完整 `msToken`。

@@ -7,6 +7,12 @@ import (
 	"time"
 )
 
+const (
+	// logTimeFormat 使用带毫秒和时区偏移的 RFC 3339 格式，便于排序和跨时区排查。
+	// logTimeFormat uses RFC 3339 with milliseconds and a timezone offset for sorting and cross-zone diagnostics.
+	logTimeFormat = "2006-01-02T15:04:05.000Z07:00"
+)
+
 // appLogger 包装 slog.Logger，并兼容 douyinLive 库需要的日志接口。
 // appLogger wraps slog.Logger while satisfying the logger interface required by the douyinLive package.
 type appLogger struct {
@@ -102,6 +108,8 @@ func slogLevel(level string) slog.Level {
 	}
 }
 
+// appLogHandlerOptions 创建统一的日志级别和字段格式配置。
+// appLogHandlerOptions creates consistent log-level and attribute formatting options.
 func appLogHandlerOptions(level string) *slog.HandlerOptions {
 	return &slog.HandlerOptions{
 		Level: slogLevel(level),
@@ -114,6 +122,8 @@ func appLogHandlerOptions(level string) *slog.HandlerOptions {
 	}
 }
 
+// formatLogTime 将日志时间转换为本地时区的 RFC 3339 毫秒格式。
+// formatLogTime formats log timestamps in local time using RFC 3339 milliseconds.
 func formatLogTime(t time.Time) string {
-	return t.Local().Format("2006-01-02 15:04:05.000")
+	return t.Local().Format(logTimeFormat)
 }

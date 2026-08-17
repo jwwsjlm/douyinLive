@@ -3,7 +3,10 @@ package douyinLive
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -31,7 +34,31 @@ func TestNewDouyinLiveDefaultsLocalSigner(t *testing.T) {
 	}
 }
 
-func TestLocalWebsocketSignerKeepsRoomProfilesIsolated(t *testing.T) {
+type trackingReadCloser struct {
+	closed bool
+}
+
+func (r *trackingReadCloser) Read([]byte) (int, error) { return 0, io.EOF }
+
+func (r *trackingReadCloser) Close() error {
+	r.closed = true
+	return nil
+}
+
+func TestCloseWebSocketHandshakeResponseClosesBody(t *testing.T) {
+	body := &trackingReadCloser{}
+	closeWebSocketHandshakeResponse(&http.Response{Body: body})
+	if !body.closed {
+		t.Fatal("closeWebSocketHandshakeResponse() did not close response body")
+	}
+}
+
+func TestCloseWebSocketHandshakeResponseAcceptsNil(t *testing.T) {
+	closeWebSocketHandshakeResponse(nil)
+	closeWebSocketHandshakeResponse(&http.Response{})
+}
+
+func TestLocalWebsocketSignerKeepsRoomStateIsolatedWithoutEagerGoja(t *testing.T) {
 	signerA := newLocalWebsocketSigner().(*localWebsocketSigner)
 	signerB := newLocalWebsocketSigner().(*localWebsocketSigner)
 	defer signerA.Close()
@@ -49,8 +76,11 @@ func TestLocalWebsocketSignerKeepsRoomProfilesIsolated(t *testing.T) {
 	if err := signerB.Prepare(uaB, cookieB); err != nil {
 		t.Fatalf("signerB.Prepare() failed: %v", err)
 	}
-	if signerA.runtime == signerB.runtime {
-		t.Fatal("different rooms share the same JS runtime")
+	if signerA.native == nil || signerB.native == nil || signerA.native == signerB.native {
+		t.Fatal("different rooms do not own isolated native signer state")
+	}
+	if signerA.runtime != nil || signerB.runtime != nil {
+		t.Fatal("native mode eagerly initialized a Goja runtime")
 	}
 	if signerA.userAgent != uaA || signerA.cookie != cookieA {
 		t.Fatalf("signer A profile changed: ua=%q cookie=%q", signerA.userAgent, signerA.cookie)
@@ -60,7 +90,7 @@ func TestLocalWebsocketSignerKeepsRoomProfilesIsolated(t *testing.T) {
 	}
 
 	firstA, err := signerA.Sign(context.Background(), "room-a", "user-a", uaA)
-	if err != nil || firstA == "" {
+	if err != nil || len(firstA) != 16 {
 		t.Fatalf("signerA.Sign() = %q, %v", firstA, err)
 	}
 	if _, err := signerB.Sign(context.Background(), "room-b", "user-b", uaB); err != nil {
@@ -70,22 +100,33 @@ func TestLocalWebsocketSignerKeepsRoomProfilesIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second signerA.Sign() failed: %v", err)
 	}
-	if secondA == "" {
-		t.Fatal("second signerA.Sign() returned an empty signature")
+	if len(secondA) != 16 || secondA == firstA {
+		t.Fatalf("second signerA.Sign() = %q, want a new 16-character signature", secondA)
 	}
 	if signerA.userAgent != uaA || signerA.cookie != cookieA {
 		t.Fatalf("signer A profile changed after signer B use: ua=%q cookie=%q", signerA.userAgent, signerA.cookie)
 	}
 }
 
-func TestLocalWebsocketSignerReusesAndRotatesRuntimeByProfile(t *testing.T) {
+func TestLocalWebsocketSignerLazilyCreatesAndRotatesFallbackRuntime(t *testing.T) {
 	signer := newLocalWebsocketSigner().(*localWebsocketSigner)
 	defer signer.Close()
 
 	if err := signer.Prepare("ua-a", "ttwid=a"); err != nil {
 		t.Fatalf("Prepare(first) failed: %v", err)
 	}
+	if signer.runtime != nil {
+		t.Fatal("Prepare() eagerly initialized Goja in native mode")
+	}
+	firstNative := signer.native
+	switched, err := signer.ActivateFallback()
+	if err != nil || !switched {
+		t.Fatalf("ActivateFallback() = %v, %v", switched, err)
+	}
 	firstRuntime := signer.runtime
+	if firstRuntime == nil || signer.Implementation() != "goja_fallback" {
+		t.Fatal("fallback mode did not initialize Goja")
+	}
 	if err := signer.Prepare("ua-a", "ttwid=a"); err != nil {
 		t.Fatalf("Prepare(reuse) failed: %v", err)
 	}
@@ -99,8 +140,54 @@ func TestLocalWebsocketSignerReusesAndRotatesRuntimeByProfile(t *testing.T) {
 	if signer.runtime == firstRuntime {
 		t.Fatal("changed UA did not rotate the JS runtime")
 	}
+	if signer.native != firstNative {
+		t.Fatal("profile rotation unexpectedly replaced native signer state")
+	}
 	if firstRuntime.ProfileMatches("ua-a", "ttwid=a") {
 		t.Fatal("old runtime remained active after rotation")
+	}
+}
+
+func TestLocalWebsocketSignerActivatesFallbackOnlyOnceConcurrently(t *testing.T) {
+	signer := newLocalWebsocketSigner().(*localWebsocketSigner)
+	defer signer.Close()
+	if err := signer.Prepare("ua-concurrent", "ttwid=concurrent"); err != nil {
+		t.Fatalf("Prepare() failed: %v", err)
+	}
+
+	const callers = 8
+	var waitGroup sync.WaitGroup
+	results := make(chan bool, callers)
+	errorsCh := make(chan error, callers)
+	for range callers {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			switched, err := signer.ActivateFallback()
+			results <- switched
+			errorsCh <- err
+		}()
+	}
+	waitGroup.Wait()
+	close(results)
+	close(errorsCh)
+
+	activated := 0
+	for switched := range results {
+		if switched {
+			activated++
+		}
+	}
+	for err := range errorsCh {
+		if err != nil {
+			t.Fatalf("ActivateFallback() failed: %v", err)
+		}
+	}
+	if activated != 1 {
+		t.Fatalf("ActivateFallback() switched %d times, want exactly once", activated)
+	}
+	if signer.runtime == nil || signer.Implementation() != "goja_fallback" {
+		t.Fatal("concurrent fallback activation did not leave signer in Goja fallback mode")
 	}
 }
 

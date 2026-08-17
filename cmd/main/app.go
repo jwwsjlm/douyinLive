@@ -184,7 +184,7 @@ func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	a.logger.Info("接收到 WebSocket 连接请求", "room_id", roomID, "remote_addr", r.RemoteAddr)
 
-	room := a.roomManager.GetOrCreateRoom(roomID, cookieOverride)
+	room := a.roomManager.AcquireRoom(roomID, cookieOverride)
 	handler := NewWsHandler(room)
 
 	upgrader := gws.NewUpgrader(handler, &gws.ServerOption{
@@ -195,6 +195,7 @@ func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	socket, err := upgrader.Upgrade(w, r)
 	if err != nil {
+		room.releaseClientReservation()
 		a.logger.Warn("升级 WebSocket 失败", "room_id", roomID, "remote_addr", r.RemoteAddr, "err", err)
 		return
 	}

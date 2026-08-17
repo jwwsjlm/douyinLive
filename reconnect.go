@@ -205,10 +205,9 @@ func (dl *DouyinLive) reconnect(attempts int, changeUA bool, rebuildHTTP bool) b
 
 		dialer := *websocket.DefaultDialer
 		dialer.HandshakeTimeout = websocketConnectTimeout
-		ctx, cancel := dl.requestContext()
-		defer cancel()
-		conn, _, err := dialer.DialContext(ctx, url, headers)
+		conn, response, err := dl.dialWebSocketWithSignerFallback(&dialer, url, headers, attemptIndex+1)
 		if err != nil {
+			closeWebSocketHandshakeResponse(response)
 			attemptIndex++
 			if websocket.IsCloseError(err,
 				websocket.ClosePolicyViolation,

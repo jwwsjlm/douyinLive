@@ -103,6 +103,65 @@ func TestLoadGojaWithCookieExposesSessionCookie(t *testing.T) {
 	}
 }
 
+func TestSignerWithProfileExposesIsolatedFingerprint(t *testing.T) {
+	profile := BrowserProfile{
+		ID:                  "12345678-1234-4234-9234-123456789abc",
+		ScreenWidth:         1536,
+		ScreenHeight:        864,
+		AvailWidth:          1536,
+		AvailHeight:         816,
+		OuterWidth:          1536,
+		OuterHeight:         816,
+		InnerWidth:          1520,
+		InnerHeight:         721,
+		DevicePixelRatio:    1.25,
+		DeviceMemory:        16,
+		HardwareConcurrency: 12,
+		Platform:            "Win32",
+		Language:            "zh-CN",
+		Languages:           []string{"zh-CN", "zh"},
+		TimezoneOffset:      -480,
+		WebGLVendor:         "Google Inc. (Intel)",
+		WebGLRenderer:       "ANGLE (Intel, test renderer)",
+		CanvasSeed:          1234,
+		RandomSeed:          5678,
+	}
+	signer, err := NewSignerWithProfile("Mozilla/5.0 Chrome/150.0.0.0", "ttwid=profile", profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer signer.Close()
+
+	signer.mu.Lock()
+	value, err := signer.vm.RunString(`JSON.stringify({
+		id: localStorage.getItem("__msuuid__"),
+		width: screen.width,
+		height: screen.height,
+		dpr: devicePixelRatio,
+		memory: navigator.deviceMemory,
+		cpu: navigator.hardwareConcurrency,
+		vendor: document.createElement("canvas").getContext("webgl").getParameter(37445),
+		renderer: document.createElement("canvas").getContext("webgl").getParameter(37446)
+	})`)
+	signer.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := value.String()
+	for _, want := range []string{
+		`"id":"12345678-1234-4234-9234-123456789abc"`,
+		`"width":1536`, `"height":864`, `"dpr":1.25`, `"memory":16`, `"cpu":12`,
+		`"vendor":"Google Inc. (Intel)"`, `"renderer":"ANGLE (Intel, test renderer)"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("custom fingerprint missing %s in %s", want, got)
+		}
+	}
+	if !signer.ProfileMatchesWithBrowserProfile("Mozilla/5.0 Chrome/150.0.0.0", "ttwid=profile", profile.ID) {
+		t.Fatal("signer did not retain profile identity")
+	}
+}
+
 func TestSignerInstancesKeepProfilesIsolated(t *testing.T) {
 	const (
 		uaA     = "Mozilla/5.0 profile-a Chrome/150.0.0.0 Safari/537.36"

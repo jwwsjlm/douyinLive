@@ -107,6 +107,27 @@ func TestRoomRemoveIfIdleKeepsRoomWithClients(t *testing.T) {
 	}
 }
 
+func TestPendingWebSocketUpgradePreventsRoomRemoval(t *testing.T) {
+	rm := NewRoomManager(nil, false, "", nil, signProviderLocal, "", time.Second, time.Second)
+	room := rm.AcquireRoom("1001", "")
+
+	room.removeIfIdle()
+	if room.isClosed() {
+		t.Fatal("room closed while a WebSocket upgrade reservation was pending")
+	}
+	rm.roomsMu.RLock()
+	got := rm.rooms["1001"]
+	rm.roomsMu.RUnlock()
+	if got != room {
+		t.Fatal("reserved room was removed from manager")
+	}
+
+	room.releaseClientReservation()
+	if !room.isClosed() {
+		t.Fatal("idle room was not closed after releasing the failed upgrade reservation")
+	}
+}
+
 func TestRoomManagerReplacesClosedRoom(t *testing.T) {
 	rm := NewRoomManager(nil, false, "", nil, signProviderLocal, "", time.Second, time.Second)
 	oldRoom := rm.GetOrCreateRoom("1001", "")
@@ -225,6 +246,39 @@ func TestRoomAnchorOnlyStatusMessageExplainsAccountExistsButNoRoom(t *testing.T)
 	for _, want := range []string{`"code":"ACCOUNT_OFFLINE_NO_ROOM"`, `"status":"account_offline"`, `"status_text":"账号存在但当前没有直播间"`, `"has_room":false`, `"account_only":true`, `"live_name":"一只喵动漫"`, `"message":"账号存在，但网页没有返回直播间房间对象，可能是该账号从未开播或当前未创建直播间，当前按未开播处理"`, `"suggestion":"客户端不需要重连`} {
 		if !strings.Contains(offline, want) {
 			t.Fatalf("offlineStatusMessage() = %s, missing %s", offline, want)
+		}
+	}
+}
+
+func TestStatusUnknownMessageKeepsClientInRetryableState(t *testing.T) {
+	room := NewRoom("139819566957", nil, false, "", signProviderLocal, "", time.Second, 30*time.Second, nil)
+	room.liveName = "亮一嗓·郝晓亮"
+	room.title = "亮一嗓大舞台"
+	message := string(room.statusUnknownMessage())
+	for _, want := range []string{
+		`"code":"ROOM_STATUS_UNKNOWN"`,
+		`"valid":false`,
+		`"live":null`,
+		`"status":"unknown"`,
+		`"has_room":null`,
+		`"account_only":null`,
+		`"live_name":"亮一嗓·郝晓亮"`,
+		`"suggestion":"客户端保持当前 WebSocket 连接，不要立即重连"`,
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("statusUnknownMessage() = %s, missing %s", message, want)
+		}
+	}
+}
+
+func TestStatusUnknownMessagePreservesPreviouslyValidatedRoomIdentity(t *testing.T) {
+	room := NewRoom("139819566957", nil, false, "", signProviderLocal, "", time.Second, 30*time.Second, nil)
+	room.liveName = "亮一嗓·郝晓亮"
+	room.markKnownValid()
+	message := string(room.statusUnknownMessage())
+	for _, want := range []string{`"has_room":true`, `"account_only":false`, `"live_name":"亮一嗓·郝晓亮"`} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("statusUnknownMessage() = %s, missing %s", message, want)
 		}
 	}
 }

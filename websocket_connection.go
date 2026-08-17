@@ -3,6 +3,7 @@ package douyinLive
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -22,22 +23,10 @@ func (dl *DouyinLive) startWebSocket() error {
 	if err != nil {
 		return fmt.Errorf("构建WebSocket URL失败: %w", err)
 	}
-	ctx, cancel := dl.requestContext()
-	defer cancel()
-	roomInfoForDial := dl.roomInfoSnapshot()
-	dl.logger.Info("开始建立上游 WebSocket",
-		logFlowArgs("ws", "dial",
-			"live_id", roomInfoForDial.liveID,
-			"room_id", roomInfoForDial.roomID,
-			"user_unique_id", roomInfoForDial.pushID,
-			"host", websocketHostForLog(url),
-			"url_len", len(url),
-			"has_cookie", dl.getCookieString() != "",
-		)...,
-	)
 
-	conn, resp, err := dialer.DialContext(ctx, url, headers)
+	conn, resp, err := dl.dialWebSocketWithSignerFallback(&dialer, url, headers, 1)
 	if err != nil {
+		closeWebSocketHandshakeResponse(resp)
 		if resp != nil {
 			return fmt.Errorf("连接失败 (状态码: %d): %w", resp.StatusCode, err)
 		}
@@ -48,8 +37,7 @@ func (dl *DouyinLive) startWebSocket() error {
 		statusCode = resp.StatusCode
 	}
 	roomInfo := dl.roomInfoSnapshot()
-	dl.logger.Info("WebSocket 连接成功", logFlowArgs("ws", "dial", "live_id", roomInfo.liveID, "room_id", roomInfo.roomID, "live_name", roomInfo.liveName, "title", roomInfo.title, "status_code", statusCode, "host", websocketHostForLog(url))...)
-	dl.logger.Info("WebSocket 连接成功", "live_id", roomInfo.liveID, "room_id", roomInfo.roomID, "live_name", roomInfo.liveName, "title", roomInfo.title, "status_code", statusCode)
+	dl.logger.Info("WebSocket 连接成功", logFlowArgs("ws", "dial", "live_id", roomInfo.liveID, "room_id", roomInfo.roomID, "live_name", roomInfo.liveName, "title", roomInfo.title, "status_code", statusCode, "host", websocketHostForLog(url), "sign_implementation", websocketSignerImplementationName(dl.signer))...)
 	dl.mu.Lock()
 	dl.conn = conn
 	dl.mu.Unlock()
@@ -58,6 +46,95 @@ func (dl *DouyinLive) startWebSocket() error {
 	dl.markReady()
 	dl.startHeartbeatLoop()
 	return nil
+}
+
+// dialUpstreamWebSocket 执行一次带独立超时上下文的上游握手。
+// dialUpstreamWebSocket performs one upstream handshake with an independent timeout context.
+func (dl *DouyinLive) dialUpstreamWebSocket(dialer *websocket.Dialer, url string, headers http.Header, attempt int) (*websocket.Conn, *http.Response, error) {
+	ctx, cancel := dl.requestContext()
+	defer cancel()
+	roomInfo := dl.roomInfoSnapshot()
+	dl.logger.Info("开始建立上游 WebSocket",
+		logFlowArgs("ws", "dial",
+			"live_id", roomInfo.liveID,
+			"room_id", roomInfo.roomID,
+			"user_unique_id", roomInfo.pushID,
+			"host", websocketHostForLog(url),
+			"url_len", len(url),
+			"has_cookie", dl.getCookieString() != "",
+			"attempt", attempt,
+			"sign_implementation", websocketSignerImplementationName(dl.signer),
+		)...,
+	)
+	return dialer.DialContext(ctx, url, headers)
+}
+
+// dialWebSocketWithSignerFallback 在收到上游 HTTP 握手响应时允许原生签名切换到 Goja 重试一次。
+// dialWebSocketWithSignerFallback allows one native-to-Goja retry when the upstream returns an HTTP handshake response.
+func (dl *DouyinLive) dialWebSocketWithSignerFallback(dialer *websocket.Dialer, url string, headers http.Header, attempt int) (*websocket.Conn, *http.Response, error) {
+	conn, response, err := dl.dialUpstreamWebSocket(dialer, url, headers, attempt)
+	if err == nil || response == nil || websocketSignerImplementationName(dl.signer) != "native" {
+		return conn, response, err
+	}
+
+	fallback, ok := dl.signer.(websocketSignerFallback)
+	if !ok {
+		return conn, response, err
+	}
+	nativeErr := err
+	nativeStatusCode := response.StatusCode
+	nativeResponseBody := readWebSocketHandshakeResponseBody(response)
+	response = nil
+	switched, fallbackErr := fallback.ActivateFallback()
+	if fallbackErr != nil {
+		return nil, nil, fmt.Errorf("原生签名握手失败且 Goja 回退初始化失败: native=%v fallback=%w", nativeErr, fallbackErr)
+	}
+	if !switched {
+		return nil, nil, nativeErr
+	}
+
+	roomInfo := dl.roomInfoSnapshot()
+	dl.logger.Warn("原生 WebSocket 签名握手失败，切换 Goja 兼容签名重试",
+		logFlowArgs("ws", "signature_fallback",
+			"live_id", roomInfo.liveID,
+			"room_id", roomInfo.roomID,
+			"native_status_code", nativeStatusCode,
+			"native_response_body", nativeResponseBody,
+			"sign_implementation", websocketSignerImplementationName(dl.signer),
+			"err", nativeErr,
+		)...,
+	)
+	url, headers, err = dl.websocketDialContext()
+	if err != nil {
+		return nil, nil, fmt.Errorf("构建 Goja 回退 WebSocket URL 失败: %w", err)
+	}
+	return dl.dialUpstreamWebSocket(dialer, url, headers, attempt+1)
+}
+
+// closeWebSocketHandshakeResponse 关闭失败握手返回的响应体，避免连接资源滞留。
+// closeWebSocketHandshakeResponse closes a failed handshake response body to avoid retaining transport resources.
+func closeWebSocketHandshakeResponse(response *http.Response) {
+	if response != nil && response.Body != nil {
+		_ = response.Body.Close()
+	}
+}
+
+// readWebSocketHandshakeResponseBody 读取并关闭失败握手响应体，仅保留有限长度用于定位上游拒绝原因。
+// readWebSocketHandshakeResponseBody reads and closes a failed handshake body, retaining only a bounded diagnostic.
+func readWebSocketHandshakeResponseBody(response *http.Response) string {
+	if response == nil || response.Body == nil {
+		return ""
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 2048))
+	_ = response.Body.Close()
+	if err != nil {
+		return fmt.Sprintf("<read failed: %v>", err)
+	}
+	text := strings.TrimSpace(string(body))
+	if len(text) > 512 {
+		text = text[:512] + "..."
+	}
+	return text
 }
 
 // Ready 返回首次上游 WebSocket 握手成功时关闭的通道。
@@ -138,17 +215,10 @@ func (dl *DouyinLive) buildWebsocketURL() (string, error) {
 			"room_id", roomInfo.roomID,
 			"user_unique_id", roomInfo.pushID,
 			"sign_provider", signer.Name(),
+			"sign_implementation", websocketSignerImplementationName(signer),
 			"websocket_key", signatureParams.Joined(),
 			"x_ms_stub", signatureParams.XMSStub(),
 		)...,
-	)
-	dl.logger.Debug("WebSocket 签名输入",
-		"live_id", roomInfo.liveID,
-		"room_id", roomInfo.roomID,
-		"user_unique_id", roomInfo.pushID,
-		"sign_provider", signer.Name(),
-		"websocket_key", signatureParams.Joined(),
-		"x_ms_stub", signatureParams.XMSStub(),
 	)
 
 	signature, err := signer.Sign(ctx, roomInfo.roomID, roomInfo.pushID, dl.userAgent)
@@ -157,7 +227,8 @@ func (dl *DouyinLive) buildWebsocketURL() (string, error) {
 	}
 
 	cursor, internalExt, pushURL := dl.websocketURLState(fetchTime, roomInfo)
-	params := newWebsocketURLParams(roomInfo, dl.userAgent, cursor, internalExt, signature)
+	screenWidth, screenHeight := dl.fingerprint.screenSize()
+	params := newWebsocketURLParamsWithScreen(roomInfo, dl.userAgent, cursor, internalExt, signature, screenWidth, screenHeight)
 	wsURL := pushURL + "?" + params.QueryString()
 	dl.logger.Debug("WebSocket URL 参数已生成",
 		logFlowArgs("ws", "build_url",
@@ -169,25 +240,16 @@ func (dl *DouyinLive) buildWebsocketURL() (string, error) {
 			"internal_ext", internalExt,
 			"heartbeat_duration", 0,
 			"signature_len", len(signature),
+			"sign_implementation", websocketSignerImplementationName(signer),
 			"url_len", len(wsURL),
 		)...,
-	)
-	dl.logger.Debug("WebSocket URL 参数已生成",
-		"live_id", roomInfo.liveID,
-		"room_id", roomInfo.roomID,
-		"user_unique_id", roomInfo.pushID,
-		"push_url", pushURL,
-		"cursor", cursor,
-		"internal_ext", internalExt,
-		"heartbeat_duration", 0,
-		"signature_len", len(signature),
-		"url_len", len(wsURL),
 	)
 	return wsURL, nil
 }
 
 func (dl *DouyinLive) buildInitialIMFetchParams(roomInfo roomInfoSnapshot, msToken string) string {
-	return newInitialIMFetchParams(roomInfo, dl.userAgent, msToken).QueryString()
+	screenWidth, screenHeight := dl.fingerprint.screenSize()
+	return newInitialIMFetchParamsWithScreen(roomInfo, dl.userAgent, msToken, screenWidth, screenHeight).QueryString()
 }
 
 // initialIMFetchMSToken 返回 im/fetch 使用的 msToken，优先使用用户 Cookie 中的值。

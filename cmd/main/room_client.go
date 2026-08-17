@@ -219,37 +219,63 @@ func (r *Room) clearClients() []*Client {
 func (r *Room) AddClient(socket *gws.Conn) {
 	clientID := socket.RemoteAddr().String()
 	client := NewClient(clientID, socket)
-	count := r.addClient(client)
-	go client.writeLoop(func() {
-		r.closeClient(clientID, nil)
-	})
-
-	r.logger.Info("客户端连接到房间", "client_id", clientID, "room_id", r.id, "client_count", count)
 
 	r.mu.Lock()
-	switch {
-	case r.closed:
+	if r.pendingClients > 0 {
+		r.pendingClients--
+	}
+	if r.closed {
 		r.mu.Unlock()
-		r.closeClient(clientID, serviceClosingMessage)
+		client.close(serviceClosingMessage)
 		return
+	}
+	r.clientsMu.Lock()
+	r.clients[clientID] = client
+	count := len(r.clients)
+	r.clientsMu.Unlock()
+
+	switch {
 	case r.douyinLive != nil:
 		upstreamReady := r.upstreamReady
 		r.mu.Unlock()
+		go client.writeLoop(func() {
+			r.closeClient(clientID, nil)
+		})
+		r.logger.Info("客户端连接到房间", "client_id", clientID, "room_id", r.id, "client_count", count)
 		if upstreamReady {
 			r.sendToClient(clientID, gws.OpcodeText, r.onlineStatusMessage())
 		}
 		return
 	case r.monitorStopCh != nil:
+		statusUnknown := r.statusUnknown
 		r.mu.Unlock()
-		r.sendToClient(clientID, gws.OpcodeText, r.offlineStatusMessage())
+		go client.writeLoop(func() {
+			r.closeClient(clientID, nil)
+		})
+		r.logger.Info("客户端连接到房间", "client_id", clientID, "room_id", r.id, "client_count", count)
+		if statusUnknown {
+			r.sendToClient(clientID, gws.OpcodeText, r.statusUnknownMessage())
+		} else {
+			r.sendToClient(clientID, gws.OpcodeText, r.offlineStatusMessage())
+		}
 		return
 	case r.starting:
 		r.mu.Unlock()
+		go client.writeLoop(func() {
+			r.closeClient(clientID, nil)
+		})
+		r.logger.Info("客户端连接到房间", "client_id", clientID, "room_id", r.id, "client_count", count)
 		return
 	default:
 		r.starting = true
 		r.mu.Unlock()
 	}
+
+	go client.writeLoop(func() {
+		r.closeClient(clientID, nil)
+	})
+
+	r.logger.Info("客户端连接到房间", "client_id", clientID, "room_id", r.id, "client_count", count)
 
 	r.logger.Info("第一个客户端连接，正在检查直播状态", "room_id", r.id)
 	err := r.startLiveSession()
@@ -278,9 +304,21 @@ func (r *Room) AddClient(socket *gws.Conn) {
 			return
 		}
 		r.logger.Info("当前未开播，进入后台轮询监控", "room_id", r.id)
+		r.setStatusUnknown(false)
 		r.notifyOfflineStatus()
 		r.startMonitorLoop()
 
+		return
+	}
+	if errors.Is(err, douyinLive.ErrLiveStatusUnknown) {
+		if r.clientCount() == 0 {
+			r.removeIfIdle()
+			return
+		}
+		r.logger.Warn("暂时无法确认直播状态，保留客户端并进入轮询", "room_id", r.id, "err", err)
+		r.setStatusUnknown(true)
+		r.notifyStatusUnknown()
+		r.startMonitorLoop()
 		return
 	}
 

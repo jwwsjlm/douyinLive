@@ -120,12 +120,28 @@ func (dl *DouyinLive) waitForReconnectDelay(delay time.Duration) bool {
 // requestContext 创建受关闭信号和请求超时共同控制的上下文。
 // requestContext creates a context governed by both close signal and request timeout.
 func (dl *DouyinLive) requestContext() (context.Context, context.CancelFunc) {
+	return dl.requestContextWithParent(context.Background())
+}
+
+// requestContextWithParent combines the caller context with the listener close context and request timeout.
+// requestContextWithParent 将调用方上下文、监听器关闭上下文和请求超时合并起来。
+func (dl *DouyinLive) requestContextWithParent(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
 	dl.mu.Lock()
 	dl.ensureCloseContextLocked()
-	parent := dl.closeCtx
+	closeCtx := dl.closeCtx
 	dl.mu.Unlock()
 
-	return context.WithTimeout(parent, httpRequestTimeout)
+	merged, mergeCancel := context.WithCancel(parent)
+	stopClosePropagation := context.AfterFunc(closeCtx, mergeCancel)
+	timed, timeoutCancel := context.WithTimeout(merged, httpRequestTimeout)
+	return timed, func() {
+		stopClosePropagation()
+		timeoutCancel()
+		mergeCancel()
+	}
 }
 
 // contextWithCloseSignal 将关闭通道转换为可取消上下文。
@@ -146,9 +162,12 @@ func contextWithCloseSignal(closeCh <-chan struct{}) (context.Context, context.C
 
 // prepareRequestContextLocked 在持上下文锁时准备 HTTP 请求头和 Cookie。
 // prepareRequestContextLocked prepares HTTP headers and cookies while the context lock is held.
-func (dl *DouyinLive) prepareRequestContextLocked() error {
+func (dl *DouyinLive) prepareRequestContextLocked(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if dl.shouldFetchTTWID() {
-		if err := dl.fetchTTWID(); err != nil {
+		if err := dl.fetchTTWID(ctx); err != nil {
 			return err
 		}
 	}
@@ -178,7 +197,9 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() (err error) {
 	}()
 
 	stepStartedAt := time.Now()
-	if err := dl.prepareRequestContextLocked(); err != nil {
+	ctx, cancel := dl.requestContext()
+	defer cancel()
+	if err := dl.prepareRequestContextLocked(ctx); err != nil {
 		dl.logWebSocketPreparationStep("request_context", stepStartedAt, err)
 		return err
 	}
@@ -234,7 +255,7 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() (err error) {
 		return ErrLiveNotStarted
 	}
 	if !dl.IsKnownLiveStatus() {
-		return fmt.Errorf("%w: live_id=%s", errLiveStatusUnknown, dl.liveID)
+		return fmt.Errorf("%w: live_id=%s", ErrLiveStatusUnknown, dl.liveID)
 	}
 
 	if preparer, ok := dl.signer.(websocketSignerPreparer); ok {
@@ -295,7 +316,9 @@ func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP b
 			newUserAgent := newHTTPUserAgentExcept(oldUserAgent)
 			dl.userAgent = newUserAgent
 			dl.lastUserAgentChange = now
-			dl.logger.Info("重连前刷新 UA", "live_id", dl.liveID, "old_user_agent", oldUserAgent, "new_user_agent", newUserAgent)
+			dl.fingerprint = newBrowserFingerprint()
+			dl.refreshSignerFingerprint()
+			dl.logger.Info("重连前刷新浏览器画像", "live_id", dl.liveID, "old_user_agent", oldUserAgent, "new_user_agent", newUserAgent, "fingerprint_preset", dl.fingerprint.Preset, "fingerprint_id", dl.fingerprint.ID, "screen_width", dl.fingerprint.ScreenWidth, "screen_height", dl.fingerprint.ScreenHeight)
 		} else {
 			dl.logger.Debug("本次重连跳过 UA 刷新", "live_id", dl.liveID, "elapsed", now.Sub(dl.lastUserAgentChange).Round(time.Millisecond))
 		}

@@ -27,7 +27,7 @@ const (
 var (
 	ErrLiveNotStarted        = errors.New("直播间未开播")
 	ErrRoomNotFound          = errors.New("直播间不存在")
+	ErrLiveStatusUnknown     = errors.New("直播状态暂时无法确认")
 	errRoomInfoEmpty         = errors.New("直播间信息响应为空")
 	errLivePageStateNotFound = errors.New("直播页状态不存在")
-	errLiveStatusUnknown     = errors.New("直播状态未知")
 )

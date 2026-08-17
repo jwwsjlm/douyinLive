@@ -1,6 +1,7 @@
 package douyinLive
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -43,8 +44,8 @@ func (dl *DouyinLive) GetAvatarThumb() string {
 	return dl.roomInfoSnapshot().avatarThumb
 }
 
-// HasAnchorOnlyPageIdentity ????????? roomInfo.anchor ??? roomInfo.room?
-// HasAnchorOnlyPageIdentity reports whether the page returned roomInfo.anchor without roomInfo.room.
+// HasAnchorOnlyPageIdentity reports whether the page returned anchor identity without room identity.
+// HasAnchorOnlyPageIdentity 判断页面是否只返回主播信息而没有返回房间信息。
 func (dl *DouyinLive) HasAnchorOnlyPageIdentity() bool {
 	return dl.roomInfoSnapshot().anchorOnly
 }
@@ -242,11 +243,6 @@ func parseLiveStatusFromRoomEnter(body string) (bool, bool) {
 // parseRoomInfoFromLivePage extracts display metadata from the live page's embedded SSR state.
 // 参数/Parameters:
 //   - body: 直播间页面 HTML 内容。 Live-room page HTML content.
-//
-// parseRoomInfoFromLivePage ???? SSR ??????????????
-// parseRoomInfoFromLivePage extracts display metadata from the live page's embedded SSR state.
-// ??/Parameters:
-//   - body: ????? HTML ??? Live-room page HTML content.
 func parseRoomInfoFromLivePage(body string) roomInfoSnapshot {
 	for _, candidate := range livePageStateCandidates(body) {
 		if roomInfoObj := roomInfoObjectFromLivePageState(candidate); roomInfoObj != "" {
@@ -645,6 +641,13 @@ func firstNonEmptyGJSON(body string, paths ...string) string {
 func (dl *DouyinLive) fetchLivePageState() error {
 	ctx, cancel := dl.requestContext()
 	defer cancel()
+	return dl.fetchLivePageStateWithContext(ctx)
+}
+
+func (dl *DouyinLive) fetchLivePageStateWithContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	headers := map[string]string{
 		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -707,27 +710,46 @@ func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
 // refreshRoomEnterData 强制请求直播间入口数据并刷新房间信息。
 // refreshRoomEnterData force-fetches room enter data and refreshes room metadata.
 func (dl *DouyinLive) refreshRoomEnterData() (string, error) {
+	ctx, cancel := dl.requestContext()
+	defer cancel()
+	return dl.refreshRoomEnterDataWithContext(ctx)
+}
+
+func (dl *DouyinLive) refreshRoomEnterDataWithContext(ctx context.Context) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	dl.logger.Debug("开始请求直播间信息", "live_id", dl.liveID)
+	livePageErr := dl.fetchLivePageStateWithContext(ctx)
+	if livePageErr != nil {
+		dl.logger.Debug("从直播间页面预取状态失败，继续请求 web/enter", "live_id", dl.liveID, "err", livePageErr)
+	}
+	return dl.refreshRoomEnterDataAfterLivePage(ctx, livePageErr)
+}
+
+// refreshRoomEnterDataAfterLivePage requests web/enter while reusing the result of an already completed live-page request.
+// refreshRoomEnterDataAfterLivePage 复用已经完成的直播页请求结果，避免状态检查重复请求同一页面。
+func (dl *DouyinLive) refreshRoomEnterDataAfterLivePage(ctx context.Context, livePageErr error) (string, error) {
 	var body string
 	missingNameSource := "web_enter"
-	var livePageErr error
-
-	dl.logger.Debug("开始请求直播间信息", "live_id", dl.liveID)
-	if err := dl.fetchLivePageState(); err != nil {
-		livePageErr = err
-		dl.logger.Debug("从直播间页面预取状态失败，继续请求 web/enter", "live_id", dl.liveID, "err", err)
+	attempts := uint(3)
+	if errors.Is(livePageErr, errLivePageStateNotFound) && !isDefinitiveRoomNotFoundPageError(livePageErr) {
+		// 200 验证页没有可重试的业务数据，重复三次只会延长客户端等待。
+		attempts = 1
 	}
 	err := retry.Do(
 		func() error {
 			// 核心请求逻辑。
 			// Core request flow.
-			reqBody, err := dl.doRequest()
+			reqBody, err := dl.doRequest(ctx)
 			if err != nil {
 				return err
 			}
 			body = reqBody
 			return nil
 		},
-		retry.Attempts(3),          // 最多重试 3 次
+		retry.Context(ctx),
+		retry.Attempts(attempts),   // 普通响应最多重试 3 次，验证页只尝试一次
 		retry.Delay(1*time.Second), // 每次重试延迟1秒
 		retry.RetryIf(dl.shouldRetryRoomEnter),
 	)
@@ -747,6 +769,10 @@ func (dl *DouyinLive) refreshRoomEnterData() (string, error) {
 			dl.logger.Debug("web/enter 返回空响应，使用直播间页面状态兜底", "live_id", dl.liveID, "err", err)
 			missingNameSource = "live_page_fallback"
 			body = fallbackBody
+		} else if isRoomInfoEmptyError(err) && errors.Is(livePageErr, errLivePageStateNotFound) && !isDefinitiveRoomNotFoundPageError(livePageErr) {
+			// 页面返回 HTTP 200 但没有 SSR 状态时，通常是无 Cookie 风控验证页。
+			// 不能把它误报为普通启动失败或 ROOM_NOT_FOUND，应保留客户端等待后续轮询。
+			return "", fmt.Errorf("%w: live_id=%s live_page=%v web_enter=%v", ErrLiveStatusUnknown, dl.liveID, livePageErr, err)
 		} else {
 			dl.logger.Warn("请求直播间信息失败，重试结束", "live_id", dl.liveID, "err", err)
 			return "", err
@@ -773,6 +799,7 @@ func (dl *DouyinLive) refreshRoomEnterData() (string, error) {
 
 func (dl *DouyinLive) buildRoomEnterParams() string {
 	roomInfo := dl.roomInfoSnapshot()
+	screenWidth, screenHeight := dl.fingerprint.screenSize()
 	parts := []string{
 		"aid=" + webcastAid,
 		"app_name=" + webcastAppName,
@@ -781,8 +808,8 @@ func (dl *DouyinLive) buildRoomEnterParams() string {
 		"language=zh-CN",
 		"enter_from=link_share",
 		"cookie_enabled=true",
-		fmt.Sprintf("screen_width=%d", defaultScreenWidth),
-		fmt.Sprintf("screen_height=%d", defaultScreenHeight),
+		fmt.Sprintf("screen_width=%d", screenWidth),
+		fmt.Sprintf("screen_height=%d", screenHeight),
 		"browser_language=zh-CN",
 		"browser_platform=Win32",
 		"browser_name=Chrome",
@@ -800,7 +827,10 @@ func (dl *DouyinLive) buildRoomEnterParams() string {
 	return strings.Join(parts, "&")
 }
 
-func (dl *DouyinLive) doRequest() (string, error) {
+func (dl *DouyinLive) doRequest(ctx context.Context) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	params := dl.buildRoomEnterParams()
 	// 参考代码 https://github.com/ihmily/DouyinLiveRecorder
 	headers := map[string]string{
@@ -813,8 +843,6 @@ func (dl *DouyinLive) doRequest() (string, error) {
 	for key, value := range browserClientHintHeaders(dl.userAgent) {
 		headers[key] = value
 	}
-	ctx, cancel := dl.requestContext()
-	defer cancel()
 	signed := signWebcastHTTPURL("https://live.douyin.com/webcast/room/web/enter/", params, dl.userAgent)
 	url := signed.URL
 	roomInfo := dl.roomInfoSnapshot()
@@ -906,10 +934,23 @@ func (dl *DouyinLive) roomNotFoundErrorAfterRoomEnter(err error, livePageErr err
 	if roomInfo.roomID != "" || strings.TrimSpace(roomInfo.liveName) != "" || strings.TrimSpace(roomInfo.title) != "" || roomInfo.anchorOnly {
 		return nil
 	}
-	if errors.Is(livePageErr, errLivePageStateNotFound) {
+	// HTTP 200 的页面状态缺失不能直接判定“房间不存在”。
+	// 抖音无 Cookie 或触发风控时会返回 200 的验证页，web/enter 同时可能为空；
+	// 这类情况必须作为暂时无法确认处理，不能关闭客户端。
+	if isDefinitiveRoomNotFoundPageError(livePageErr) {
 		return fmt.Errorf("%w: live_id=%s", ErrRoomNotFound, dl.liveID)
 	}
 	return nil
+}
+
+func isDefinitiveRoomNotFoundPageError(err error) bool {
+	if !errors.Is(err, errLivePageStateNotFound) || err == nil {
+		return false
+	}
+	// 只有明确的 404/410 页面才允许进入 ROOM_NOT_FOUND；
+	// status=200 的验证页、空壳页和暂时风控页都不能当作不存在。
+	message := err.Error()
+	return strings.Contains(message, "status=404") || strings.Contains(message, "status=410")
 }
 
 func (dl *DouyinLive) roomEnterFallbackBody(err error) (string, bool) {
@@ -966,26 +1007,36 @@ func (dl *DouyinLive) refreshLiveStatusFromAPI() (bool, error) {
 // fetchLiveStatusFromAPI 从直播间入口数据判断当前是否开播。
 // fetchLiveStatusFromAPI determines whether the room is live from room enter data.
 func (dl *DouyinLive) fetchLiveStatusFromAPI() (bool, error) {
+	ctx, cancel := dl.requestContext()
+	defer cancel()
+	return dl.fetchLiveStatusFromAPIWithContext(ctx)
+}
+
+func (dl *DouyinLive) fetchLiveStatusFromAPIWithContext(ctx context.Context) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	dl.contextMu.Lock()
 	defer dl.contextMu.Unlock()
 
-	if err := dl.prepareRequestContextLocked(); err != nil {
+	if err := dl.prepareRequestContextLocked(ctx); err != nil {
 		return false, err
 	}
 
-	if err := dl.fetchLivePageState(); err == nil {
+	livePageErr := dl.fetchLivePageStateWithContext(ctx)
+	if livePageErr == nil {
 		roomInfo := dl.roomInfoSnapshot()
 		if isLive, known := dl.liveStatusSnapshot(); known {
 			if roomInfo.roomID != "" || strings.TrimSpace(roomInfo.liveName) != "" || strings.TrimSpace(roomInfo.title) != "" || roomInfo.anchorOnly {
 				step := "live_page_offline"
-				msg := "?????????????????"
+				msg := "直播页确认当前未开播"
 				if roomInfo.anchorOnly {
 					step = "account_offline_no_room"
-					msg = "????????????????????????"
+					msg = "账号存在但当前没有直播间"
 				}
 				if isLive {
 					step = "live_page_online"
-					msg = "??????????"
+					msg = "直播页确认当前正在直播"
 				}
 				dl.logger.Info(msg,
 					logFlowArgs("room_info", step,
@@ -1002,7 +1053,7 @@ func (dl *DouyinLive) fetchLiveStatusFromAPI() (bool, error) {
 		}
 	}
 
-	body, err := dl.refreshRoomEnterData()
+	body, err := dl.refreshRoomEnterDataAfterLivePage(ctx, livePageErr)
 	if err != nil {
 		if isRoomInfoEmptyError(err) {
 			roomInfo := dl.roomInfoSnapshot()
@@ -1016,12 +1067,15 @@ func (dl *DouyinLive) fetchLiveStatusFromAPI() (bool, error) {
 				}
 			}
 		}
+		if isRoomInfoEmptyError(err) && !dl.isKnownOfflineStatus() {
+			return false, fmt.Errorf("%w: live_id=%s: %v", ErrLiveStatusUnknown, dl.liveID, err)
+		}
 		return false, err
 	}
 
 	isLive, known := parseLiveStatusFromRoomEnter(body)
 	if !known {
-		return false, fmt.Errorf("%w: web/enter 未返回 status", errLiveStatusUnknown)
+		return false, fmt.Errorf("%w: web/enter 未返回 status", ErrLiveStatusUnknown)
 	}
 	return isLive, nil
 }

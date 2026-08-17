@@ -93,6 +93,24 @@ func (r *Room) offlineStatusMessage() []byte {
 		strconv.Quote(r.id), strconv.Quote(liveName), strconv.Quote(title), strconv.Quote(avatarThumb), int(r.notifyInterval/time.Second)))
 }
 
+// statusUnknownMessage 构造暂时无法确认状态的通知，避免把风控验证页误报为房间不存在。
+// statusUnknownMessage builds an indeterminate status notification instead of misclassifying a challenge page as a missing room.
+func (r *Room) statusUnknownMessage() []byte {
+	liveName, title, avatarThumb, accountOnly := r.metadataSnapshot()
+	r.mu.Lock()
+	knownValid := r.knownValid
+	r.mu.Unlock()
+	hasRoomJSON, accountOnlyJSON := "null", "null"
+	switch {
+	case accountOnly:
+		hasRoomJSON, accountOnlyJSON = "false", "true"
+	case knownValid:
+		hasRoomJSON, accountOnlyJSON = "true", "false"
+	}
+	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","code":"ROOM_STATUS_UNKNOWN","valid":false,"live":null,"status":"unknown","status_text":"暂时无法确认直播状态","room_id":%s,"live_name":%s,"title":%s,"avatar_thumb":%s,"has_room":%s,"account_only":%s,"message":"上游页面或接口暂时未返回可验证的房间状态，服务端会继续轮询","suggestion":"客户端保持当前 WebSocket 连接，不要立即重连"}`,
+		strconv.Quote(r.id), strconv.Quote(liveName), strconv.Quote(title), strconv.Quote(avatarThumb), hasRoomJSON, accountOnlyJSON))
+}
+
 // offlineEndedStatusMessage 构造已下播状态通知。
 // offlineEndedStatusMessage builds the ended-offline status notification.
 func (r *Room) offlineEndedStatusMessage() []byte {
@@ -113,6 +131,22 @@ func (r *Room) onlineStatusMessage() []byte {
 // notifyOfflineStatus broadcasts the offline status notification.
 func (r *Room) notifyOfflineStatus() {
 	r.Broadcast(r.offlineStatusMessage())
+}
+
+// notifyStatusUnknown 广播暂时无法确认状态的通知。
+// notifyStatusUnknown broadcasts an indeterminate live-status notification.
+func (r *Room) notifyStatusUnknown() {
+	r.Broadcast(r.statusUnknownMessage())
+}
+
+// notifyMonitorStatus 按当前监控状态广播未知或未开播通知，避免把风控页误报为未开播。
+// notifyMonitorStatus broadcasts the current indeterminate/offline monitor state without misclassifying challenge pages.
+func (r *Room) notifyMonitorStatus() {
+	if r.isStatusUnknown() {
+		r.notifyStatusUnknown()
+		return
+	}
+	r.notifyOfflineStatus()
 }
 
 // notifyOfflineEndedStatus 广播已下播状态通知。

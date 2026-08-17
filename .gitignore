@@ -36,6 +36,7 @@ config*.local.yaml
 *.har
 *.network-request
 *.network-response
+/tmp-codex-*
 
 # Go
 *.test

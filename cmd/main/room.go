@@ -27,6 +27,8 @@ type Room struct {
 	clients        map[string]*Client
 	clientsMu      sync.RWMutex
 	douyinLive     *douyinLive.DouyinLive
+	probeLive      *douyinLive.DouyinLive
+	probeFailures  int
 	mu             sync.Mutex
 	onClose        func()
 	unknown        bool
@@ -40,11 +42,54 @@ type Room struct {
 	avatarThumb    string
 	accountOnly    bool
 	knownValid     bool
+	statusUnknown  bool
+	pendingClients int
 	starting       bool
 	closed         bool
 	upstreamReady  bool
 	monitorStopCh  chan struct{}
 	monitorDoneCh  chan struct{}
+}
+
+// setStatusUnknown 记录监控阶段当前是否只能得到“状态未知”。
+// setStatusUnknown records whether the monitor can currently report only an indeterminate status.
+func (r *Room) setStatusUnknown(unknown bool) bool {
+	r.mu.Lock()
+	changed := r.statusUnknown != unknown
+	r.statusUnknown = unknown
+	r.mu.Unlock()
+	return changed
+}
+
+// isStatusUnknown 返回监控阶段当前是否处于“状态未知”。
+// isStatusUnknown reports whether the monitor is currently in an indeterminate state.
+func (r *Room) isStatusUnknown() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.statusUnknown
+}
+
+// reserveClient 为已通过 HTTP 校验但尚未完成 WebSocket 升级的客户端预留房间。
+// reserveClient reserves the room for a client whose WebSocket upgrade hasn't completed yet.
+func (r *Room) reserveClient() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return false
+	}
+	r.pendingClients++
+	return true
+}
+
+// releaseClientReservation 释放升级失败或取消的客户端预留。
+// releaseClientReservation releases a reservation after a failed or canceled WebSocket upgrade.
+func (r *Room) releaseClientReservation() {
+	r.mu.Lock()
+	if r.pendingClients > 0 {
+		r.pendingClients--
+	}
+	r.mu.Unlock()
+	r.removeIfIdle()
 }
 
 // NewRoom 创建直播间实例。
@@ -118,23 +163,28 @@ func (r *Room) closeBackgroundWorkers() {
 func (r *Room) closeDouyinLive() {
 	r.mu.Lock()
 	d := r.douyinLive
+	probe := r.probeLive
 	r.douyinLive = nil
+	r.probeLive = nil
+	r.probeFailures = 0
 	r.mu.Unlock()
 
 	if d != nil {
 		d.Close()
+	}
+	if probe != nil && probe != d {
+		probe.Dispose()
 	}
 }
 
 // removeIfIdle 在房间无客户端且无后台任务时从管理器移除房间。
 // removeIfIdle removes the room from the manager when it has no clients or background work.
 func (r *Room) removeIfIdle() {
-	if r.clientCount() != 0 {
-		return
-	}
-
 	r.mu.Lock()
-	idle := !r.closed && r.douyinLive == nil && r.monitorStopCh == nil && !r.starting
+	r.clientsMu.RLock()
+	clientCount := len(r.clients)
+	r.clientsMu.RUnlock()
+	idle := !r.closed && clientCount == 0 && r.pendingClients == 0 && r.douyinLive == nil && r.probeLive == nil && r.monitorStopCh == nil && !r.starting
 	if idle {
 		r.closed = true
 	}
@@ -155,7 +205,10 @@ func (r *Room) Close() {
 	}
 	r.closed = true
 	d := r.douyinLive
+	probe := r.probeLive
 	r.douyinLive = nil
+	r.probeLive = nil
+	r.probeFailures = 0
 	onClose := r.onClose
 	r.mu.Unlock()
 
@@ -167,6 +220,10 @@ func (r *Room) Close() {
 	if d != nil {
 		d.Close()
 		r.logger.Info("抖音直播监听已关闭", "room_id", r.id)
+	}
+	if probe != nil && probe != d {
+		probe.Dispose()
+		r.logger.Debug("直播状态探测会话已释放", "room_id", r.id)
 	}
 
 	if onClose != nil {

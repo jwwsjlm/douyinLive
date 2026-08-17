@@ -10,13 +10,17 @@ import (
 	"strings"
 )
 
-// logger 定义兼容标准库 log.Logger 的最小日志接口。
-// logger defines the minimal logging interface compatible with log.Logger.
-type logger interface {
+// Logger defines the minimal logger interface accepted by the library.
+// Logger 定义库接受的最小日志接口，兼容标准库 log.Logger。
+type Logger interface {
 	Print(v ...interface{})
 	Printf(format string, v ...interface{})
 	Println(v ...interface{})
 }
+
+// logger is kept as an internal alias for existing implementation code.
+// logger 是内部兼容别名，避免改变已有实现代码。
+type logger = Logger
 
 // logSink 扩展基础日志接口，支持结构化日志级别。
 // logSink extends the base logging interface with structured log levels.
@@ -38,7 +42,7 @@ type printLogger struct {
 // normalizeLogger returns a usable log sink and falls back to the default logger when needed.
 // 参数/Parameters:
 //   - base: 外部传入的旧版日志器。 Legacy logger provided by the caller.
-func normalizeLogger(base logger) logSink {
+func normalizeLogger(base Logger) logSink {
 	if base == nil {
 		base = log.Default()
 	}

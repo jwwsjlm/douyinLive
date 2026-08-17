@@ -59,7 +59,7 @@ type DouyinLive struct {
 //   - liveID: 直播间短号、web_rid 或房间标识。 Live room short ID, web_rid, or room identifier.
 //   - logger: 可选日志器；为 nil 时使用默认日志器。 Optional logger; nil uses the default logger.
 //   - cookie: 可选抖音 Cookie，用于登录态请求。 Optional Douyin Cookie for authenticated requests.
-func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, error) {
+func NewDouyinLive(liveID string, logger Logger, cookie string) (*DouyinLive, error) {
 	return newDouyinLive(liveID, logger, cookie, newLocalWebsocketSigner())
 }
 
@@ -70,7 +70,7 @@ func NewDouyinLive(liveID string, logger logger, cookie string) (*DouyinLive, er
 //   - logger: 可选日志器；为 nil 时使用默认日志器。 Optional logger; nil uses the default logger.
 //   - cookie: 可选抖音 Cookie，用于登录态请求。 Optional Douyin Cookie for authenticated requests.
 //   - tikHubToken: TikHub API Token，用于在线生成 WebSocket 签名。 TikHub API token for online WebSocket signing.
-func NewDouyinLiveWithTikHub(liveID string, logger logger, cookie string, tikHubToken string) (*DouyinLive, error) {
+func NewDouyinLiveWithTikHub(liveID string, logger Logger, cookie string, tikHubToken string) (*DouyinLive, error) {
 	return newDouyinLive(liveID, logger, cookie, newTikHubWebsocketSigner(tikHubToken, ""))
 }
 
@@ -81,7 +81,7 @@ func NewDouyinLiveWithTikHub(liveID string, logger logger, cookie string, tikHub
 //   - baseLogger: 可选日志器；为 nil 时使用默认日志器。 Optional logger; nil uses the default logger.
 //   - cookie: 可选抖音 Cookie，用于登录态请求。 Optional Douyin Cookie for authenticated requests.
 //   - signer: WebSocket 签名实现。 WebSocket signature provider.
-func newDouyinLive(liveID string, baseLogger logger, cookie string, signer websocketSigner) (*DouyinLive, error) {
+func newDouyinLive(liveID string, baseLogger Logger, cookie string, signer websocketSigner) (*DouyinLive, error) {
 	userAgent := newHTTPUserAgent()
 	profile := newSessionProfile(userAgent, signer, cookie)
 	cache, err := ristretto.NewCache(&ristretto.Config[string, string]{
@@ -117,6 +117,12 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string, signer webso
 		"浏览器会话画像已创建",
 		"live_id", dl.liveID,
 		"user_agent", dl.userAgent,
+		"fingerprint_preset", dl.fingerprint.Preset,
+		"fingerprint_id", dl.fingerprint.ID,
+		"screen_width", dl.fingerprint.ScreenWidth,
+		"screen_height", dl.fingerprint.ScreenHeight,
+		"device_memory", dl.fingerprint.DeviceMemory,
+		"hardware_concurrency", dl.fingerprint.HardwareConcurrency,
 		"sign_provider", dl.signer.Name(),
 	)
 	if statusLogger, ok := dl.signer.(interface {

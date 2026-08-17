@@ -38,6 +38,7 @@ type Signer struct {
 	fGetSign  func(string) string
 	userAgent string
 	cookie    string
+	profileID string
 	closed    bool
 }
 
@@ -53,13 +54,20 @@ func compiledProgram() (*goja.Program, error) {
 // NewSigner 创建一个使用指定 UA 和 Cookie 的独立签名运行时。
 // NewSigner creates an isolated signing runtime for the supplied UA and cookie.
 func NewSigner(ua, cookie string) (*Signer, error) {
+	return NewSignerWithProfile(ua, cookie, DefaultBrowserProfile())
+}
+
+// NewSignerWithProfile 创建绑定指定 UA、Cookie 和浏览器画像的独立签名运行时。
+// NewSignerWithProfile creates an isolated signer bound to the supplied UA, cookie, and browser profile.
+func NewSignerWithProfile(ua, cookie string, profile BrowserProfile) (*Signer, error) {
 	compiled, err := compiledProgram()
 	if err != nil {
 		return nil, err
 	}
 
+	profile = normalizeBrowserProfile(profile)
 	runtime := goja.New()
-	if _, err := runtime.RunString(browserEnvironmentScript(ua, cookie)); err != nil {
+	if _, err := runtime.RunString(browserEnvironmentScriptWithProfile(ua, cookie, profile)); err != nil {
 		return nil, err
 	}
 	if _, err := runtime.RunProgram(compiled); err != nil {
@@ -79,6 +87,7 @@ func NewSigner(ua, cookie string) (*Signer, error) {
 		fGetSign:  getSign,
 		userAgent: ua,
 		cookie:    cookie,
+		profileID: profile.ID,
 	}, nil
 }
 
@@ -99,12 +108,18 @@ func (s *Signer) Sign(signature string) (string, error) {
 // ProfileMatches 判断 Runtime 是否与当前连接的 UA/Cookie 一致。
 // ProfileMatches reports whether the runtime matches the current connection profile.
 func (s *Signer) ProfileMatches(ua, cookie string) bool {
+	return s.ProfileMatchesWithBrowserProfile(ua, cookie, "")
+}
+
+// ProfileMatchesWithBrowserProfile 判断 Runtime 是否同时匹配 UA、Cookie 和画像 ID。
+// ProfileMatchesWithBrowserProfile reports whether the runtime matches the UA, cookie, and optional profile ID.
+func (s *Signer) ProfileMatchesWithBrowserProfile(ua, cookie, profileID string) bool {
 	if s == nil {
 		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return !s.closed && s.vm != nil && s.userAgent == ua && s.cookie == cookie
+	return !s.closed && s.vm != nil && s.userAgent == ua && s.cookie == cookie && (profileID == "" || s.profileID == profileID)
 }
 
 // Close 解除 Runtime 和 JS 函数引用，使其可由 Go GC 回收。
@@ -119,6 +134,7 @@ func (s *Signer) Close() {
 	s.vm = nil
 	s.userAgent = ""
 	s.cookie = ""
+	s.profileID = ""
 	s.mu.Unlock()
 }
 
@@ -165,20 +181,27 @@ func ExecuteJS(signature string) string {
 }
 
 func browserEnvironmentScript(ua, cookie string) string {
+	return browserEnvironmentScriptWithProfile(ua, cookie, DefaultBrowserProfile())
+}
+
+func browserEnvironmentScriptWithProfile(ua, cookie string, profile BrowserProfile) string {
+	profile = normalizeBrowserProfile(profile)
 	uaJSON, _ := json.Marshal(ua)
 	cookieJSON, _ := json.Marshal(cookie)
+	profileJSON, _ := json.Marshal(profile)
 	return `
 		(function () {
 			var root = this;
 			var ua = ` + string(uaJSON) + `;
 			var cookie = ` + string(cookieJSON) + `;
+			var profile = ` + string(profileJSON) + `;
 			var webglDebugInfo = {
 				UNMASKED_VENDOR_WEBGL: 37445,
 				UNMASKED_RENDERER_WEBGL: 37446
 			};
 			var webglParameters = {};
-			webglParameters[37445] = "Google Inc. (NVIDIA)";
-			webglParameters[37446] = "ANGLE (NVIDIA, NVIDIA GeForce GTX 1080 Ti (0x00001B06) Direct3D11 vs_5_0 ps_5_0, D3D11)";
+			webglParameters[37445] = profile.webgl_vendor;
+			webglParameters[37446] = profile.webgl_renderer;
 			webglParameters[7938] = "WebGL 1.0 (OpenGL ES 2.0 Chromium)";
 			webglParameters[35724] = "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)";
 			webglParameters[3379] = 16384;
@@ -287,8 +310,8 @@ func browserEnvironmentScript(ua, cookie string) string {
 					fillRect: function () {},
 					clearRect: function () {},
 					fillText: function () {},
-					measureText: function (text) { return { width: String(text || "").length * 6 }; },
-					getImageData: function () { return { data: [0, 0, 0, 255] }; },
+					measureText: function (text) { return { width: String(text || "").length * (6 + (profile.canvas_seed % 7) / 100) }; },
+					getImageData: function () { return { data: [profile.canvas_seed & 3, (profile.canvas_seed >>> 2) & 3, (profile.canvas_seed >>> 4) & 3, 255] }; },
 					putImageData: function () {},
 					beginPath: function () {},
 					closePath: function () {},
@@ -365,7 +388,7 @@ func browserEnvironmentScript(ua, cookie string) string {
 					}
 				};
 				if (tagName === "canvas") {
-					element.toDataURL = function () { return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"; };
+					element.toDataURL = function () { return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB" + profile.canvas_seed.toString(16); };
 					element.getContext = function (type) {
 						if (type === "2d") {
 							return make2DContext();
@@ -394,29 +417,29 @@ func browserEnvironmentScript(ua, cookie string) string {
 				hash: ""
 			};
 			root.screen = {
-				width: 1920,
-				height: 1080,
-				availWidth: 1920,
-				availHeight: 1032,
+				width: profile.screen_width,
+				height: profile.screen_height,
+				availWidth: profile.avail_width,
+				availHeight: profile.avail_height,
 				colorDepth: 24,
 				pixelDepth: 24
 			};
-			root.devicePixelRatio = 1;
-			root.innerWidth = 929;
-			root.innerHeight = 917;
-			root.outerWidth = 945;
-			root.outerHeight = 1012;
+			root.devicePixelRatio = profile.device_pixel_ratio;
+			root.innerWidth = profile.inner_width;
+			root.innerHeight = profile.inner_height;
+			root.outerWidth = profile.outer_width;
+			root.outerHeight = profile.outer_height;
 			root.screenX = 0;
 			root.screenY = 0;
 			root.pageXOffset = 0;
 			root.pageYOffset = 0;
 
 			root.localStorage = makeStorage({
-				"__msuuid__": "00000000-0000-4000-8000-000000000000",
+				"__msuuid__": profile.id,
 				"xmst": "",
 				"websocketkey20230220": "",
-				"a11y_device_id": "",
-				"RTC_DEVICE_ID": ""
+				"a11y_device_id": profile.id,
+				"RTC_DEVICE_ID": profile.id
 			});
 			root.sessionStorage = makeStorage({
 				"__tea_session_id_6383": "",
@@ -429,18 +452,18 @@ func browserEnvironmentScript(ua, cookie string) string {
 				appCodeName: "Mozilla",
 				appName: "Netscape",
 				appVersion: ua.replace(/^Mozilla\//, ""),
-				platform: "Win32",
+				platform: profile.platform,
 				product: "Gecko",
 				productSub: "20030107",
 				vendor: "Google Inc.",
 				vendorSub: "",
-				language: "zh-CN",
-				languages: ["zh-CN", "zh"],
+				language: profile.language,
+				languages: profile.languages,
 				cookieEnabled: true,
 				onLine: true,
 				doNotTrack: null,
-				deviceMemory: 32,
-				hardwareConcurrency: 20,
+				deviceMemory: profile.device_memory,
+				hardwareConcurrency: profile.hardware_concurrency,
 				maxTouchPoints: 0,
 				webdriver: false,
 				plugins: [
@@ -500,9 +523,13 @@ func browserEnvironmentScript(ua, cookie string) string {
 			root.mozRTCPeerConnection = root.RTCPeerConnection;
 
 			root.crypto = root.crypto || {};
+			var cryptoState = profile.random_seed >>> 0;
 			root.crypto.getRandomValues = root.crypto.getRandomValues || function (array) {
 				for (var i = 0; i < array.length; i++) {
-					array[i] = (i * 17 + 29) & 255;
+					cryptoState ^= cryptoState << 13;
+					cryptoState ^= cryptoState >>> 17;
+					cryptoState ^= cryptoState << 5;
+					array[i] = cryptoState & 255;
 				}
 				return array;
 			};
@@ -517,7 +544,7 @@ func browserEnvironmentScript(ua, cookie string) string {
 			root.clearTimeout = function () {};
 			root.setInterval = function () { return 1; };
 			root.clearInterval = function () {};
-			root.Date.prototype.getTimezoneOffset = function () { return -480; };
+			root.Date.prototype.getTimezoneOffset = function () { return profile.timezone_offset; };
 		}).call(this);
 	`
 }

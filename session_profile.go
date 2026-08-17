@@ -25,6 +25,7 @@ type sessionProfile struct {
 	lastUserAgentChange time.Time
 	additionalCookies   map[string]string
 	cookieManager       *sign.CookieManager
+	fingerprint         browserFingerprint
 }
 
 // newSessionProfile 创建 UA、Cookie、HTTP 客户端和签名器保持一致的会话画像。
@@ -34,6 +35,10 @@ func newSessionProfile(userAgent string, signer websocketSigner, cookie string) 
 		signer = newLocalWebsocketSigner()
 	}
 	signer.UpdateUserAgent(userAgent)
+	fingerprint := newBrowserFingerprint()
+	if updater, ok := signer.(websocketSignerFingerprintUpdater); ok {
+		updater.UpdateBrowserFingerprint(fingerprint)
+	}
 	cookieManager := sign.NewCookieManager()
 	if cookie != "" {
 		cookieManager.SetDouyinCookie(cookie)
@@ -46,6 +51,7 @@ func newSessionProfile(userAgent string, signer websocketSigner, cookie string) 
 		lastUserAgentChange: time.Now(),
 		additionalCookies:   make(map[string]string),
 		cookieManager:       cookieManager,
+		fingerprint:         fingerprint,
 	}
 }
 
@@ -61,13 +67,15 @@ func (p *sessionProfile) close() {
 	closeHTTPClientIdleConnections(p.client)
 }
 
+const httpImpersonationChromeMajor = "133"
+
+// impersonatedUserAgents 必须与 req 当前 Chrome 133 TLS/HTTP2/HTTP3 画像保持同一主版本。
+// impersonatedUserAgents must stay on the same major version as req's Chrome 133 TLS/HTTP2/HTTP3 profile.
+// UA 仍按会话随机轮换架构，但不再伪造与底层网络指纹不一致的 Chrome 版本。
+// The architecture still rotates per session without claiming a Chrome version inconsistent with the transport fingerprint.
 var impersonatedUserAgents = []string{
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + httpImpersonationChromeMajor + ".0.0.0 Safari/537.36",
+	"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + httpImpersonationChromeMajor + ".0.0.0 Safari/537.36",
 }
 
 var userAgentSelector struct {
@@ -92,7 +100,7 @@ func newHTTPUserAgentExcept(excluded string) string {
 		return ""
 	}
 
-	for range len(impersonatedUserAgents) {
+	for {
 		if userAgentSelector.cursor >= len(userAgentSelector.order) {
 			userAgentSelector.order = shuffledUserAgentIndexes(len(impersonatedUserAgents))
 			userAgentSelector.cursor = 0
@@ -104,8 +112,6 @@ func newHTTPUserAgentExcept(excluded string) string {
 			return candidate
 		}
 	}
-
-	return impersonatedUserAgents[0]
 }
 
 // shuffledUserAgentIndexes 为一个选择周期生成随机且不重复的 UA 顺序。
@@ -166,6 +172,14 @@ func closeHTTPClientIdleConnections(client *req.Client) {
 func (dl *DouyinLive) refreshSignerUserAgent() {
 	if dl.signer != nil {
 		dl.signer.UpdateUserAgent(dl.userAgent)
+	}
+}
+
+// refreshSignerFingerprint 将当前会话画像同步给本地签名器。
+// refreshSignerFingerprint syncs the current browser fingerprint to the local signer.
+func (dl *DouyinLive) refreshSignerFingerprint() {
+	if updater, ok := dl.signer.(websocketSignerFingerprintUpdater); ok {
+		updater.UpdateBrowserFingerprint(dl.fingerprint)
 	}
 }
 

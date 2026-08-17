@@ -124,6 +124,17 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string, cookieOverride string) *Ro
 	return room
 }
 
+// AcquireRoom 获取房间并为即将完成的 WebSocket 升级预留一个客户端位置。
+// AcquireRoom obtains a room and reserves it for the pending WebSocket upgrade.
+func (rm *RoomManager) AcquireRoom(roomID string, cookieOverride string) *Room {
+	for {
+		room := rm.GetOrCreateRoom(roomID, cookieOverride)
+		if room.reserveClient() {
+			return room
+		}
+	}
+}
+
 // CloseAll 关闭管理器中的所有房间。
 // CloseAll closes every room managed by this manager.
 func (rm *RoomManager) CloseAll() {

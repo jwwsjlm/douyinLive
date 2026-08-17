@@ -105,9 +105,15 @@ type websocketURLParams struct {
 	UserUniqueID   string
 	RoomID         string
 	Signature      string
+	ScreenWidth    int
+	ScreenHeight   int
 }
 
 func newWebsocketURLParams(roomInfo roomInfoSnapshot, userAgent, cursor, internalExt, signature string) websocketURLParams {
+	return newWebsocketURLParamsWithScreen(roomInfo, userAgent, cursor, internalExt, signature, defaultScreenWidth, defaultScreenHeight)
+}
+
+func newWebsocketURLParamsWithScreen(roomInfo roomInfoSnapshot, userAgent, cursor, internalExt, signature string, screenWidth, screenHeight int) websocketURLParams {
 	return websocketURLParams{
 		BrowserVersion: browserVersionFromUserAgent(userAgent),
 		Cursor:         cursor,
@@ -115,6 +121,8 @@ func newWebsocketURLParams(roomInfo roomInfoSnapshot, userAgent, cursor, interna
 		UserUniqueID:   roomInfo.pushID,
 		RoomID:         roomInfo.roomID,
 		Signature:      signature,
+		ScreenWidth:    screenWidth,
+		ScreenHeight:   screenHeight,
 	}
 }
 
@@ -134,8 +142,8 @@ func (p websocketURLParams) QueryString() string {
 		"compress=gzip",
 		"device_platform=" + webcastDevice,
 		"cookie_enabled=true",
-		fmt.Sprintf("screen_width=%d", defaultScreenWidth),
-		fmt.Sprintf("screen_height=%d", defaultScreenHeight),
+		fmt.Sprintf("screen_width=%d", p.ScreenWidth),
+		fmt.Sprintf("screen_height=%d", p.ScreenHeight),
 		"browser_language=zh-CN",
 		"browser_platform=Win32",
 		"browser_name=Mozilla",
@@ -172,14 +180,22 @@ type initialIMFetchParams struct {
 	UserUniqueID   string
 	BrowserVersion string
 	MSToken        string
+	ScreenWidth    int
+	ScreenHeight   int
 }
 
 func newInitialIMFetchParams(roomInfo roomInfoSnapshot, userAgent, msToken string) initialIMFetchParams {
+	return newInitialIMFetchParamsWithScreen(roomInfo, userAgent, msToken, defaultScreenWidth, defaultScreenHeight)
+}
+
+func newInitialIMFetchParamsWithScreen(roomInfo roomInfoSnapshot, userAgent, msToken string, screenWidth, screenHeight int) initialIMFetchParams {
 	return initialIMFetchParams{
 		RoomID:         roomInfo.roomID,
 		UserUniqueID:   roomInfo.pushID,
 		BrowserVersion: browserVersionFromUserAgent(userAgent),
 		MSToken:        msToken,
+		ScreenWidth:    screenWidth,
+		ScreenHeight:   screenHeight,
 	}
 }
 
@@ -206,8 +222,8 @@ func (p initialIMFetchParams) QueryString() string {
 		"internal_ext=",
 		"device_platform=" + webcastDevice,
 		"cookie_enabled=true",
-		fmt.Sprintf("screen_width=%d", defaultScreenWidth),
-		fmt.Sprintf("screen_height=%d", defaultScreenHeight),
+		fmt.Sprintf("screen_width=%d", p.ScreenWidth),
+		fmt.Sprintf("screen_height=%d", p.ScreenHeight),
 		"browser_language=zh-CN",
 		"browser_platform=Win32",
 		"browser_name=Mozilla",

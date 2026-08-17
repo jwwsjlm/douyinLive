@@ -456,13 +456,23 @@ func TestRoomEnterEmptyResponseDoesNotRetryWhenKnownOffline(t *testing.T) {
 	}
 }
 
-func TestRoomEnterEmptyAfterMissingLivePageStateIsRoomNotFound(t *testing.T) {
+func TestRoomEnterEmptyAfterHTTPNotFoundPageIsRoomNotFound(t *testing.T) {
 	dl := &DouyinLive{}
 	err := fmt.Errorf("%w status=200 content_type=%q content_length=0 raw_len=0", errRoomInfoEmpty, "application/json")
-	livePageErr := fmt.Errorf("%w: %s", errLivePageStateNotFound, "9122185334341")
+	livePageErr := fmt.Errorf("%w live_id=%s status=404 body_len=128 has_user_unique_id=false", errLivePageStateNotFound, "9122185334341")
 
 	if got := dl.roomNotFoundErrorAfterRoomEnter(err, livePageErr); !errors.Is(got, ErrRoomNotFound) {
 		t.Fatalf("roomNotFoundErrorAfterRoomEnter() = %v, want ErrRoomNotFound", got)
+	}
+}
+
+func TestRoomEnterEmptyAfterHTTP200ChallengeIsNotRoomNotFound(t *testing.T) {
+	dl := &DouyinLive{}
+	err := fmt.Errorf("%w status=200 content_type=%q content_length=0 raw_len=0", errRoomInfoEmpty, "application/json")
+	livePageErr := fmt.Errorf("%w live_id=%s status=200 body_len=6297 has_user_unique_id=false", errLivePageStateNotFound, "139819566957")
+
+	if got := dl.roomNotFoundErrorAfterRoomEnter(err, livePageErr); got != nil {
+		t.Fatalf("roomNotFoundErrorAfterRoomEnter() = %v, want nil for HTTP 200 challenge page", got)
 	}
 }
 
@@ -624,7 +634,9 @@ func TestBuildRoomEnterParamsUsesCurrentUserAgentAndCookieToken(t *testing.T) {
 		t.Fatalf("newDouyinLive() failed: %v", err)
 	}
 	defer dl.Dispose()
-	dl.userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+	dl.userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+	dl.fingerprint.ScreenWidth = 1920
+	dl.fingerprint.ScreenHeight = 1080
 
 	params := dl.buildRoomEnterParams()
 	for _, want := range []string{
@@ -634,7 +646,7 @@ func TestBuildRoomEnterParamsUsesCurrentUserAgentAndCookieToken(t *testing.T) {
 		"screen_width=1920",
 		"screen_height=1080",
 		"browser_name=Chrome",
-		"browser_version=150.0.0.0",
+		"browser_version=133.0.0.0",
 		"os_name=Windows",
 		"os_version=10",
 		"is_need_double_stream=false",

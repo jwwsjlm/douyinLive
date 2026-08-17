@@ -1,6 +1,7 @@
 package douyinLive
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -88,9 +89,10 @@ func (dl *DouyinLive) setupCookies() {
 
 // fetchTTWID 请求抖音首页并提取 ttwid 及附加 Cookie。
 // fetchTTWID requests the Douyin homepage and extracts ttwid plus extra cookies.
-func (dl *DouyinLive) fetchTTWID() error {
-	ctx, cancel := dl.requestContext()
-	defer cancel()
+func (dl *DouyinLive) fetchTTWID(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	resp, err := dl.client.R().
 		SetContext(ctx).

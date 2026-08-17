@@ -82,8 +82,6 @@ func (dl *DouyinLive) Start() error {
 	dl.setManualClose(false)
 	defer dl.cleanup()
 	dl.logger.Info("开始连接抖音直播间", logFlowArgs("startup", "start_room", "live_id", dl.liveID)...)
-
-	dl.logger.Info("开始连接抖音直播间", "live_id", dl.liveID)
 	if dl.isKnownOfflineStatus() {
 		return ErrLiveNotStarted
 	}

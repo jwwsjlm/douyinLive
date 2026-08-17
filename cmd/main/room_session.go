@@ -10,9 +10,23 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// startLiveSession 启动抖音直播监听和事件处理。
-// startLiveSession creates DouyinLive, verifies live status, and starts upstream listening.
-func (r *Room) startLiveSession() error {
+const anonymousProbeRotateFailures = 3
+
+// acquireProbeLive 获取当前房间稳定复用的状态探测会话；首次调用时才创建。
+// acquireProbeLive returns the room's stable reusable status-probe session, creating it lazily.
+func (r *Room) acquireProbeLive() (*douyinLive.DouyinLive, error) {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil, errRoomInactive
+	}
+	if r.probeLive != nil {
+		d := r.probeLive
+		r.mu.Unlock()
+		return d, nil
+	}
+	r.mu.Unlock()
+
 	var (
 		d   *douyinLive.DouyinLive
 		err error
@@ -24,6 +38,96 @@ func (r *Room) startLiveSession() error {
 		d, err = douyinLive.NewDouyinLiveWithSlog(r.id, r.logger.base, r.cookie)
 	}
 	if err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		d.Dispose()
+		return nil, errRoomInactive
+	}
+	if r.probeLive == nil {
+		r.probeLive = d
+		r.probeFailures = 0
+		r.mu.Unlock()
+		return d, nil
+	}
+	existing := r.probeLive
+	r.mu.Unlock()
+	d.Dispose()
+	return existing, nil
+}
+
+// resetProbeFailures 在探测得到有效在线或离线状态后清空连续失败次数。
+// resetProbeFailures clears consecutive probe failures after a valid online or offline result.
+func (r *Room) resetProbeFailures(d *douyinLive.DouyinLive) {
+	r.mu.Lock()
+	if r.probeLive == d {
+		r.probeFailures = 0
+	}
+	r.mu.Unlock()
+}
+
+// recordProbeFailure 记录探测失败；匿名会话连续失败后才轮换画像，避免每次轮询都更换身份。
+// recordProbeFailure records a probe failure and rotates anonymous identity only after repeated failures.
+func (r *Room) recordProbeFailure(d *douyinLive.DouyinLive) {
+	rotate := false
+	failures := 0
+	r.mu.Lock()
+	if r.probeLive == d {
+		r.probeFailures++
+		failures = r.probeFailures
+		if r.cookie == "" && r.probeFailures >= anonymousProbeRotateFailures {
+			r.probeLive = nil
+			r.probeFailures = 0
+			rotate = true
+		}
+	}
+	r.mu.Unlock()
+
+	if rotate {
+		r.logger.Info("匿名状态探测连续失败，下一轮将刷新浏览器画像", "room_id", r.id, "failures", failures)
+		d.Dispose()
+	}
+}
+
+// discardProbeLive 丢弃不能继续使用的探测会话。
+// discardProbeLive discards a probe session that must not be reused.
+func (r *Room) discardProbeLive(d *douyinLive.DouyinLive) {
+	if d == nil {
+		return
+	}
+	r.mu.Lock()
+	if r.probeLive == d {
+		r.probeLive = nil
+		r.probeFailures = 0
+	}
+	r.mu.Unlock()
+	d.Dispose()
+}
+
+// promoteProbeLive 将已确认在线的探测会话提升为正式上游直播会话。
+// promoteProbeLive promotes a confirmed-online probe into the active upstream session.
+func (r *Room) promoteProbeLive(d *douyinLive.DouyinLive) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.probeLive != d {
+		return false
+	}
+	r.probeLive = nil
+	r.probeFailures = 0
+	r.douyinLive = d
+	r.upstreamReady = false
+	r.statusUnknown = false
+	return true
+}
+
+// startLiveSession 启动抖音直播监听和事件处理。
+// startLiveSession creates DouyinLive, verifies live status, and starts upstream listening.
+func (r *Room) startLiveSession() error {
+	d, err := r.acquireProbeLive()
+	if err != nil {
 		return err
 	}
 
@@ -31,30 +135,32 @@ func (r *Room) startLiveSession() error {
 		if d.IsKnownOfflineStatus() {
 			r.updateMetadataFromDouyinLive(d)
 			r.markKnownValid()
-			d.Dispose()
+			r.resetProbeFailures(d)
 			return douyinLive.ErrLiveNotStarted
 		}
-		d.Dispose()
 		if errors.Is(err, douyinLive.ErrRoomNotFound) {
+			r.discardProbeLive(d)
 			return err
 		}
+		r.recordProbeFailure(d)
 		return fmt.Errorf("初始化直播间 %s 连接上下文失败: %w", r.id, err)
 	}
 	if err := confirmLiveSessionStatus(d); err != nil {
 		r.updateMetadataFromDouyinLive(d)
 		if errors.Is(err, douyinLive.ErrLiveNotStarted) {
 			r.markKnownValid()
+			r.resetProbeFailures(d)
+		} else {
+			r.recordProbeFailure(d)
 		}
-		d.Dispose()
 		return err
 	}
 	r.updateMetadataFromDouyinLive(d)
 	r.markKnownValid()
-
-	r.mu.Lock()
-	r.douyinLive = d
-	r.upstreamReady = false
-	r.mu.Unlock()
+	if !r.promoteProbeLive(d) {
+		r.discardProbeLive(d)
+		return errRoomInactive
+	}
 
 	d.SubscribeMessage(func(message *douyinLive.LiveMessage) {
 		r.handleDouyinEvent(message)
@@ -187,6 +293,7 @@ func (r *Room) markUpstreamReady(d *douyinLive.DouyinLive) bool {
 		return false
 	}
 	r.upstreamReady = true
+	r.statusUnknown = false
 	r.mu.Unlock()
 
 	r.logger.Info("上游 WebSocket 已就绪，开始推送直播消息", "room_id", r.id)

@@ -65,7 +65,7 @@ douyinLive-v2.0.26-abcdef123456-windows-amd64.zip
 
 当前只发布一个主版本：
 
-- 默认使用本地 JS 计算 WebSocket 签名，普通用户不需要额外配置。
+- 默认使用本地原生 Go 计算 WebSocket 签名，必要时自动使用独立 Goja Runtime 兼容回退，普通用户不需要额外配置。
 - 如果要使用 TikHub 在线 API 生成 WebSocket 签名，通过 `sign.provider`、`APP_SIGN_PROVIDER` 或 `--sign-provider` 在运行时切换，不需要下载单独版本。
 
 压缩包里的可执行文件名仍然固定为 `douyinLive`，所以脚本和 Docker 启动命令不需要因为 hash 变化而每次修改。
@@ -496,6 +496,97 @@ Windows：
 - `source`：构建来源，例如 GitHub Actions 或本地构建
 - `signProvider`：当前二进制默认签名来源，`local` 或 `tikhub`
 
+## 作为 Go 库使用
+
+项目可以直接嵌入其他 Go 程序，不需要启动本地 HTTP 服务。库模式下建议由调用方负责传入 `context.Context`、订阅消息并在退出时调用 `Close` 或 `Dispose`。
+
+### 检查直播间是否开播
+
+`CheckLiveStatus` 只执行直播页和 `web/enter` 状态检查，不会建立 WebSocket：
+
+```go
+package main
+
+import (
+    "context"
+    "errors"
+    "fmt"
+    "log/slog"
+    "time"
+
+    douyinLive "github.com/jwwsjlm/douyinLive/v2"
+)
+
+func main() {
+    if err := check(); err != nil {
+        panic(err)
+    }
+}
+
+func check() error {
+    live, err := douyinLive.NewDouyinLiveWithSlog("516466932480", slog.Default(), "")
+    if err != nil {
+        return err
+    }
+    defer live.Dispose()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+    defer cancel()
+
+    status, err := live.CheckLiveStatus(ctx)
+    if errors.Is(err, douyinLive.ErrLiveStatusUnknown) {
+        fmt.Printf("暂时无法确认状态: %+v\n", status)
+        return nil
+    }
+    if errors.Is(err, douyinLive.ErrRoomNotFound) {
+        fmt.Printf("直播间不存在: %+v\n", status)
+        return nil
+    }
+    if err != nil {
+        return err
+    }
+    fmt.Printf("状态=%s 开播=%v 房间=%s\n", status.Code, *status.Live, status.RoomID)
+    return nil
+}
+```
+
+状态码含义：
+
+- `online`：已确认正在直播；
+- `offline`：已确认账号有房间但当前未开播；
+- `account_no_room`：已确认账号存在，但当前没有房间；
+- `not_found`：已明确判定直播间标识不存在，同时返回 `ErrRoomNotFound`；
+- `unknown`：上游超时、风控页、接口异常或缺少可验证数据，同时返回 `ErrLiveStatusUnknown`。
+
+`unknown` 不等于未开播，调用方应根据 error 进行重试，不要直接当作离线处理。
+
+### 监听消息
+
+```go
+func run() error {
+    live, err := douyinLive.NewDouyinLiveWithSlog("516466932480", slog.Default(), "")
+    if err != nil {
+        return err
+    }
+    defer live.Dispose()
+
+    subscriptionID := live.SubscribeMessage(func(message *douyinLive.LiveMessage) {
+        fmt.Println(message.GetMethod(), len(message.GetPayload()))
+    })
+    defer live.Unsubscribe(subscriptionID)
+
+    return live.Start()
+}
+```
+
+库模式注意事项：
+
+- `Start()` 会阻塞当前 goroutine，建议由调用方放入独立 goroutine；
+- 使用 `Close()` 停止当前监听，使用 `Dispose()` 释放 HTTP Client、缓存和签名 Runtime；
+- `Close()` 和 `Dispose()` 可以重复调用；
+- 不要访问 `DouyinLive` 的内部字段，房间名称、标题和头像通过 `GetName`、`GetTitle`、`GetAvatarThumb` 获取；
+- `SubscribeMessage` 会自动按消息方法分发，若只关心一种消息可使用 `SubscribeMethod`。
+
 ### 设置签名来源
 
 程序默认使用 `local`。需要 TikHub 在线签名时，可以通过配置文件、命令行或环境变量切换：
@@ -515,10 +606,10 @@ APP_SIGN_PROVIDER=tikhub APP_TIKHUB_KEY=YOUR_TIKHUB_KEY ./douyinLive
 
 如果多个地方同时配置，以优先级最高的为准。`sign.provider=local` 时：
 
-- WebSocket `signature` 仍使用项目原来的 `webmssdk.js` / `X-MS-STUB` 链路。
+- WebSocket `signature` 默认使用与 `webmssdk.js` 逐字节校验过的原生 Go 实现；如果上游握手明确失败，会按当前房间的 UA、Cookie 和浏览器画像延迟启用独立 Goja Runtime 兼容重试。
 - `/webcast/room/web/enter/` 和 `/webcast/im/fetch/` 使用轻量原生 `AbSign`（SM3 + RC4）计算 `a_bogus`，不会启动大体积 JavaScript 运行时。
 
-为了兼顾稳定性和启动速度，HTTP 请求的 `a_bogus` 与 WebSocket 的 `signature` 分开处理：`a_bogus` 固定使用原生算法，`signature` 才根据 `sign.provider` 选择本地 `webmssdk.js` 或 TikHub 在线 API。两者用途不同，不应混用。
+为了兼顾稳定性和启动速度，HTTP 请求的 `a_bogus` 与 WebSocket 的 `signature` 分开处理：`a_bogus` 固定使用原生算法，`signature` 根据 `sign.provider` 选择本地原生 Go（必要时 Goja 兼容回退）或 TikHub 在线 API。两者用途不同，不应混用。
 
 只有 `sign.provider=tikhub` 时才会调用 TikHub 在线 API，并且必须提供 `tikhub.key`。
 
@@ -648,7 +739,7 @@ log:
 
 WebSocket 签名来源。可选值：
 
-- `local`：使用内置本地 JS 签名，默认推荐。
+- `local`：使用内置原生 Go 签名，WebSocket 签名失败时自动使用独立 Goja Runtime 兼容回退，默认推荐。
 - `tikhub`：使用 TikHub 在线 API 生成签名，需要配置 `tikhub.key`。
 
 默认值：
@@ -1170,6 +1261,8 @@ setInterval(() => {
 | `live_name` | 主播昵称；如果网页没有返回，可能为空字符串。 |
 | `title` | 直播间标题；账号存在但当前没有直播间对象时可能为空字符串。 |
 | `avatar_thumb` | 主播头像缩略图地址；没有取到时为空字符串。 |
+| `has_room` | `true` 表示已确认存在直播间对象，`false` 表示仅确认账号存在但没有房间，`null` 表示当前响应不足以判断。 |
+| `account_only` | `true` 表示仅存在账号，`false` 表示已确认存在房间，`null` 表示当前响应不足以判断。 |
 | `retry_interval_seconds` | 未开播/已下播时，服务端下一次轮询的大致间隔。 |
 
 #### 情况一：直播间未开播，但账号/直播间有效
@@ -1290,23 +1383,27 @@ setInterval(() => {
 }
 ```
 
-#### 情况六：状态检查失败
+#### 情况六：状态暂时无法确认
 
-这种情况通常是网络、Cookie、风控或网页结构变化导致。服务端会关闭本次连接，客户端可以稍后重试。
+这种情况通常是匿名访问遇到验证码、网络波动、Cookie 失效、风控或网页结构变化导致。服务端不会把它误判为未开播或房间不存在，也不会立即关闭客户端；客户端应保持当前连接，由服务端继续轮询。无 Cookie 模式会自动获取 `ttwid`，但不能保证绕过抖音对匿名高频访问触发的验证码。
 
 ```json
 {
   "type": "system",
   "event": "live_status",
-  "code": "ROOM_CHECK_FAILED",
+  "code": "ROOM_STATUS_UNKNOWN",
   "valid": false,
-  "live": false,
-  "status": "error",
-  "status_text": "直播间状态检查失败",
-  "message": "直播间状态检查失败，请稍后重试",
-  "suggestion": "请稍后重新连接；如果多次失败，请开启 debug 日志并检查 Cookie 是否过期"
+  "live": null,
+  "has_room": null,
+  "account_only": null,
+  "status": "unknown",
+  "status_text": "直播状态暂时无法确认",
+  "message": "暂时无法确认直播状态，服务端会保持连接并继续轮询",
+  "suggestion": "请保持当前连接；如果长时间不能恢复，请开启 debug 日志并检查 Cookie 或验证码风控"
 }
 ```
+
+客户端不要在收到 `ROOM_STATUS_UNKNOWN` 后立即反复重连。频繁创建匿名会话更容易触发验证码；同一连接会复用房间级探测画像，连续失败达到阈值后才自动轮换 UA、浏览器指纹、`ttwid` 和 HTTP Client。
 
 #### 直播业务消息
 

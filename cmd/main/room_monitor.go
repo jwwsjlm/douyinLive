@@ -48,7 +48,7 @@ func (r *Room) startMonitorLoop() {
 				if r.clientCount() == 0 {
 					return
 				}
-				r.notifyOfflineStatus()
+				r.notifyMonitorStatus()
 			case <-pollTicker.C:
 				if r.clientCount() == 0 {
 					return
@@ -86,7 +86,16 @@ func (r *Room) startMonitorLoop() {
 					r.closeAllClients(roomInvalidMessage)
 					return
 				case errors.Is(err, douyinLive.ErrLiveNotStarted):
+					if r.setStatusUnknown(false) {
+						r.notifyOfflineStatus()
+					}
 					r.logger.Debug("房间仍未开播，继续等待", "room_id", r.id)
+				case errors.Is(err, douyinLive.ErrLiveStatusUnknown):
+					changed := r.setStatusUnknown(true)
+					r.logger.Warn("直播状态暂时无法确认，继续轮询", "room_id", r.id, "err", err)
+					if changed {
+						r.notifyStatusUnknown()
+					}
 				default:
 					r.logger.Warn("检查直播状态失败，将继续轮询", "room_id", r.id, "err", err)
 				}

@@ -4,30 +4,22 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net/http"
 	"sync"
 	"time"
 
 	"github.com/dgraph-io/ristretto/v2"
 	"github.com/gorilla/websocket"
-	"github.com/jwwsjlm/douyinLive/v2/sign"
-	"github.com/jwwsjlm/req/v3"
 )
 
 // DouyinLive 管理一个抖音直播间的 HTTP 初始化、WebSocket 连接和消息分发。
 // DouyinLive manages HTTP initialization, WebSocket connection, and message dispatch for one Douyin live room.
 type DouyinLive struct {
-	liveID                 string
-	roomID                 string
-	pushID                 string
-	liveName               string
-	ttwid                  string
-	msToken                string
-	userAgent              string
-	signer                 websocketSigner
-	client                 *req.Client
+	liveID   string
+	roomID   string
+	pushID   string
+	liveName string
+	sessionProfile
 	conn                   *websocket.Conn
-	headers                http.Header
 	bufferPool             *sync.Pool
 	logger                 logSink
 	events                 *messageBus
@@ -37,10 +29,7 @@ type DouyinLive struct {
 	contextPrepared        bool
 	isLiveClosed           bool
 	manualClose            bool
-	lastUserAgentChange    time.Time
 	consecutiveFailures    int
-	additionalCookies      map[string]string
-	cookieManager          *sign.CookieManager
 	heartbeatStopCh        chan struct{}
 	heartbeatDoneCh        chan struct{}
 	heartbeatEvery         time.Duration
@@ -94,10 +83,7 @@ func NewDouyinLiveWithTikHub(liveID string, logger logger, cookie string, tikHub
 //   - signer: WebSocket 签名实现。 WebSocket signature provider.
 func newDouyinLive(liveID string, baseLogger logger, cookie string, signer websocketSigner) (*DouyinLive, error) {
 	userAgent := newHTTPUserAgent()
-	if signer == nil {
-		signer = newLocalWebsocketSigner()
-	}
-	signer.UpdateUserAgent(userAgent)
+	profile := newSessionProfile(userAgent, signer, cookie)
 	cache, err := ristretto.NewCache(&ristretto.Config[string, string]{
 		NumCounters: 500,
 		MaxCost:     500,
@@ -105,43 +91,35 @@ func newDouyinLive(liveID string, baseLogger logger, cookie string, signer webso
 		BufferItems: 64,
 	})
 	if err != nil {
+		profile.close()
 		return nil, fmt.Errorf("初始化缓存失败: %w", err)
 	}
 	closeCtx, closeCancel := context.WithCancel(context.Background())
 	dl := &DouyinLive{
-		liveID:    liveID,
-		liveName:  "",
-		userAgent: userAgent,
-		signer:    signer,
-		client:    newHTTPClient(userAgent),
+		liveID:         liveID,
+		liveName:       "",
+		sessionProfile: profile,
 		bufferPool: &sync.Pool{
 			New: func() interface{} {
 				return bytes.NewBuffer(make([]byte, 0, gzipBufferSize))
 			},
 		},
-		events:              newMessageBus(),
-		ristretto:           cache,
-		headers:             make(http.Header),
-		additionalCookies:   make(map[string]string),
-		logger:              normalizeLogger(baseLogger),
-		lastUserAgentChange: time.Now(),
-		closeCh:             make(chan struct{}),
-		closeCtx:            closeCtx,
-		closeCancel:         closeCancel,
-		readyCh:             make(chan struct{}),
+		events:      newMessageBus(),
+		ristretto:   cache,
+		logger:      normalizeLogger(baseLogger),
+		closeCh:     make(chan struct{}),
+		closeCtx:    closeCtx,
+		closeCancel: closeCancel,
+		readyCh:     make(chan struct{}),
 	}
 
-	dl.cookieManager = sign.NewCookieManager()
-	if cookie != "" {
-		dl.cookieManager.SetDouyinCookie(cookie)
-	}
 	dl.logger.Debug(
 		"浏览器会话画像已创建",
 		"live_id", dl.liveID,
 		"user_agent", dl.userAgent,
-		"sign_provider", signer.Name(),
+		"sign_provider", dl.signer.Name(),
 	)
-	if statusLogger, ok := signer.(interface {
+	if statusLogger, ok := dl.signer.(interface {
 		LogStatus(logSink, string)
 	}); ok {
 		statusLogger.LogStatus(dl.logger, dl.liveID)

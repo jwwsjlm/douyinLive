@@ -28,10 +28,7 @@ func (dl *DouyinLive) Dispose() {
 // releaseResources idempotently releases cache, idle HTTP connections, and the session signer runtime.
 func (dl *DouyinLive) releaseResources() {
 	dl.releaseOnce.Do(func() {
-		if closer, ok := dl.signer.(websocketSignerCloser); ok {
-			closer.Close()
-		}
-		closeHTTPClientIdleConnections(dl.client)
+		dl.sessionProfile.close()
 		if dl.ristretto != nil {
 			dl.ristretto.Close()
 		}

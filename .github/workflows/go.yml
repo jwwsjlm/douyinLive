@@ -15,21 +15,122 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Test
+  quality:
+    name: Build, test and audit
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v6.5.0
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
+      - name: Install quality tools
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+
       - name: Build
         run: go build -v ./...
 
-      - name: Test
-        run: go test -v ./...
+      - name: Test with coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -count=1 -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tee coverage.txt
+          total="$(awk '/^total:/ { gsub(/%/, "", $3); print $3 }' coverage.txt)"
+          awk -v total="$total" 'BEGIN { if (total + 0 < 50) exit 1 }'
+
+          go test -count=1 -coverprofile=sign-coverage.out ./sign
+          go tool cover -func=sign-coverage.out | tee sign-coverage.txt
+          sign_total="$(awk '/^total:/ { gsub(/%/, "", $3); print $3 }' sign-coverage.txt)"
+          awk -v total="$sign_total" 'BEGIN { if (total + 0 < 70) exit 1 }'
+
+          {
+            echo "### Coverage"
+            echo ""
+            echo "- Overall: ${total}% (minimum 50%)"
+            echo "- sign package: ${sign_total}% (minimum 70%)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Race detector
+        run: go test -count=1 -race ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        run: staticcheck ./...
+
+      - name: Vulnerability scan
+        run: govulncheck ./...
+
+  release-snapshot:
+    name: GoReleaser snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: quality
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build snapshot
+        uses: goreleaser/goreleaser-action@v7.2.3
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --snapshot --clean --skip=publish --parallelism 1
+
+      - name: Verify snapshot contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          linux_archive="$(find dist -maxdepth 1 -name '*linux-amd64.tar.gz' -type f | head -n 1)"
+          windows_archive="$(find dist -maxdepth 1 -name '*windows-amd64.zip' -type f | head -n 1)"
+          test -n "$linux_archive"
+          test -n "$windows_archive"
+          find dist -maxdepth 1 -name '*checksums.txt' -type f | grep -q .
+
+          tar -tzf "$linux_archive" > linux-archive.txt
+          unzip -Z1 "$windows_archive" > windows-archive.txt
+          for required in README.md LICENSE config.example.yaml compose.yaml compose.data.yaml; do
+            grep -Fxq "$required" linux-archive.txt
+            grep -Fxq "$required" windows-archive.txt
+          done
+          grep -Fxq douyinLive linux-archive.txt
+          grep -Fxq douyinLive.exe windows-archive.txt
+
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: quality
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.2.0
+
+      - name: Build multi-platform image
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

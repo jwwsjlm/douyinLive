@@ -23,7 +23,7 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/jwwsjlm/douyinLive)](https://github.com/jwwsjlm/douyinLive/releases)
 [![License](https://img.shields.io/github/license/jwwsjlm/douyinLive)](LICENSE)
-[![Go Version](https://img.shields.io/badge/go-1.26.4-blue)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/go-1.26.6-blue)](https://golang.org)
 
 ## 功能
 
@@ -59,8 +59,8 @@
 发布包名称会带上版本号和构建 commit，格式类似：
 
 ```text
-douyinLive-v2.0.3-abcdef123456-linux-amd64.tar.gz
-douyinLive-v2.0.3-abcdef123456-windows-amd64.zip
+douyinLive-v2.0.26-abcdef123456-linux-amd64.tar.gz
+douyinLive-v2.0.26-abcdef123456-windows-amd64.zip
 ```
 
 当前只发布一个主版本：
@@ -112,7 +112,7 @@ go build -o douyinLive ./cmd/main
 输出示例：
 
 ```text
-tag=v2.0.3 commit=abcdef123456 buildDate=2026-05-24T00:00:00Z source=github-actions/release#123.1 signProvider=local
+tag=v2.0.26 commit=abcdef123456 buildDate=2026-08-17T00:00:00Z source=github-actions/release#123.1 signProvider=local
 ```
 
 ### 方式三：Docker 运行
@@ -132,7 +132,7 @@ ws://127.0.0.1:1088/ws/直播间标识
 如果你需要固定版本，也可以直接拉指定 tag：
 
 ```bash
-docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:v2.0.3
+docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:v2.0.26
 ```
 
 测试版不会覆盖 `latest`。如果你要验证某个 beta 版本，请使用完整测试版 tag：
@@ -145,7 +145,7 @@ docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:v2.0.18-beta.1
 Docker 镜像也支持查看构建信息：
 
 ```bash
-docker run --rm ghcr.io/jwwsjlm/douyinlive:v2.0.3 --version
+docker run --rm ghcr.io/jwwsjlm/douyinlive:v2.0.26 --version
 ```
 
 如果要使用 TikHub 在线签名，仍然使用同一个镜像，只需要在配置文件、环境变量或命令行里指定签名来源并提供 TikHub API Key：
@@ -154,7 +154,7 @@ docker run --rm ghcr.io/jwwsjlm/douyinlive:v2.0.3 --version
 docker run --rm -p 1088:1088 \
   -e APP_SIGN_PROVIDER=tikhub \
   -e APP_TIKHUB_KEY=YOUR_TIKHUB_KEY \
-  ghcr.io/jwwsjlm/douyinlive:v2.0.3
+  ghcr.io/jwwsjlm/douyinlive:v2.0.26
 ```
 
 #### 2. 通过 Docker 挂载 `config.yaml`
@@ -187,6 +187,21 @@ docker run -d \
 ```
 
 这样即使容器被删除或重建，宿主机上的 `config.yaml` 仍然保留，达到配置持久化的效果。
+
+镜像内置健康检查，也可以手动查看：
+
+```bash
+docker inspect --format '{{json .State.Health}}' douyinlive
+curl http://127.0.0.1:1088/healthz
+```
+
+正常响应类似：
+
+```json
+{"status":"ok","version":"tag=v2.0.26 commit=abcdef123456 buildDate=2026-08-17T00:00:00Z source=github-actions/release#123.1 signProvider=local"}
+```
+
+`/healthz` 只表示进程和本地 HTTP/WebSocket 服务可用，不代表某个具体直播间一定处于开播状态。
 
 #### 4. 挂载整个目录（适合后续扩展）
 
@@ -242,6 +257,12 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:1088/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
 ```
 
 ##### 方案 B：使用 `compose.data.yaml`
@@ -274,6 +295,12 @@ services:
     volumes:
       - ./data:/app/data
     command: ["--config", "/app/data/config.yaml"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:1088/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
 ```
 
 此时你只需要保证宿主机存在：
@@ -636,6 +663,8 @@ sign:
 #### `tikhub.key`
 
 TikHub API Key，仅当 `sign.provider` 为 `tikhub` 时需要。
+
+如果选择了 `tikhub` 但没有提供 Key，程序会在启动阶段直接报错，不会等到连接直播间后才失败。日志不会输出完整 API Key。
 
 获取方式：
 
@@ -1309,10 +1338,18 @@ douyinLive/
 ├── cmd/main/                 # 可执行程序入口
 │   ├── main.go               # 主程序
 │   ├── app.go                # HTTP / WebSocket 服务
-│   ├── room.go               # 房间与客户端管理
+│   ├── room.go               # 房间生命周期
+│   ├── room_manager.go       # 房间复用与管理
+│   ├── room_client.go        # 下游客户端队列和广播
+│   ├── room_monitor.go       # 未开播轮询
+│   ├── room_session.go       # 上游直播会话
+│   ├── room_status.go        # 状态与消息输出
 │   ├── config.go             # 配置读取
 │   └── WsHandler.go          # WebSocket 事件处理
 ├── douyin.go                 # 核心抓取逻辑，对外库接口
+├── session_profile.go        # UA/Cookie/HTTP/签名会话画像
+├── http_context.go           # 请求上下文与连接准备
+├── cookie_context.go         # Cookie 获取与组装
 ├── sign/                     # 签名与 Cookie 相关逻辑
 ├── jsScript/                 # 签名脚本
 ├── go.mod                    # Go module 依赖，protobuf 类型来自 github.com/jwwsjlm/douyinlive-proto

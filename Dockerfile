@@ -1,7 +1,7 @@
-﻿FROM golang:1.26.6-alpine3.22 AS builder
+﻿FROM golang:1.26.6-alpine3.24 AS builder
 
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
+ARG TARGETOS
+ARG TARGETARCH
 ARG BUILD_TAG=dev
 ARG BUILD_COMMIT=unknown
 ARG BUILD_DATE=unknown
@@ -17,7 +17,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w -X main.buildTag=${BUILD_TAG} -X main.buildCommit=${BUILD_COMMIT} -X main.buildDate=${BUILD_DATE} -X main.buildSource=${BUILD_SOURCE} -X main.defaultSignProvider=${DEFAULT_SIGN_PROVIDER}" -o /out/douyinLive ./cmd/main
 
-FROM alpine:3.22
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app

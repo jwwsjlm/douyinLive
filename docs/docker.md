@@ -22,11 +22,11 @@ ws://127.0.0.1:1088/ws/直播间标识
 docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:v2.1.0
 ```
 
-测试版不会覆盖 `latest`。如果你要验证某个 beta 版本，请使用完整测试版 tag：
+测试版不会覆盖 `latest`。如果你要验证某个测试版，请把下面的 `<tag>` 替换为实际发布的 beta tag：
 
 ```bash
-docker pull ghcr.io/jwwsjlm/douyinlive:v2.0.18-beta.1
-docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:v2.0.18-beta.1
+docker pull ghcr.io/jwwsjlm/douyinlive:<tag>
+docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:<tag>
 ```
 
 Docker 镜像也支持查看构建信息：

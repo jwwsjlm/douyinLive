@@ -139,6 +139,7 @@ cp config.example.yaml config.yaml
 | [配置文件](docs/configuration.md) | YAML、环境变量、Cookie 和配置优先级 |
 | [作为 Go 库使用](docs/library.md) | 状态检查、订阅、protobuf 和生命周期 |
 | [WebSocket 客户端与消息格式](docs/websocket-client.md) | 客户端接入、系统状态和业务消息 |
+| [`sign` 包说明](sign/README.md) | `a_bogus` 签名和 CookieManager 的直接调用 |
 
 ## 项目结构
 

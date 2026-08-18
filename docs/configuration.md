@@ -194,6 +194,23 @@ ws://127.0.0.1:1088/ws/直播间ID?cookie_b64=BASE64URL_COOKIE
 ws://127.0.0.1:1088/ws/直播间ID?cookie=URL_ENCODED_COOKIE
 ```
 
+## 环境变量映射
+
+独立服务使用 Viper 的 `APP_` 前缀和下划线映射配置项。常用配置如下：
+
+| 配置项 | 环境变量 |
+| --- | --- |
+| `port` | `APP_PORT` |
+| `unknown` | `APP_UNKNOWN` |
+| `log.level` | `APP_LOG_LEVEL` |
+| `sign.provider` | `APP_SIGN_PROVIDER` |
+| `tikhub.key` | `APP_TIKHUB_KEY` |
+| `cookie.douyin` | `APP_COOKIE_DOUYIN` |
+| `monitor.poll_interval` | `APP_MONITOR_POLL_INTERVAL` |
+| `monitor.notify_interval` | `APP_MONITOR_NOTIFY_INTERVAL` |
+
+命令行参数优先级高于环境变量，环境变量高于配置文件，配置文件高于程序默认值。Cookie 也可以通过 WebSocket URL 的 `cookie_b64` 或 `cookie` 参数临时覆盖，但不建议把 Cookie 长期放在 URL、Shell 历史或进程列表中。
+
 ## 什么时候需要 Cookie
 
 不是所有场景都必须填 Cookie。

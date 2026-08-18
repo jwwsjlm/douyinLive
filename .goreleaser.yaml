@@ -35,6 +35,7 @@ archives:
     files:
       - README.md
       - docs/**/*.md
+      - sign/README.md
       - LICENSE
       - config.example.yaml
       - compose.yaml

@@ -33,10 +33,22 @@ config*.local.yaml
 
 # Local captures / reverse-engineering exports
 /captures/
+/exports/
+/reports/
 *.har
 *.network-request
 *.network-response
 /tmp-codex-*
+
+# Temporary Python/JS inspection helpers and embedded runtimes
+/python311-embed/
+/diag_*.py
+/dis_pyz.py
+/functions_pyz.py
+/index_pyz.py
+/inspect_pyz.py
+/scan_pyz.py
+/scripts_extract*.py
 
 # Go
 *.test

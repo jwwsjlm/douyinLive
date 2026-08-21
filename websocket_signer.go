@@ -27,11 +27,21 @@ const (
 )
 
 var (
+	// ErrLocalSignerNotPrepared indicates that the local signer has not received its session profile.
+	// ErrLocalSignerNotPrepared 表示本地签名器尚未载入直播会话画像。
 	ErrLocalSignerNotPrepared = errors.New("本地 WebSocket 签名器尚未初始化")
-	ErrLocalSignerClosed      = errors.New("本地 WebSocket 签名器已关闭")
-	ErrLocalSignerProfile     = errors.New("本地 WebSocket 签名器画像不匹配")
-	ErrTikHubTokenEmpty       = errors.New("tikhub token 未配置")
-	ErrTikHubSignInvalid      = errors.New("tikhub 签名响应无效")
+	// ErrLocalSignerClosed indicates that the local signer has already released its resources.
+	// ErrLocalSignerClosed 表示本地签名器已经释放资源并关闭。
+	ErrLocalSignerClosed = errors.New("本地 WebSocket 签名器已关闭")
+	// ErrLocalSignerProfile indicates that the signing request does not match the prepared session profile.
+	// ErrLocalSignerProfile 表示签名请求与已准备的直播会话画像不一致。
+	ErrLocalSignerProfile = errors.New("本地 WebSocket 签名器画像不匹配")
+	// ErrTikHubTokenEmpty indicates that TikHub signing was selected without an API token.
+	// ErrTikHubTokenEmpty 表示选择 TikHub 签名时没有配置 API Token。
+	ErrTikHubTokenEmpty = errors.New("tikhub token 未配置")
+	// ErrTikHubSignInvalid indicates that TikHub did not return a usable WebSocket signature.
+	// ErrTikHubSignInvalid 表示 TikHub 没有返回可用的 WebSocket 签名。
+	ErrTikHubSignInvalid = errors.New("tikhub 签名响应无效")
 )
 
 // websocketSigner 抽象 WebSocket 签名来源。
@@ -407,10 +417,10 @@ func (s *tikhubWebsocketSigner) Sign(ctx context.Context, roomID, userUniqueID, 
 		return "", fmt.Errorf("%w: nil response", ErrTikHubSignInvalid)
 	}
 	if resp.StatusCode != 0 && (resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices) {
-		return "", fmt.Errorf("tikhub 签名接口返回异常 status=%d body=%s", resp.StatusCode, string(resp.Raw))
+		return "", fmt.Errorf("tikhub 签名接口返回异常 status=%d", resp.StatusCode)
 	}
 	if !isTikHubSuccessCode(resp.Code) {
-		return "", fmt.Errorf("tikhub 签名接口业务失败 code=%d message=%s body=%s", resp.Code, firstNonEmptyString(resp.MessageZH, resp.Message), string(resp.Raw))
+		return "", fmt.Errorf("tikhub 签名接口业务失败 code=%d message=%s", resp.Code, firstNonEmptyString(resp.MessageZH, resp.Message))
 	}
 
 	signature := extractTikHubSignature(resp.Raw)
@@ -418,11 +428,11 @@ func (s *tikhubWebsocketSigner) Sign(ctx context.Context, roomID, userUniqueID, 
 		signature = extractTikHubSignature(resp.Data)
 	}
 	if signature == "" {
-		return "", fmt.Errorf("%w: body=%s", ErrTikHubSignInvalid, string(resp.Raw))
+		return "", fmt.Errorf("%w: response_len=%d", ErrTikHubSignInvalid, len(resp.Raw))
 	}
 	signature = normalizeTikHubSignature(signature)
 	if signature == "" {
-		return "", fmt.Errorf("%w: body=%s", ErrTikHubSignInvalid, string(resp.Raw))
+		return "", fmt.Errorf("%w: normalized response_len=%d", ErrTikHubSignInvalid, len(resp.Raw))
 	}
 	return signature, nil
 }

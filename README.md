@@ -20,6 +20,7 @@
 - 支持本地签名以及可选 TikHub 在线签名
 - 支持断线重连、未开播轮询和基础保活
 - 可作为独立服务或 Go 库使用
+- 提供只读 HTTP 查询、批量状态、URL 解析和 Prometheus 指标
 
 本项目不负责下载或录制 FLV、M3U8 和直播回放。
 
@@ -73,6 +74,18 @@ docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:latest
 ```
 
 长期运行、配置挂载和 Docker Compose 请阅读 [Docker 部署文档](docs/docker.md)。
+
+## HTTP API 与后端服务
+
+很多项目会直接把 `douyinLive` 作为后端服务使用，因此 v2.2.0 在保留 Go 库用法和原有 WebSocket 行为的基础上，增强了独立服务能力：
+
+- 不建立长期 WebSocket，也可以查询直播状态和直播间信息
+- 支持批量状态查询和 `douyin.com` 直播间 URL 解析
+- 提供 `/health`、`/metrics` 和 OpenAPI 描述
+- 支持自定义 WebSocket 路由，以及 HTTP/WebSocket 共用的可选 API Key
+- 查询时可按配置使用房间 Cookie、全局 Cookie，或关闭预存 Cookie
+
+HTTP API 默认只读，不提供发弹幕、点赞、礼物或远程修改配置的接口。完整说明见 [HTTP API 文档](docs/http-api.md)，接口定义见 [OpenAPI 文件](docs/openapi.yaml)。
 
 ## 作为 Go 库使用
 
@@ -137,6 +150,8 @@ cp config.example.yaml config.yaml
 | [Docker 部署](docs/docker.md) | Docker、Compose、配置挂载和长期运行 |
 | [CLI 使用指南](docs/cli.md) | 参数、日志、签名方式和故障排查 |
 | [配置文件](docs/configuration.md) | YAML、环境变量、Cookie 和配置优先级 |
+| [HTTP API](docs/http-api.md) | 只读查询、批量状态、URL 解析、认证和指标 |
+| [OpenAPI](docs/openapi.yaml) | HTTP API 的机器可读接口定义 |
 | [作为 Go 库使用](docs/library.md) | 状态检查、订阅、protobuf 和生命周期 |
 | [WebSocket 客户端与消息格式](docs/websocket-client.md) | 客户端接入、系统状态和业务消息 |
 | [`sign` 包说明](sign/README.md) | `a_bogus` 签名和 CookieManager 的直接调用 |

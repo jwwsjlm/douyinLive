@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,7 +43,7 @@ func TestMarkUpstreamReadyOnlyMarksTheCurrentRoomSession(t *testing.T) {
 func TestMonitorStatusKeepsUnknownSemantics(t *testing.T) {
 	room := NewRoom("live-id", nil, false, "", douyinLive.SignProviderLocal, "", time.Second, time.Second, nil)
 	client := NewClient("client", nil)
-	room.addClient(client)
+	addTestClient(room, client)
 	room.setStatusUnknown(true)
 
 	room.notifyMonitorStatus()
@@ -54,6 +55,19 @@ func TestMonitorStatusKeepsUnknownSemantics(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("monitor did not enqueue status message")
+	}
+}
+
+func addTestClient(room *Room, client *Client) {
+	room.clientsMu.Lock()
+	room.clients[client.id] = client
+	room.clientsMu.Unlock()
+}
+
+func TestNewRoomNormalizesInvalidMonitorIntervals(t *testing.T) {
+	room := NewRoom("live-id", nil, false, "", douyinLive.SignProviderLocal, "", 0, -time.Second, nil)
+	if room.pollInterval != defaultRoomPollInterval || room.notifyInterval != defaultRoomNotifyInterval {
+		t.Fatalf("monitor intervals = (%s, %s), want (%s, %s)", room.pollInterval, room.notifyInterval, defaultRoomPollInterval, defaultRoomNotifyInterval)
 	}
 }
 
@@ -105,5 +119,69 @@ func TestRoomCloseDisposesProbeSession(t *testing.T) {
 
 	if room.probeLive != nil {
 		t.Fatal("Room.Close() retained the probe session")
+	}
+}
+
+func TestRoomCloseWaitsForOwnedTaskAndRejectsNewTasks(t *testing.T) {
+	room := NewRoom("live-id", nil, false, "", douyinLive.SignProviderLocal, "", time.Second, time.Second, nil)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	if !room.startTask(func() {
+		close(started)
+		<-release
+	}) {
+		t.Fatal("startTask unexpectedly rejected an open room")
+	}
+	<-started
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		room.Close()
+	}()
+
+	select {
+	case <-room.closeDone:
+		t.Fatal("Room.Close returned before the owned task exited")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if room.startTask(func() {}) {
+		t.Fatal("startTask accepted a task after Room.Close began")
+	}
+	close(release)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Room.Close did not finish after the owned task exited")
+	}
+}
+
+func TestRoomCloseIsSafeWhenCalledConcurrently(t *testing.T) {
+	room := NewRoom("live-id", nil, false, "", douyinLive.SignProviderLocal, "", time.Second, time.Second, nil)
+
+	const callers = 16
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for range callers {
+		go func() {
+			defer wg.Done()
+			room.Close()
+		}()
+	}
+	wg.Wait()
+
+	if !room.isClosed() {
+		t.Fatal("room remained open after concurrent Close calls")
+	}
+	select {
+	case <-room.closeDone:
+	default:
+		t.Fatal("room close completion was not signaled")
 	}
 }

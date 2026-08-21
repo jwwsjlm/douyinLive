@@ -27,9 +27,11 @@ douyinLive
 # Config
 config.yaml
 config*.local.yaml
+/smoke-*.yaml
 
 # Logs
 *.log
+/logs/
 
 # Local captures / reverse-engineering exports
 /captures/

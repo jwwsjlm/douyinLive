@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -15,7 +17,9 @@ import (
 //   - key: 要追加的字段名。 Field name to append.
 //   - value: 要追加的字段值。 Field value to append.
 func appendJSONStringField(dst []byte, key, value string) []byte {
-	dst = append(dst, ',')
+	if len(dst) == 0 || dst[len(dst)-1] != '{' {
+		dst = append(dst, ',')
+	}
 	dst = append(dst, '"')
 	dst = append(dst, key...)
 	dst = append(dst, '"', ':')
@@ -32,13 +36,18 @@ func appendJSONStringField(dst []byte, key, value string) []byte {
 //   - title: 直播间标题。 Live room title.
 //   - avatarThumb: 主播头像缩略图地址。 Live owner avatar thumbnail URL.
 func (r *Room) buildEventJSON(jsonBytes []byte, method, liveName, title, avatarThumb string) ([]byte, error) {
-	if len(jsonBytes) == 0 || jsonBytes[len(jsonBytes)-1] != '}' {
+	jsonBytes = bytes.TrimSpace(jsonBytes)
+	if len(jsonBytes) < 2 || jsonBytes[0] != '{' || jsonBytes[len(jsonBytes)-1] != '}' || !json.Valid(jsonBytes) {
 		return nil, fmt.Errorf("无效的事件 JSON")
 	}
 
 	extra := 64 + len(method) + len(liveName) + len(title) + len(avatarThumb)
 	result := make([]byte, 0, len(jsonBytes)+extra)
-	result = append(result, jsonBytes[:len(jsonBytes)-1]...)
+	result = append(result, '{')
+	objectBody := bytes.TrimSpace(jsonBytes[1 : len(jsonBytes)-1])
+	if len(objectBody) > 0 {
+		result = append(result, objectBody...)
+	}
 	result = appendJSONStringField(result, "method", method)
 	result = appendJSONStringField(result, "livename", liveName)
 	result = appendJSONStringField(result, "title", title)
@@ -81,16 +90,52 @@ func (r *Room) metadataSnapshot() (string, string, string, bool) {
 	return r.liveName, r.title, r.avatarThumb, r.accountOnly
 }
 
+type systemStatusMessage struct {
+	Type                 string `json:"type"`
+	Event                string `json:"event"`
+	Code                 string `json:"code"`
+	Valid                *bool  `json:"valid"`
+	Live                 *bool  `json:"live"`
+	Status               string `json:"status"`
+	StatusText           string `json:"status_text"`
+	RoomID               string `json:"room_id"`
+	LiveName             string `json:"live_name"`
+	Title                string `json:"title"`
+	AvatarThumb          string `json:"avatar_thumb"`
+	HasRoom              *bool  `json:"has_room"`
+	AccountOnly          *bool  `json:"account_only"`
+	Message              string `json:"message"`
+	Suggestion           string `json:"suggestion"`
+	RetryIntervalSeconds *int   `json:"retry_interval_seconds,omitempty"`
+	Ended                *bool  `json:"ended,omitempty"`
+}
+
+func marshalSystemStatusMessage(message systemStatusMessage) []byte {
+	payload, err := json.Marshal(message)
+	if err != nil {
+		return []byte(`{"type":"system","event":"live_status","code":"SERIALIZATION_ERROR"}`)
+	}
+	return payload
+}
+
+func boolPtr(value bool) *bool { return &value }
+
 // offlineStatusMessage 构造未开播状态通知。
 // offlineStatusMessage builds the offline status notification.
 func (r *Room) offlineStatusMessage() []byte {
 	liveName, title, avatarThumb, accountOnly := r.metadataSnapshot()
+	falseValue := false
+	hasRoom := !accountOnly
+	message := "直播间当前未开播，服务端会保持连接并继续轮询"
+	code, status, statusText := "ROOM_OFFLINE", "offline", "直播间未开播"
+	suggestion := "客户端不需要重连，保持当前 WebSocket 连接等待开播通知"
 	if accountOnly {
-		return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","code":"ACCOUNT_OFFLINE_NO_ROOM","valid":true,"live":false,"status":"account_offline","status_text":"账号存在但当前没有直播间","room_id":%s,"live_name":%s,"title":%s,"avatar_thumb":%s,"has_room":false,"account_only":true,"message":"账号存在，但网页没有返回直播间房间对象，可能是该账号从未开播或当前未创建直播间，当前按未开播处理","suggestion":"客户端不需要重连，保持当前 WebSocket 连接；如果该账号后续开播，服务端会自动切换为直播连接","retry_interval_seconds":%d}`,
-			strconv.Quote(r.id), strconv.Quote(liveName), strconv.Quote(title), strconv.Quote(avatarThumb), int(r.notifyInterval/time.Second)))
+		code, status, statusText = "ACCOUNT_OFFLINE_NO_ROOM", "account_offline", "账号存在但当前没有直播间"
+		message = "账号存在，但网页没有返回直播间房间对象，可能是该账号从未开播或当前未创建直播间，当前按未开播处理"
+		suggestion = "客户端不需要重连，保持当前 WebSocket 连接；如果该账号后续开播，服务端会自动切换为直播连接"
 	}
-	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","code":"ROOM_OFFLINE","valid":true,"live":false,"status":"offline","status_text":"直播间未开播","room_id":%s,"live_name":%s,"title":%s,"avatar_thumb":%s,"has_room":true,"account_only":false,"message":"直播间当前未开播，服务端会保持连接并继续轮询","suggestion":"客户端不需要重连，保持当前 WebSocket 连接等待开播通知","retry_interval_seconds":%d}`,
-		strconv.Quote(r.id), strconv.Quote(liveName), strconv.Quote(title), strconv.Quote(avatarThumb), int(r.notifyInterval/time.Second)))
+	retrySeconds := int(r.notifyInterval / time.Second)
+	return marshalSystemStatusMessage(systemStatusMessage{Type: "system", Event: "live_status", Code: code, Valid: boolPtr(true), Live: &falseValue, Status: status, StatusText: statusText, RoomID: r.id, LiveName: liveName, Title: title, AvatarThumb: avatarThumb, HasRoom: &hasRoom, AccountOnly: &accountOnly, Message: message, Suggestion: suggestion, RetryIntervalSeconds: &retrySeconds})
 }
 
 // statusUnknownMessage 构造暂时无法确认状态的通知，避免把风控验证页误报为房间不存在。
@@ -100,31 +145,34 @@ func (r *Room) statusUnknownMessage() []byte {
 	r.mu.Lock()
 	knownValid := r.knownValid
 	r.mu.Unlock()
-	hasRoomJSON, accountOnlyJSON := "null", "null"
+	var hasRoom, accountOnlyValue *bool
 	switch {
 	case accountOnly:
-		hasRoomJSON, accountOnlyJSON = "false", "true"
+		falseValue, trueValue := false, true
+		hasRoom, accountOnlyValue = &falseValue, &trueValue
 	case knownValid:
-		hasRoomJSON, accountOnlyJSON = "true", "false"
+		trueValue, falseValue := true, false
+		hasRoom, accountOnlyValue = &trueValue, &falseValue
 	}
-	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","code":"ROOM_STATUS_UNKNOWN","valid":false,"live":null,"status":"unknown","status_text":"暂时无法确认直播状态","room_id":%s,"live_name":%s,"title":%s,"avatar_thumb":%s,"has_room":%s,"account_only":%s,"message":"上游页面或接口暂时未返回可验证的房间状态，服务端会继续轮询","suggestion":"客户端保持当前 WebSocket 连接，不要立即重连"}`,
-		strconv.Quote(r.id), strconv.Quote(liveName), strconv.Quote(title), strconv.Quote(avatarThumb), hasRoomJSON, accountOnlyJSON))
+	return marshalSystemStatusMessage(systemStatusMessage{Type: "system", Event: "live_status", Code: "ROOM_STATUS_UNKNOWN", Valid: boolPtr(false), Live: nil, Status: "unknown", StatusText: "暂时无法确认直播状态", RoomID: r.id, LiveName: liveName, Title: title, AvatarThumb: avatarThumb, HasRoom: hasRoom, AccountOnly: accountOnlyValue, Message: "上游页面或接口暂时未返回可验证的房间状态，服务端会继续轮询", Suggestion: "客户端保持当前 WebSocket 连接，不要立即重连", RetryIntervalSeconds: nil})
 }
 
 // offlineEndedStatusMessage 构造已下播状态通知。
 // offlineEndedStatusMessage builds the ended-offline status notification.
 func (r *Room) offlineEndedStatusMessage() []byte {
 	liveName, title, avatarThumb, _ := r.metadataSnapshot()
-	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","code":"ROOM_ENDED","valid":true,"live":false,"status":"ended","status_text":"直播间已下播","room_id":%s,"live_name":%s,"title":%s,"avatar_thumb":%s,"message":"直播间已经下播，服务端会保持连接并等待再次开播","suggestion":"客户端不需要重连，保持当前 WebSocket 连接等待下一次开播","ended":true,"retry_interval_seconds":%d}`,
-		strconv.Quote(r.id), strconv.Quote(liveName), strconv.Quote(title), strconv.Quote(avatarThumb), int(r.notifyInterval/time.Second)))
+	falseValue := false
+	ended := true
+	retrySeconds := int(r.notifyInterval / time.Second)
+	return marshalSystemStatusMessage(systemStatusMessage{Type: "system", Event: "live_status", Code: "ROOM_ENDED", Valid: boolPtr(true), Live: &falseValue, Status: "ended", StatusText: "直播间已下播", RoomID: r.id, LiveName: liveName, Title: title, AvatarThumb: avatarThumb, Message: "直播间已经下播，服务端会保持连接并等待再次开播", Suggestion: "客户端不需要重连，保持当前 WebSocket 连接等待下一次开播", Ended: &ended, RetryIntervalSeconds: &retrySeconds})
 }
 
 // onlineStatusMessage 构造已开播状态通知。
 // onlineStatusMessage builds the online status notification.
 func (r *Room) onlineStatusMessage() []byte {
 	liveName, title, avatarThumb, _ := r.metadataSnapshot()
-	return []byte(fmt.Sprintf(`{"type":"system","event":"live_status","code":"ROOM_ONLINE","valid":true,"live":true,"status":"online","status_text":"直播间已开播","room_id":%s,"live_name":%s,"title":%s,"avatar_thumb":%s,"message":"直播间已开播，后续将开始推送弹幕、礼物、点赞等直播消息","suggestion":"客户端可以开始正常处理直播消息"}`,
-		strconv.Quote(r.id), strconv.Quote(liveName), strconv.Quote(title), strconv.Quote(avatarThumb)))
+	trueValue := true
+	return marshalSystemStatusMessage(systemStatusMessage{Type: "system", Event: "live_status", Code: "ROOM_ONLINE", Valid: boolPtr(true), Live: &trueValue, Status: "online", StatusText: "直播间已开播", RoomID: r.id, LiveName: liveName, Title: title, AvatarThumb: avatarThumb, Message: "直播间已开播，后续将开始推送弹幕、礼物、点赞等直播消息", Suggestion: "客户端可以开始正常处理直播消息", RetryIntervalSeconds: nil})
 }
 
 // notifyOfflineStatus 广播未开播状态通知。

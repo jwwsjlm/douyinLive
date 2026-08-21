@@ -49,6 +49,9 @@ type LiveStatus struct {
 	// RoomID is the verified long room ID when available.
 	// RoomID 是可用时解析到的真实长房间 ID。
 	RoomID string `json:"room_id,omitempty"`
+	// UserUniqueID is the anchor/user identifier used by Douyin's live APIs.
+	// UserUniqueID 是抖音直播接口使用的主播/用户唯一标识。
+	UserUniqueID string `json:"user_unique_id,omitempty"`
 	// LiveName is the anchor display name when available.
 	// LiveName 是可用时解析到的主播名称。
 	LiveName string `json:"live_name,omitempty"`
@@ -70,6 +73,9 @@ type LiveStatus struct {
 // 网络、风控验证页、超时和解析失败会返回 LiveStatusUnknown 以及 error，
 // 调用方可以区分“无法确认”和“已确认未开播”。
 func (dl *DouyinLive) CheckLiveStatus(ctx context.Context) (LiveStatus, error) {
+	if err := dl.ensureUsable(); err != nil {
+		return LiveStatus{Code: LiveStatusUnknown}, fmt.Errorf("%w: %w", ErrLiveStatusUnknown, err)
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -128,7 +134,7 @@ func boolPointer(value bool) *bool {
 
 func (dl *DouyinLive) liveStatusResult(code LiveStatusCode) LiveStatus {
 	dl.mu.Lock()
-	isLive := dl.isLiveClosed
+	isLive := dl.isLive
 	known := dl.liveStatusKnown
 	info := roomInfoSnapshot{
 		liveID:      dl.liveID,
@@ -145,12 +151,13 @@ func (dl *DouyinLive) liveStatusResult(code LiveStatusCode) LiveStatus {
 	}
 
 	status := LiveStatus{
-		Code:        code,
-		LiveID:      info.liveID,
-		RoomID:      info.roomID,
-		LiveName:    info.liveName,
-		Title:       info.title,
-		AvatarThumb: info.avatarThumb,
+		Code:         code,
+		LiveID:       info.liveID,
+		RoomID:       info.roomID,
+		UserUniqueID: info.pushID,
+		LiveName:     info.liveName,
+		Title:        info.title,
+		AvatarThumb:  info.avatarThumb,
 	}
 	if known && code != LiveStatusUnknown && code != LiveStatusNotFound {
 		status.Live = boolPointer(isLive)

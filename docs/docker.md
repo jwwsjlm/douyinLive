@@ -81,7 +81,7 @@ docker run -d \
 docker inspect --format '{{json .State.Health}}' douyinlive
 ```
 
-镜像健康检查只探测容器内的 TCP `1088` 端口是否正在监听，不提供额外的 HTTP 健康接口，也不代表某个具体直播间一定处于开播状态。
+镜像健康检查请求容器内的 `GET /health`。该接口只表示服务进程能够正常响应，不代表某个具体直播间一定处于开播状态。
 
 ## 4. 挂载整个目录（适合后续扩展）
 
@@ -138,7 +138,7 @@ services:
       - ./config.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml"]
     healthcheck:
-      test: ["CMD-SHELL", "nc -z -w 2 127.0.0.1 1088 || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:1088/health >/dev/null || exit 1"]
       interval: 30s
       timeout: 3s
       start_period: 10s
@@ -176,7 +176,7 @@ services:
       - ./data:/app/data
     command: ["--config", "/app/data/config.yaml"]
     healthcheck:
-      test: ["CMD-SHELL", "nc -z -w 2 127.0.0.1 1088 || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:1088/health >/dev/null || exit 1"]
       interval: 30s
       timeout: 3s
       start_period: 10s

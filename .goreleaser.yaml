@@ -40,6 +40,8 @@ archives:
       - config.example.yaml
       - compose.yaml
       - compose.data.yaml
+      - docs/http-api.md
+      - docs/openapi.yaml
 
 checksum:
   name_template: '{{ .ProjectName }}-{{ .Tag }}-{{ envOrDefault "BUILD_COMMIT" .ShortCommit }}-checksums.txt'

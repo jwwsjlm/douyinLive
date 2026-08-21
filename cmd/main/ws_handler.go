@@ -26,6 +26,9 @@ func NewWsHandler(room *Room) *WsHandler {
 // 参数/Parameters:
 //   - socket: 新建立的客户端 WebSocket 连接。 Newly established client WebSocket connection.
 func (c *WsHandler) OnOpen(socket *gws.Conn) {
+	if c == nil || c.room == nil {
+		return
+	}
 	c.room.AddClient(socket)
 }
 
@@ -35,7 +38,12 @@ func (c *WsHandler) OnOpen(socket *gws.Conn) {
 //   - socket: 已关闭的客户端 WebSocket 连接。 Closed client WebSocket connection.
 //   - err: 连接关闭时的错误；正常关闭时可为空。 Error reported on close; may be nil for normal closes.
 func (c *WsHandler) OnClose(socket *gws.Conn, err error) {
-	c.room.RemoveClient(socket.RemoteAddr().String())
+	if c == nil || c.room == nil {
+		return
+	}
+	if clientID, ok := c.room.clientIDForSocket(socket); ok {
+		c.room.RemoveClient(clientID)
+	}
 }
 
 // OnPing 按 WebSocket 规范使用相同 payload 回复 pong。
@@ -44,17 +52,31 @@ func (c *WsHandler) OnClose(socket *gws.Conn, err error) {
 //   - socket: 收到 ping 的客户端连接。 Client connection that received the ping.
 //   - payload: ping 帧载荷。 Ping frame payload.
 func (c *WsHandler) OnPing(socket *gws.Conn, payload []byte) {
-	_ = socket.WritePong(payload)
+	if c == nil || c.room == nil {
+		// Keep the standalone handler contract used by embedding handlers/tests.
+		// 对未绑定 Room 的独立处理器保留 gws 的直接 Pong 行为。
+		_ = socket.WritePong(payload)
+		return
+	}
+	// Room-owned connections always use the per-client write lock.
+	// 已绑定房间的连接统一通过客户端写锁发送 Pong。
+	_ = c.room.writePong(socket, payload)
 }
 
-// OnMessage 处理客户端文本消息：ping 心跳或发送弹幕 JSON 指令。
-// OnMessage handles client text messages: ping heartbeat only.
+// OnMessage 处理客户端文本消息：仅支持文本 ping 心跳，不执行任何发送或控制指令。
+// OnMessage handles client text messages: only the text ping heartbeat is supported; no send or control command is executed.
 // 参数/Parameters:
 //   - socket: 发送消息的客户端连接。 Client connection that sent the message.
 //   - message: 收到的 WebSocket 消息。 Received WebSocket message.
 func (c *WsHandler) OnMessage(socket *gws.Conn, message *gws.Message) {
+	if message == nil {
+		return
+	}
 	defer message.Close()
-	if strings.TrimSpace(message.Data.String()) == "ping" {
-		c.room.sendToClient(socket.RemoteAddr().String(), gws.OpcodeText, pongMessage)
+	if c == nil || c.room == nil || strings.TrimSpace(message.Data.String()) != "ping" {
+		return
+	}
+	if clientID, ok := c.room.clientIDForSocket(socket); ok {
+		c.room.sendToClient(clientID, gws.OpcodeText, pongMessage)
 	}
 }

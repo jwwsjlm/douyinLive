@@ -183,6 +183,9 @@ func (dl *DouyinLive) prepareRequestContextLocked(ctx context.Context) error {
 // prepareWebSocketContextLocked prepares room data and signer runtime needed for WebSocket dialing.
 
 func (dl *DouyinLive) prepareWebSocketContextLocked() (err error) {
+	if err := dl.ensureUsable(); err != nil {
+		return err
+	}
 	startedAt := time.Now()
 	dl.contextPrepared = false
 	defer func() {
@@ -300,6 +303,9 @@ func (dl *DouyinLive) logWebSocketPreparationStep(step string, startedAt time.Ti
 func (dl *DouyinLive) PrepareWebSocketContext() error {
 	dl.contextMu.Lock()
 	defer dl.contextMu.Unlock()
+	if err := dl.ensureUsable(); err != nil {
+		return err
+	}
 	return dl.prepareWebSocketContextLocked()
 }
 

@@ -146,6 +146,9 @@ func LoadGoja(ua string) error {
 	return LoadGojaWithCookie(ua, "")
 }
 
+// LoadGojaWithCookie replaces the legacy shared Goja signer with a runtime
+// prepared from the supplied User-Agent and Cookie.
+// LoadGojaWithCookie 使用指定的 User-Agent 和 Cookie 重建旧版共享 Goja 签名运行时。
 func LoadGojaWithCookie(ua, cookie string) error {
 	signer, err := NewSigner(ua, cookie)
 	if err != nil {

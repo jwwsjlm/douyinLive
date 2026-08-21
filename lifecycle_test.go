@@ -107,3 +107,35 @@ func TestStartAfterCloseDoesNotResetCloseSignal(t *testing.T) {
 		t.Fatalf("request context was reopened after Start on a closed instance")
 	}
 }
+
+func TestStartRejectsConcurrentOrRepeatedUse(t *testing.T) {
+	dl := &DouyinLive{}
+	if err := dl.beginStart(); err != nil {
+		t.Fatalf("beginStart() error = %v", err)
+	}
+	if err := dl.Start(); !errors.Is(err, ErrDouyinLiveAlreadyStarted) {
+		t.Fatalf("concurrent Start() error = %v, want ErrDouyinLiveAlreadyStarted", err)
+	}
+	dl.finishLifecycle()
+	if err := dl.Start(); !errors.Is(err, ErrDouyinLiveClosed) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("repeated Start() error = %v, want ErrDouyinLiveClosed and context.Canceled", err)
+	}
+}
+
+func TestStatusMethodsRejectDisposedInstance(t *testing.T) {
+	dl, err := NewDouyinLive("123", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dl.Dispose()
+	status, err := dl.CheckLiveStatus(context.Background())
+	if status.Code != LiveStatusUnknown || !errors.Is(err, ErrLiveStatusUnknown) || !errors.Is(err, ErrDouyinLiveClosed) {
+		t.Fatalf("CheckLiveStatus() status=%+v err=%v", status, err)
+	}
+	if _, err := dl.IsLive(); !errors.Is(err, ErrDouyinLiveClosed) {
+		t.Fatalf("IsLive() error = %v, want ErrDouyinLiveClosed", err)
+	}
+	if err := dl.PrepareWebSocketContext(); !errors.Is(err, ErrDouyinLiveClosed) {
+		t.Fatalf("PrepareWebSocketContext() error = %v, want ErrDouyinLiveClosed", err)
+	}
+}

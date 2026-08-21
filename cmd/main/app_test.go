@@ -38,6 +38,22 @@ func TestNewHTTPServerSetsDefensiveTimeouts(t *testing.T) {
 	}
 }
 
+func TestDownstreamWebSocketOptionUsesSmallBoundedMessages(t *testing.T) {
+	option := downstreamServerOption()
+	if option.ReadMaxPayloadSize != downstreamReadMaxPayloadSize {
+		t.Fatalf("ReadMaxPayloadSize = %d, want %d", option.ReadMaxPayloadSize, downstreamReadMaxPayloadSize)
+	}
+	if option.ReadMaxPayloadSize > 4<<10 {
+		t.Fatalf("ReadMaxPayloadSize = %d, local protocol only needs small ping messages", option.ReadMaxPayloadSize)
+	}
+	if option.WriteMaxPayloadSize != maxClientMessageBytes {
+		t.Fatalf("WriteMaxPayloadSize = %d, want %d", option.WriteMaxPayloadSize, maxClientMessageBytes)
+	}
+	if option.HandshakeTimeout <= 0 || !option.CheckUtf8Enabled || option.ParallelEnabled {
+		t.Fatalf("unexpected downstream option: %+v", option)
+	}
+}
+
 func TestParseConfiguredPort(t *testing.T) {
 	tests := []struct {
 		value string

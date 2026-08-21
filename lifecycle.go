@@ -3,24 +3,91 @@ package douyinLive
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/gorilla/websocket"
 )
 
-// Close 主动关闭直播监听并释放当前连接。
-// Close actively stops live listening and releases the current connection.
+type listenerLifecycleState uint8
+
+const (
+	listenerLifecycleNew listenerLifecycleState = iota
+	listenerLifecycleRunning
+	listenerLifecycleClosing
+	listenerLifecycleClosed
+)
+
+func (dl *DouyinLive) beginStart() error {
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+	switch dl.lifecycleState {
+	case listenerLifecycleNew:
+		if dl.manualClose || dl.closeSignalClosed {
+			dl.lifecycleState = listenerLifecycleClosed
+			return fmt.Errorf("%w: %w", ErrDouyinLiveClosed, context.Canceled)
+		}
+		dl.lifecycleState = listenerLifecycleRunning
+		dl.manualClose = false
+		return nil
+	case listenerLifecycleRunning, listenerLifecycleClosing:
+		return ErrDouyinLiveAlreadyStarted
+	default:
+		return fmt.Errorf("%w: %w", ErrDouyinLiveClosed, context.Canceled)
+	}
+}
+
+func (dl *DouyinLive) beginClose() {
+	dl.mu.Lock()
+	dl.manualClose = true
+	switch dl.lifecycleState {
+	case listenerLifecycleNew:
+		dl.lifecycleState = listenerLifecycleClosed
+	case listenerLifecycleRunning:
+		dl.lifecycleState = listenerLifecycleClosing
+	}
+	dl.mu.Unlock()
+}
+
+func (dl *DouyinLive) finishLifecycle() {
+	dl.mu.Lock()
+	dl.lifecycleState = listenerLifecycleClosed
+	dl.mu.Unlock()
+}
+
+func (dl *DouyinLive) ensureUsable() error {
+	if dl == nil {
+		return ErrDouyinLiveClosed
+	}
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+	if dl.lifecycleState == listenerLifecycleClosing || dl.lifecycleState == listenerLifecycleClosed {
+		return ErrDouyinLiveClosed
+	}
+	return nil
+}
+
+// Close permanently stops this listener and releases its current connection.
+// Close 永久停止当前监听实例并释放连接；关闭后的实例不能再次 Start。
 func (dl *DouyinLive) Close() {
-	dl.setManualClose(true)
+	if dl == nil {
+		return
+	}
+	dl.beginClose()
 	dl.setLiveStatus(false)
 	dl.signalClose()
 	dl.stopHeartbeatLoop()
 	dl.closeCurrentConnection(websocket.CloseNormalClosure, "closing connection")
 }
 
-// Dispose 释放尚未进入 Start 流程的实例资源。
-// Dispose releases resources for instances that will not enter Start.
+// Dispose permanently closes the instance and releases all session resources.
+// Dispose 永久关闭实例并释放全部会话资源，可安全重复调用。
 func (dl *DouyinLive) Dispose() {
+	if dl == nil {
+		return
+	}
 	dl.Close()
+	dl.contextMu.Lock()
+	defer dl.contextMu.Unlock()
 	dl.releaseResources()
 }
 
@@ -54,16 +121,6 @@ func (dl *DouyinLive) recordReconnectFailure(reason string) int {
 	return dl.consecutiveFailures
 }
 
-// setManualClose 标记连接是否由调用方主动关闭。
-// setManualClose marks whether the connection is being closed by the caller.
-// 参数/Parameters:
-//   - status: true 表示主动关闭流程。 true means the caller is closing the listener.
-func (dl *DouyinLive) setManualClose(status bool) {
-	dl.mu.Lock()
-	defer dl.mu.Unlock()
-	dl.manualClose = status
-}
-
 // isManualClose 返回当前是否处于主动关闭流程。
 // isManualClose reports whether the listener is in a manual close flow.
 func (dl *DouyinLive) isManualClose() bool {
@@ -72,14 +129,16 @@ func (dl *DouyinLive) isManualClose() bool {
 	return dl.manualClose
 }
 
-// Start 启动直播监听并阻塞处理 WebSocket 消息直到结束。
-// Start starts live listening and blocks while processing WebSocket messages until it ends.
+// Start starts this single-use listener and blocks while processing WebSocket messages until it ends.
+// Start 启动一次性监听实例并阻塞处理 WebSocket 消息；同一实例不能并发或重复 Start。
 func (dl *DouyinLive) Start() error {
-	if dl.isManualClose() {
-		return context.Canceled
+	if dl == nil {
+		return ErrDouyinLiveClosed
+	}
+	if err := dl.beginStart(); err != nil {
+		return err
 	}
 	dl.resetCloseSignal()
-	dl.setManualClose(false)
 	defer dl.cleanup()
 	dl.logger.Info("开始连接抖音直播间", logFlowArgs("startup", "start_room", "live_id", dl.liveID)...)
 	if dl.isKnownOfflineStatus() {
@@ -104,6 +163,7 @@ func (dl *DouyinLive) Start() error {
 // cleanup 释放当前连接、心跳和缓存资源。
 // cleanup releases the current connection, heartbeat loop, and cache resources.
 func (dl *DouyinLive) cleanup() {
+	defer dl.finishLifecycle()
 	dl.stopHeartbeatLoop()
 	dl.contextMu.Lock()
 	dl.contextPrepared = false

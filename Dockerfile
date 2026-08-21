@@ -28,6 +28,6 @@ COPY config.example.yaml /app/config.example.yaml
 EXPOSE 1088
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD nc -z -w 2 127.0.0.1 1088 || exit 1
+  CMD wget -q -O - http://127.0.0.1:1088/health >/dev/null || exit 1
 
 ENTRYPOINT ["/app/douyinLive"]

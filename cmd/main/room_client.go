@@ -13,9 +13,32 @@ import (
 // clientSendQueueSize limits the pending outbound queue size for each client.
 const clientSendQueueSize = 256
 
+// maxClientQueuedBytes bounds retained outbound payloads per downstream client.
+// maxClientQueuedBytes 限制每个下游客户端待发送消息占用的总字节数。
+const maxClientQueuedBytes = 16 << 20
+
+// maxClientMessageBytes prevents one oversized upstream message from
+// monopolizing memory for every connected downstream client.
+// maxClientMessageBytes 防止单条异常上游消息占满所有下游客户端内存。
+const maxClientMessageBytes = 8 << 20
+
 // clientWriteTimeout 限制向客户端写消息的最长时间。
 // clientWriteTimeout limits how long a write to a client may take.
 const clientWriteTimeout = 5 * time.Second
+
+// clientControlWriteTimeout bounds close and pong control-frame writes.
+// clientControlWriteTimeout 限制 close 和 pong 控制帧的写入耗时。
+const clientControlWriteTimeout = time.Second
+
+type enqueueResult uint8
+
+const (
+	enqueueAccepted enqueueResult = iota
+	enqueueClientClosed
+	enqueueQueueFull
+	enqueueQueueBytesExceeded
+	enqueueMessageTooLarge
+)
 
 // outboundMessage 表示写入客户端队列的一条待发送消息。
 // outboundMessage represents one pending message in a client's outbound queue.
@@ -24,14 +47,34 @@ type outboundMessage struct {
 	payload []byte
 }
 
+// clientCloseDirective describes the final application message and the short
+// protocol close reason sent when a downstream client is disconnected.
+// clientCloseDirective 描述断开下游客户端前发送的最终业务消息，以及符合协议长度限制的简短关闭原因。
+type clientCloseDirective struct {
+	message []byte
+	code    uint16
+	reason  string
+}
+
+var (
+	normalClientClose          = clientCloseDirective{code: 1000, reason: "normal_close"}
+	serviceClientClose         = clientCloseDirective{message: serviceClosingMessage, code: 1001, reason: "service_shutdown"}
+	invalidRoomClientClose     = clientCloseDirective{message: roomInvalidMessage, code: 1008, reason: "room_not_found"}
+	liveStartFailedClientClose = clientCloseDirective{message: liveStartFailedMessage, code: 1011, reason: "upstream_start_failed"}
+	slowClientClose            = clientCloseDirective{message: slowClientClosingMessage, code: 1008, reason: "client_too_slow"}
+)
+
 // Client 表示一个下游 WebSocket 客户端连接。
 // Client represents one downstream WebSocket client connection.
 type Client struct {
-	id        string
-	conn      *gws.Conn
-	sendQueue chan outboundMessage
-	stopCh    chan struct{}
-	closeOnce sync.Once
+	id          string
+	conn        *gws.Conn
+	sendQueue   chan outboundMessage
+	stopCh      chan struct{}
+	closeOnce   sync.Once
+	stateMu     sync.RWMutex
+	writeMu     sync.Mutex
+	queuedBytes int
 }
 
 // NewClient 创建客户端连接包装器。
@@ -54,18 +97,43 @@ func NewClient(id string, conn *gws.Conn) *Client {
 //   - opcode: 要发送的 WebSocket 帧类型。 WebSocket frame opcode to send.
 //   - payload: 要发送的消息载荷。 Message payload to send.
 func (c *Client) enqueue(opcode gws.Opcode, payload []byte) bool {
+	return c.enqueueWithResult(opcode, payload) == enqueueAccepted
+}
+
+func (c *Client) enqueueWithResult(opcode gws.Opcode, payload []byte) enqueueResult {
+	if len(payload) > maxClientMessageBytes {
+		return enqueueMessageTooLarge
+	}
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
 	select {
 	case <-c.stopCh:
-		return false
+		return enqueueClientClosed
 	default:
+	}
+	if c.queuedBytes+len(payload) > maxClientQueuedBytes {
+		return enqueueQueueBytesExceeded
 	}
 
 	select {
 	case c.sendQueue <- outboundMessage{opcode: opcode, payload: payload}:
-		return true
+		c.queuedBytes += len(payload)
+		return enqueueAccepted
 	default:
-		return false
+		return enqueueQueueFull
 	}
+}
+
+func (c *Client) releaseQueuedBytes(size int) {
+	if size <= 0 {
+		return
+	}
+	c.stateMu.Lock()
+	c.queuedBytes -= size
+	if c.queuedBytes < 0 {
+		c.queuedBytes = 0
+	}
+	c.stateMu.Unlock()
 }
 
 // writeLoop 串行消费发送队列并写入客户端连接。
@@ -81,56 +149,103 @@ func (c *Client) writeLoop(onWriteError func()) {
 			if !ok {
 				return
 			}
-			nc := c.conn.NetConn()
-			if nc != nil {
-				_ = nc.SetWriteDeadline(time.Now().Add(clientWriteTimeout))
-			}
-			if err := c.conn.WriteMessage(msg.opcode, msg.payload); err != nil {
-				c.close(nil)
+			err := c.writeMessage(msg.opcode, msg.payload)
+			c.releaseQueuedBytes(len(msg.payload))
+			if err != nil {
+				c.close(normalClientClose)
 				if onWriteError != nil {
 					onWriteError()
 				}
 				return
 			}
-			if nc != nil {
-				_ = nc.SetWriteDeadline(time.Time{})
-			}
 		}
 	}
 }
 
-// close 幂等关闭客户端连接和发送循环。
-// close idempotently closes the client connection and send loop.
+// close 幂等停止发送循环，发送可选的最终业务消息，再以简短 reason 关闭连接。
+// close idempotently stops the send loop, sends an optional final application message, and closes with a short reason.
 // 参数/Parameters:
-//   - closePayload: 可选 close 帧载荷。 Optional close-frame payload.
-func (c *Client) close(closePayload []byte) {
+//   - directive: 最终消息、关闭码和简短关闭原因。 Final message, close code, and short close reason.
+func (c *Client) close(directive clientCloseDirective) {
 	c.closeOnce.Do(func() {
+		c.stateMu.Lock()
 		close(c.stopCh)
+		c.stateMu.Unlock()
 		if c.conn == nil {
 			return
 		}
-		if closePayload != nil {
-			_ = c.conn.WriteClose(1000, closePayload)
-		}
+		_ = c.writeFinalAndClose(directive)
 		if nc := c.conn.NetConn(); nc != nil {
 			_ = nc.Close()
 		}
 	})
 }
 
-// closeClient 从房间移除并关闭指定客户端。
-// closeClient removes and closes a client from the room.
+func (c *Client) writeFinalAndClose(directive clientCloseDirective) error {
+	if c == nil || c.conn == nil {
+		return errors.New("client connection is nil")
+	}
+	nc := c.conn.NetConn()
+	if nc != nil {
+		// Interrupt an already-blocked data write before waiting for writeMu.
+		// 在等待 writeMu 前先打断可能阻塞的数据写入，避免关闭流程被慢客户端拖住。
+		_ = nc.SetWriteDeadline(time.Now().Add(clientControlWriteTimeout))
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if nc != nil {
+		_ = nc.SetWriteDeadline(time.Now().Add(clientControlWriteTimeout))
+	}
+	if len(directive.message) > 0 {
+		if err := c.conn.WriteMessage(gws.OpcodeText, directive.message); err != nil {
+			_ = c.conn.WriteClose(directive.code, []byte(directive.reason))
+			return err
+		}
+	}
+	return c.conn.WriteClose(directive.code, []byte(directive.reason))
+}
+
+func (c *Client) writeMessage(opcode gws.Opcode, payload []byte) error {
+	if c == nil || c.conn == nil {
+		return errors.New("client connection is nil")
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	nc := c.conn.NetConn()
+	if nc != nil {
+		_ = nc.SetWriteDeadline(time.Now().Add(clientWriteTimeout))
+		defer nc.SetWriteDeadline(time.Time{})
+	}
+	return c.conn.WriteMessage(opcode, payload)
+}
+
+func (c *Client) writePong(payload []byte) error {
+	if c == nil || c.conn == nil {
+		return errors.New("client connection is nil")
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	nc := c.conn.NetConn()
+	if nc != nil {
+		_ = nc.SetWriteDeadline(time.Now().Add(clientControlWriteTimeout))
+		defer nc.SetWriteDeadline(time.Time{})
+	}
+	return c.conn.WritePong(payload)
+}
+
+// closeClient 从房间移除并按指定关闭策略关闭客户端。
+// closeClient removes a client from the room and closes it with the specified directive.
 // 参数/Parameters:
 //   - clientID: 要关闭的客户端 ID。 Client ID to close.
-//   - closePayload: 可选 close 帧载荷。 Optional close-frame payload.
-func (r *Room) closeClient(clientID string, closePayload []byte) {
+//   - directive: 最终业务消息和 WebSocket 关闭信息。 Final application message and WebSocket close information.
+func (r *Room) closeClient(clientID string, directive clientCloseDirective) {
 	client, _, removed := r.removeClient(clientID)
 	if !removed {
 		return
 	}
 
 	if client != nil {
-		client.close(closePayload)
+		client.close(directive)
 	}
 
 	remaining := r.clientCount()
@@ -138,19 +253,20 @@ func (r *Room) closeClient(clientID string, closePayload []byte) {
 
 	if remaining == 0 {
 		r.logger.Info("最后一个客户端已断开，正在关闭后台监听", "room_id", r.id)
-		go r.closeBackgroundWorkers()
+		if !r.startTask(r.closeBackgroundWorkers) {
+			r.closeBackgroundWorkers()
+		}
 	}
 }
 
-// addClient 将客户端加入房间并返回当前客户端数量。
-// addClient adds a client to the room and returns the current client count.
-// 参数/Parameters:
-//   - client: 要加入房间的客户端。 Client to add to the room.
-func (r *Room) addClient(client *Client) int {
-	r.clientsMu.Lock()
-	defer r.clientsMu.Unlock()
-	r.clients[client.id] = client
-	return len(r.clients)
+func (r *Room) clientIDForSocket(socket *gws.Conn) (string, bool) {
+	if socket == nil {
+		return "", false
+	}
+	r.clientsMu.RLock()
+	defer r.clientsMu.RUnlock()
+	id, ok := r.connIDs[socket]
+	return id, ok
 }
 
 // getClient 按 ID 获取客户端。
@@ -176,6 +292,9 @@ func (r *Room) removeClient(clientID string) (*Client, int, bool) {
 		return nil, len(r.clients), false
 	}
 	delete(r.clients, clientID)
+	if client != nil && client.conn != nil {
+		delete(r.connIDs, client.conn)
+	}
 	return client, len(r.clients), true
 }
 
@@ -209,6 +328,7 @@ func (r *Room) clearClients() []*Client {
 		clients = append(clients, client)
 	}
 	r.clients = make(map[string]*Client)
+	r.connIDs = make(map[*gws.Conn]string)
 	return clients
 }
 
@@ -216,8 +336,8 @@ func (r *Room) clearClients() []*Client {
 // AddClient attaches a downstream WebSocket client and starts listening or returns status based on room state.
 // 参数/Parameters:
 //   - socket: 下游客户端 WebSocket 连接。 Downstream client WebSocket connection.
-func (r *Room) AddClient(socket *gws.Conn) {
-	clientID := socket.RemoteAddr().String()
+func (r *Room) AddClient(socket *gws.Conn) string {
+	clientID := newClientID()
 	client := NewClient(clientID, socket)
 
 	r.mu.Lock()
@@ -226,11 +346,14 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	}
 	if r.closed {
 		r.mu.Unlock()
-		client.close(serviceClosingMessage)
-		return
+		client.close(serviceClientClose)
+		return clientID
 	}
 	r.clientsMu.Lock()
 	r.clients[clientID] = client
+	if socket != nil {
+		r.connIDs[socket] = clientID
+	}
 	count := len(r.clients)
 	r.clientsMu.Unlock()
 
@@ -239,18 +362,18 @@ func (r *Room) AddClient(socket *gws.Conn) {
 		upstreamReady := r.upstreamReady
 		r.mu.Unlock()
 		go client.writeLoop(func() {
-			r.closeClient(clientID, nil)
+			r.closeClient(clientID, normalClientClose)
 		})
 		r.logger.Info("客户端连接到房间", "client_id", clientID, "room_id", r.id, "client_count", count)
 		if upstreamReady {
 			r.sendToClient(clientID, gws.OpcodeText, r.onlineStatusMessage())
 		}
-		return
+		return clientID
 	case r.monitorStopCh != nil:
 		statusUnknown := r.statusUnknown
 		r.mu.Unlock()
 		go client.writeLoop(func() {
-			r.closeClient(clientID, nil)
+			r.closeClient(clientID, normalClientClose)
 		})
 		r.logger.Info("客户端连接到房间", "client_id", clientID, "room_id", r.id, "client_count", count)
 		if statusUnknown {
@@ -258,25 +381,34 @@ func (r *Room) AddClient(socket *gws.Conn) {
 		} else {
 			r.sendToClient(clientID, gws.OpcodeText, r.offlineStatusMessage())
 		}
-		return
+		return clientID
 	case r.starting:
 		r.mu.Unlock()
 		go client.writeLoop(func() {
-			r.closeClient(clientID, nil)
+			r.closeClient(clientID, normalClientClose)
 		})
 		r.logger.Info("客户端连接到房间", "client_id", clientID, "room_id", r.id, "client_count", count)
-		return
+		return clientID
 	default:
 		r.starting = true
 		r.mu.Unlock()
 	}
 
 	go client.writeLoop(func() {
-		r.closeClient(clientID, nil)
+		r.closeClient(clientID, normalClientClose)
 	})
 
 	r.logger.Info("客户端连接到房间", "client_id", clientID, "room_id", r.id, "client_count", count)
 
+	// Do not hold the WebSocket upgrade/read-loop path while talking to Douyin.
+	// 上游 HTTP 初始化可能耗时较长，必须异步执行，避免阻塞客户端握手。
+	if !r.startTask(r.initializeLiveSession) {
+		r.closeClient(clientID, serviceClientClose)
+	}
+	return clientID
+}
+
+func (r *Room) initializeLiveSession() {
 	r.logger.Info("第一个客户端连接，正在检查直播状态", "room_id", r.id)
 	err := r.startLiveSession()
 
@@ -294,7 +426,7 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	}
 	if errors.Is(err, douyinLive.ErrRoomNotFound) {
 		r.logger.Warn("直播间不存在，关闭客户端连接", "room_id", r.id, "err", err)
-		r.closeAllClients(roomInvalidMessage)
+		r.closeAllClients(invalidRoomClientClose)
 		r.removeIfIdle()
 		return
 	}
@@ -307,7 +439,6 @@ func (r *Room) AddClient(socket *gws.Conn) {
 		r.setStatusUnknown(false)
 		r.notifyOfflineStatus()
 		r.startMonitorLoop()
-
 		return
 	}
 	if errors.Is(err, douyinLive.ErrLiveStatusUnknown) {
@@ -323,8 +454,20 @@ func (r *Room) AddClient(socket *gws.Conn) {
 	}
 
 	r.logger.Error("启动抖音直播监听失败", "room_id", r.id, "err", err)
-	r.closeAllClients(liveStartFailedMessage)
+	r.closeAllClients(liveStartFailedClientClose)
 	r.removeIfIdle()
+}
+
+func (r *Room) writePong(socket *gws.Conn, payload []byte) bool {
+	id, ok := r.clientIDForSocket(socket)
+	if !ok {
+		return false
+	}
+	client, ok := r.getClient(id)
+	if !ok {
+		return false
+	}
+	return client.writePong(payload) == nil
 }
 
 // RemoveClient 从房间移除并关闭指定客户端。
@@ -332,7 +475,7 @@ func (r *Room) AddClient(socket *gws.Conn) {
 // 参数/Parameters:
 //   - clientID: 需要移除的客户端 ID。 Client ID to remove.
 func (r *Room) RemoveClient(clientID string) {
-	r.closeClient(clientID, nil)
+	r.closeClient(clientID, normalClientClose)
 }
 
 // sendToClient 向指定客户端发送消息，队列满时关闭慢客户端。
@@ -346,22 +489,26 @@ func (r *Room) sendToClient(clientID string, opcode gws.Opcode, payload []byte) 
 	if !ok {
 		return
 	}
-	if client.enqueue(opcode, payload) {
+	switch client.enqueueWithResult(opcode, payload) {
+	case enqueueAccepted, enqueueClientClosed:
+		return
+	case enqueueMessageTooLarge:
+		r.logger.Warn("跳过超过下游消息大小限制的消息", "client_id", clientID, "room_id", r.id, "payload_len", len(payload), "max_payload_len", maxClientMessageBytes)
 		return
 	}
 
 	r.logger.Warn("客户端消费过慢，关闭连接", "client_id", clientID, "room_id", r.id)
-	r.closeClient(clientID, slowClientClosingMessage)
+	r.closeClient(clientID, slowClientClose)
 }
 
-// closeAllClients 关闭并移除房间内所有客户端。
-// closeAllClients closes and removes every client in the room.
+// closeAllClients 按指定关闭策略关闭并移除房间内所有客户端。
+// closeAllClients closes and removes every client in the room using the specified directive.
 // 参数/Parameters:
-//   - closePayload: 可选 close 帧载荷。 Optional close-frame payload.
-func (r *Room) closeAllClients(closePayload []byte) {
+//   - directive: 最终业务消息和 WebSocket 关闭信息。 Final application message and WebSocket close information.
+func (r *Room) closeAllClients(directive clientCloseDirective) {
 	clients := r.clearClients()
 	for _, client := range clients {
-		client.close(closePayload)
+		client.close(directive)
 	}
 }
 
@@ -372,10 +519,14 @@ func (r *Room) closeAllClients(closePayload []byte) {
 func (r *Room) Broadcast(message []byte) {
 	clients := r.snapshotClients()
 	for _, client := range clients {
-		if client.enqueue(gws.OpcodeText, message) {
+		switch client.enqueueWithResult(gws.OpcodeText, message) {
+		case enqueueAccepted, enqueueClientClosed:
 			continue
+		case enqueueMessageTooLarge:
+			r.logger.Warn("跳过超过下游消息大小限制的广播消息", "room_id", r.id, "payload_len", len(message), "max_payload_len", maxClientMessageBytes)
+			return
 		}
 		r.logger.Warn("客户端消费过慢，关闭连接", "client_id", client.id, "room_id", r.id)
-		r.closeClient(client.id, slowClientClosingMessage)
+		r.closeClient(client.id, slowClientClose)
 	}
 }

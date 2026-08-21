@@ -62,6 +62,8 @@ func newWebsocketSignatureParams(roomID, userUniqueID string) websocketSignature
 	}
 }
 
+// OrderedMap returns the ordered signing fields used by the upstream handshake.
+// OrderedMap 返回上游握手签名所需的有序字段。
 func (p websocketSignatureParams) OrderedMap() *orderedmap.OrderedMap {
 	m := orderedmap.NewOrderedMap()
 	m.Set("live_id", p.LiveID)
@@ -80,6 +82,8 @@ func (p websocketSignatureParams) OrderedMap() *orderedmap.OrderedMap {
 	return m
 }
 
+// Joined returns the canonical comma-separated signing input.
+// Joined 返回规范化的逗号分隔签名输入。
 func (p websocketSignatureParams) Joined() string {
 	var b strings.Builder
 	m := p.OrderedMap()
@@ -93,6 +97,8 @@ func (p websocketSignatureParams) Joined() string {
 	return b.String()
 }
 
+// XMSStub returns the MD5 stub derived from the canonical signing input.
+// XMSStub 返回由规范化签名输入计算出的 MD5 stub。
 func (p websocketSignatureParams) XMSStub() string {
 	sum := md5.Sum([]byte(p.Joined()))
 	return hex.EncodeToString(sum[:])
@@ -133,6 +139,8 @@ func browserVersionFromUserAgent(userAgent string) string {
 	return userAgent
 }
 
+// QueryString returns the upstream WebSocket query string.
+// QueryString 返回上游 WebSocket 查询字符串。
 func (p websocketURLParams) QueryString() string {
 	parts := []string{
 		"app_name=" + webcastAppName,
@@ -199,6 +207,8 @@ func newInitialIMFetchParamsWithScreen(roomInfo roomInfoSnapshot, userAgent, msT
 	}
 }
 
+// QueryString returns the initial IM fetch query string.
+// QueryString 返回初始 IM fetch 查询字符串。
 func (p initialIMFetchParams) QueryString() string {
 	parts := []string{
 		"resp_content_type=" + protobufContentType,

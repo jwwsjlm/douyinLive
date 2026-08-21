@@ -32,7 +32,7 @@ func (g *liveStatusGuard) Reset() {
 func (dl *DouyinLive) setLiveStatus(status bool) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
-	dl.isLiveClosed = status
+	dl.isLive = status
 	dl.liveStatusKnown = true
 	if status {
 		dl.liveStatusGuard.Reset()
@@ -44,7 +44,7 @@ func (dl *DouyinLive) setLiveStatus(status bool) {
 func (dl *DouyinLive) clearLiveStatus() {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
-	dl.isLiveClosed = false
+	dl.isLive = false
 	dl.liveStatusKnown = false
 }
 
@@ -53,7 +53,7 @@ func (dl *DouyinLive) clearLiveStatus() {
 func (dl *DouyinLive) isLiveStatus() bool {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
-	return dl.isLiveClosed
+	return dl.isLive
 }
 
 // liveStatusSnapshot 返回直播状态和该状态是否来自有效页面或接口。
@@ -61,7 +61,7 @@ func (dl *DouyinLive) isLiveStatus() bool {
 func (dl *DouyinLive) liveStatusSnapshot() (bool, bool) {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
-	return dl.isLiveClosed, dl.liveStatusKnown
+	return dl.isLive, dl.liveStatusKnown
 }
 
 // isKnownOfflineStatus 判断当前是否已确认未开播或已下播。
@@ -93,10 +93,10 @@ func (dl *DouyinLive) shouldCloseAfterStatusCheck(isLive bool) bool {
 	defer dl.mu.Unlock()
 	shouldClose := dl.liveStatusGuard.Record(isLive)
 	if shouldClose {
-		dl.isLiveClosed = false
+		dl.isLive = false
 		dl.liveStatusKnown = true
 	} else if isLive {
-		dl.isLiveClosed = true
+		dl.isLive = true
 		dl.liveStatusKnown = true
 	}
 	return shouldClose

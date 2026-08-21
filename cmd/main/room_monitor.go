@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/jwwsjlm/douyinLive/v2"
@@ -17,21 +18,29 @@ func (r *Room) startMonitorLoop() {
 	}
 	stopCh := make(chan struct{})
 	doneCh := make(chan struct{})
-	r.monitorStopCh = stopCh
-	r.monitorDoneCh = doneCh
-	pollInterval := r.pollInterval
-	notifyInterval := r.notifyInterval
-	r.mu.Unlock()
-
-	go func() {
-		defer close(doneCh)
-		defer func() {
+	var finishOnce sync.Once
+	finish := func() {
+		finishOnce.Do(func() {
 			r.mu.Lock()
 			if r.monitorStopCh == stopCh {
 				r.monitorStopCh = nil
 				r.monitorDoneCh = nil
+				r.monitorStopRequested = false
 			}
 			r.mu.Unlock()
+			close(doneCh)
+		})
+	}
+	r.monitorStopCh = stopCh
+	r.monitorDoneCh = doneCh
+	r.monitorStopRequested = false
+	pollInterval := r.pollInterval
+	notifyInterval := r.notifyInterval
+	r.mu.Unlock()
+
+	monitorTask := func() {
+		defer finish()
+		defer func() {
 			r.removeIfIdle()
 		}()
 
@@ -39,9 +48,12 @@ func (r *Room) startMonitorLoop() {
 		defer pollTicker.Stop()
 		notifyTicker := time.NewTicker(notifyInterval)
 		defer notifyTicker.Stop()
+		lifecycleCtx := r.lifecycleCtx
 
 		for {
 			select {
+			case <-lifecycleCtx.Done():
+				return
 			case <-stopCh:
 				return
 			case <-notifyTicker.C:
@@ -83,7 +95,7 @@ func (r *Room) startMonitorLoop() {
 						continue
 					}
 					r.logger.Warn("轮询发现直播间不存在，关闭客户端连接", "room_id", r.id, "err", err)
-					r.closeAllClients(roomInvalidMessage)
+					r.closeAllClients(invalidRoomClientClose)
 					return
 				case errors.Is(err, douyinLive.ErrLiveNotStarted):
 					if r.setStatusUnknown(false) {
@@ -101,7 +113,10 @@ func (r *Room) startMonitorLoop() {
 				}
 			}
 		}
-	}()
+	}
+	if !r.startTask(monitorTask) {
+		finish()
+	}
 }
 
 // stopMonitorLoop 停止未开播轮询并等待后台 goroutine 退出。
@@ -110,17 +125,12 @@ func (r *Room) stopMonitorLoop() {
 	r.mu.Lock()
 	stopCh := r.monitorStopCh
 	doneCh := r.monitorDoneCh
-	r.monitorStopCh = nil
-	r.monitorDoneCh = nil
+	if stopCh != nil && !r.monitorStopRequested {
+		close(stopCh)
+		r.monitorStopRequested = true
+	}
 	r.mu.Unlock()
 
-	if stopCh != nil {
-		select {
-		case <-stopCh:
-		default:
-			close(stopCh)
-		}
-	}
 	if doneCh != nil {
 		select {
 		case <-doneCh:

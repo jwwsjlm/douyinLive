@@ -1,0 +1,464 @@
+openapi: 3.0.3
+info:
+  title: DouyinLive HTTP API
+  version: v1
+  license:
+    name: MIT
+    url: https://opensource.org/license/mit
+  description: >-
+    Read-only live-room status and metadata API. Queries do not create a
+    long-lived WebSocket room. The WebSocket endpoint is configured separately
+    with websocket.path and defaults to /ws/{live_id}.
+servers:
+  - url: http://127.0.0.1:1088
+security:
+  - bearerAuth: []
+  - {}
+tags:
+  - name: Service
+    description: Service health, capabilities, and operational metrics.
+  - name: Rooms
+    description: Read-only live-room status, metadata, batch, and URL parsing APIs.
+paths:
+  /health:
+    get:
+      tags: [Service]
+      operationId: getPublicHealth
+      summary: Basic service health
+      security: [{}]
+      responses:
+        '200':
+          description: Health envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthEnvelope'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+  /metrics:
+    get:
+      tags: [Service]
+      operationId: getMetrics
+      summary: Prometheus metrics
+      description: Requires bearerAuth when api.key is configured; /health remains public.
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        '200':
+          description: Prometheus text exposition
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/health:
+    get:
+      tags: [Service]
+      operationId: getVersionedHealth
+      summary: Versioned service health
+      responses:
+        '200':
+          description: Health envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthEnvelope'
+        '304':
+          description: Not modified when If-None-Match matches
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+  /api/v1/capabilities:
+    get:
+      tags: [Service]
+      operationId: getCapabilities
+      summary: List read-only API and WebSocket capabilities
+      responses:
+        '200':
+          description: Capabilities envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CapabilitiesEnvelope'
+        '304':
+          description: Not modified when If-None-Match matches
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/rooms:
+    get:
+      tags: [Rooms]
+      operationId: listActiveRooms
+      summary: List active or monitored rooms
+      description: Does not trigger an upstream request. Cookie-specific internal sessions for the same live_id are aggregated into one logical room entry.
+      responses:
+        '200':
+          description: Active room snapshots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomListEnvelope'
+        '304':
+          description: Not modified when If-None-Match matches
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/rooms/{live_id}:
+    get:
+      tags: [Rooms]
+      operationId: getRoom
+      summary: Query room status and metadata
+      description: Performs a one-shot upstream HTTP query without creating a managed room.
+      parameters:
+        - $ref: '#/components/parameters/LiveID'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Room status and metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomEnvelope'
+        '304':
+          description: Not modified when If-None-Match matches
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '503':
+          $ref: '#/components/responses/UpstreamUnavailable'
+  /api/v1/rooms/{live_id}/status:
+    get:
+      tags: [Rooms]
+      operationId: getRoomStatus
+      summary: Query room status only
+      parameters:
+        - $ref: '#/components/parameters/LiveID'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Room status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusEnvelope'
+        '304':
+          description: Not modified when If-None-Match matches
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '503':
+          $ref: '#/components/responses/UpstreamUnavailable'
+  /api/v1/rooms/status:batch:
+    post:
+      tags: [Rooms]
+      operationId: batchGetRoomStatus
+      summary: Query multiple room statuses
+      description: Queries up to 50 unique room identifiers with a bounded worker pool.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchStatusRequest'
+      responses:
+        '200':
+          description: Per-room results and summary counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchStatusEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+  /api/v1/rooms/resolve:
+    get:
+      tags: [Rooms]
+      operationId: resolveRoomURL
+      summary: Parse a Douyin live-room URL
+      description: Validates URL structure and allowed domain only; it does not request the supplied URL.
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uri
+      responses:
+        '200':
+          description: Parsed room URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvedURLEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API key
+  parameters:
+    LiveID:
+      name: live_id
+      in: path
+      required: true
+      description: 直播间标识，只允许 1-128 个字母、数字、下划线或短横线。
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9_-]{1,128}$'
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    Unauthorized:
+      description: Missing or invalid API key
+      headers:
+        WWW-Authenticate:
+          schema: {type: string}
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      description: Room does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    MethodNotAllowed:
+      description: HTTP method is not supported
+      headers:
+        Allow:
+          schema: {type: string}
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    UpstreamUnavailable:
+      description: Upstream status could not be verified
+      headers:
+        Retry-After:
+          schema: {type: string}
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    RequestTooLarge:
+      description: Request body exceeds the 1 MiB limit
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    APIError:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        suggestion: {type: string}
+    Envelope:
+      type: object
+      required: [ok, data, error, request_id]
+      properties:
+        ok: {type: boolean}
+        data: {}
+        error:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/APIError'
+        request_id: {type: string}
+    ErrorEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+    Health:
+      type: object
+      required: [status, version, tag, commit, build_date, port, sign_provider]
+      properties:
+        status: {type: string, example: ok}
+        version: {type: string}
+        tag: {type: string}
+        commit: {type: string}
+        build_date: {type: string}
+        port: {type: string}
+        sign_provider: {type: string}
+    HealthEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+      properties:
+        data: {$ref: '#/components/schemas/Health'}
+    Room:
+      type: object
+      required: [live_id, status, source]
+      properties:
+        live_id: {type: string}
+        status: {$ref: '#/components/schemas/RoomStatus'}
+        is_live: {type: boolean, nullable: true}
+        has_room: {type: boolean, nullable: true}
+        account_only: {type: boolean, nullable: true}
+        room_id: {type: string}
+        title: {type: string}
+        client_count: {type: integer, minimum: 0}
+        upstream_ready: {type: boolean}
+        status_unknown: {type: boolean}
+        source: {type: string, enum: [active, probe]}
+        checked_at: {type: string, format: date-time}
+    ActiveRoom:
+      allOf:
+        - $ref: '#/components/schemas/Room'
+        - type: object
+          required: [client_count, upstream_ready, status_unknown]
+          properties:
+            source: {type: string, enum: [active]}
+    RoomStatus:
+      type: string
+      enum: [online, offline, account_no_room, unknown, not_found]
+    RoomList:
+      type: object
+      required: [rooms, count]
+      properties:
+        rooms:
+          type: array
+          items: {$ref: '#/components/schemas/ActiveRoom'}
+        count: {type: integer, minimum: 0}
+    RoomListEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+      properties:
+        data: {$ref: '#/components/schemas/RoomList'}
+    RoomEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+      properties:
+        data: {$ref: '#/components/schemas/Room'}
+    Status:
+      type: object
+      required: [live_id, status, is_live, has_room, checked_at]
+      properties:
+        live_id: {type: string}
+        status: {$ref: '#/components/schemas/RoomStatus'}
+        is_live: {type: boolean, nullable: true}
+        has_room: {type: boolean, nullable: true}
+        checked_at: {type: string, format: date-time}
+    StatusEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+      properties:
+        data: {$ref: '#/components/schemas/Status'}
+    BatchStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [live_ids]
+      properties:
+        live_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{1,128}$'
+    BatchItem:
+      type: object
+      required: [live_id, status]
+      properties:
+        live_id: {type: string}
+        status: {$ref: '#/components/schemas/RoomStatus'}
+        is_live: {type: boolean, nullable: true}
+        has_room: {type: boolean, nullable: true}
+        account_only: {type: boolean, nullable: true}
+        room_id: {type: string}
+        title: {type: string}
+        error:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/APIError'
+    BatchStatus:
+      type: object
+      required: [items, total, online, offline, account_no_room, not_found, unknown]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/BatchItem'}
+        total: {type: integer, minimum: 1}
+        online: {type: integer, minimum: 0}
+        offline: {type: integer, minimum: 0}
+        account_no_room: {type: integer, minimum: 0}
+        not_found: {type: integer, minimum: 0}
+        unknown: {type: integer, minimum: 0}
+    BatchStatusEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+      properties:
+        data: {$ref: '#/components/schemas/BatchStatus'}
+    ResolvedURL:
+      type: object
+      required: [input_url, live_id, canonical_url]
+      properties:
+        input_url: {type: string, format: uri}
+        live_id: {type: string}
+        canonical_url: {type: string, format: uri}
+    ResolvedURLEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+      properties:
+        data: {$ref: '#/components/schemas/ResolvedURL'}
+    Capabilities:
+      type: object
+      required: [api_version, read_only, message_transport, http_send_supported, websocket_auth, endpoints, message_types]
+      properties:
+        api_version: {type: string}
+        read_only: {type: boolean}
+        message_transport: {type: string}
+        http_send_supported: {type: boolean}
+        websocket_path: {type: string}
+        websocket_endpoint: {type: string}
+        websocket_auth:
+          type: object
+          required: [required, scheme, header]
+          properties:
+            required: {type: boolean}
+            scheme: {type: string, enum: [bearer]}
+            header: {type: string, enum: [Authorization]}
+            browser_native_supported: {type: boolean}
+        endpoints:
+          type: array
+          items: {type: string}
+        message_types:
+          type: array
+          items: {type: string}
+    CapabilitiesEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+      properties:
+        data: {$ref: '#/components/schemas/Capabilities'}

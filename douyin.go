@@ -27,8 +27,9 @@ type DouyinLive struct {
 	mu                     sync.Mutex
 	contextMu              sync.Mutex
 	contextPrepared        bool
-	isLiveClosed           bool
+	isLive                 bool
 	manualClose            bool
+	lifecycleState         listenerLifecycleState
 	consecutiveFailures    int
 	heartbeatStopCh        chan struct{}
 	heartbeatDoneCh        chan struct{}
@@ -82,6 +83,13 @@ func NewDouyinLiveWithTikHub(liveID string, logger Logger, cookie string, tikHub
 //   - cookie: 可选抖音 Cookie，用于登录态请求。 Optional Douyin Cookie for authenticated requests.
 //   - signer: WebSocket 签名实现。 WebSocket signature provider.
 func newDouyinLive(liveID string, baseLogger Logger, cookie string, signer websocketSigner) (*DouyinLive, error) {
+	liveID, err := ValidateLiveID(liveID)
+	if err != nil {
+		if closer, ok := signer.(websocketSignerCloser); ok {
+			closer.Close()
+		}
+		return nil, err
+	}
 	userAgent := newHTTPUserAgent()
 	profile := newSessionProfile(userAgent, signer, cookie)
 	cache, err := ristretto.NewCache(&ristretto.Config[string, string]{

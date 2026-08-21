@@ -10,6 +10,9 @@
 
 ```yaml
 port: "1088"
+websocket:
+  path: "/ws"
+  allowed_origins: []
 unknown: false
 log:
   level: "info"
@@ -17,10 +20,15 @@ sign:
   provider: ""
 tikhub:
   key: ""
+api:
+  key: ""
+  allowed_domains:
+    - "douyin.com"
 monitor:
   poll_interval: "15s"
   notify_interval: "30s"
 cookie:
+  use_stored: true
   douyin: ""
   rooms:
     # "516466932480": "ttwid=...; sessionid=..."
@@ -48,6 +56,25 @@ port: "1088"
 
 ```yaml
 unknown: false
+```
+
+### `websocket.path`
+
+本地 WebSocket 路由前缀，默认是 `/ws`。例如设置为 `/live-stream` 后，客户端使用 `/live-stream/{live_id}` 连接。不能与 `/health`、`/metrics` 或 `/api/*` 等保留 HTTP 路由冲突。
+
+```yaml
+websocket:
+  path: "/ws"
+```
+
+### `websocket.allowed_origins`
+
+可选的浏览器 `Origin` 白名单。留空时保持向后兼容并允许所有来源；配置后只允许精确匹配的 `http` 或 `https` Origin。
+
+```yaml
+websocket:
+  allowed_origins:
+    - "https://client.example.com"
 ```
 
 ### `log.level`
@@ -105,6 +132,27 @@ tikhub:
 APP_SIGN_PROVIDER=tikhub APP_TIKHUB_KEY=YOUR_TIKHUB_KEY ./douyinLive
 ```
 
+### `api.key`
+
+只读 HTTP API 和 WebSocket 握手共用的可选 Bearer Token。留空时不强制认证；配置后 `/api/v1/*`、`/metrics` 和 WebSocket 握手必须携带 `Authorization: Bearer <key>`。`/health` 始终无需认证，便于容器健康检查。
+
+```yaml
+api:
+  key: "YOUR_API_KEY"
+```
+
+也可以使用环境变量 `APP_API_KEY`。API Key 不支持放在 URL 查询参数中。
+
+### `api.allowed_domains`
+
+URL 解析接口允许的域名。程序只接受 `douyin.com` 主域名或其子域名，避免把该接口变成通用 URL 获取器。默认值：
+
+```yaml
+api:
+  allowed_domains:
+    - "douyin.com"
+```
+
 ### `monitor.poll_interval`
 未开播时，服务端检查“是否已经开播”的时间间隔。
 
@@ -141,6 +189,15 @@ cookie:
   douyin: "ttwid=...; sessionid=..."
 ```
 
+### `cookie.use_stored`
+
+是否使用 `cookie.douyin` 和 `cookie.rooms` 中的预存 Cookie，默认是 `true`。设置为 `false` 后，HTTP 查询和 WebSocket 房间都会忽略预存 Cookie，临时传入的连接 Cookie 仍然优先。
+
+```yaml
+cookie:
+  use_stored: true
+```
+
 ### `cookie.rooms`
 按直播间 ID 单独配置 Cookie，可选。
 
@@ -148,6 +205,7 @@ cookie:
 
 ```yaml
 cookie:
+  use_stored: true
   douyin: "默认 Cookie"
   rooms:
     "516466932480": "直播间 516466932480 专用 Cookie"
@@ -205,6 +263,11 @@ ws://127.0.0.1:1088/ws/直播间ID?cookie=URL_ENCODED_COOKIE
 | `log.level` | `APP_LOG_LEVEL` |
 | `sign.provider` | `APP_SIGN_PROVIDER` |
 | `tikhub.key` | `APP_TIKHUB_KEY` |
+| `api.key` | `APP_API_KEY` |
+| `api.allowed_domains` | `APP_API_ALLOWED_DOMAINS` |
+| `websocket.path` | `APP_WEBSOCKET_PATH` |
+| `websocket.allowed_origins` | `APP_WEBSOCKET_ALLOWED_ORIGINS` |
+| `cookie.use_stored` | `APP_COOKIE_USE_STORED` |
 | `cookie.douyin` | `APP_COOKIE_DOUYIN` |
 | `monitor.poll_interval` | `APP_MONITOR_POLL_INTERVAL` |
 | `monitor.notify_interval` | `APP_MONITOR_NOTIFY_INTERVAL` |

@@ -44,6 +44,18 @@ func (dl *DouyinLive) GetAvatarThumb() string {
 	return dl.roomInfoSnapshot().avatarThumb
 }
 
+// GetRoomID returns the verified long room ID when available.
+// GetRoomID 返回已确认的真实长房间 ID。
+func (dl *DouyinLive) GetRoomID() string {
+	return dl.roomInfoSnapshot().roomID
+}
+
+// GetUserUniqueID returns the anchor/user identifier used by Douyin APIs.
+// GetUserUniqueID 返回抖音接口使用的主播/用户唯一标识。
+func (dl *DouyinLive) GetUserUniqueID() string {
+	return dl.roomInfoSnapshot().pushID
+}
+
 // HasAnchorOnlyPageIdentity reports whether the page returned anchor identity without room identity.
 // HasAnchorOnlyPageIdentity 判断页面是否只返回主播信息而没有返回房间信息。
 func (dl *DouyinLive) HasAnchorOnlyPageIdentity() bool {
@@ -523,6 +535,28 @@ type livePageStateSnapshot struct {
 	statusKnown       bool
 }
 
+type livePageStateNotFoundError struct {
+	liveID          string
+	statusCode      int
+	bodyLength      int
+	hasUserUniqueID bool
+}
+
+// Error returns a structured diagnostic without exposing response content.
+// Error 返回不包含响应正文的结构化诊断文本。
+func (e *livePageStateNotFoundError) Error() string {
+	if e == nil {
+		return errLivePageStateNotFound.Error()
+	}
+	return fmt.Sprintf("%s live_id=%s status=%d body_len=%d has_user_unique_id=%t", errLivePageStateNotFound, e.liveID, e.statusCode, e.bodyLength, e.hasUserUniqueID)
+}
+
+// Unwrap exposes the stable sentinel used by errors.Is.
+// Unwrap 返回供 errors.Is 判断使用的稳定哨兵错误。
+func (e *livePageStateNotFoundError) Unwrap() error {
+	return errLivePageStateNotFound
+}
+
 func (s livePageStateSnapshot) hasRoomIdentity() bool {
 	return strings.TrimSpace(s.info.roomID) != ""
 }
@@ -676,13 +710,12 @@ func (dl *DouyinLive) fetchLivePageStateWithContext(ctx context.Context) error {
 	}
 	pageState := parseLivePageState(body)
 	if !pageState.hasKnownPageIdentity() {
-		return fmt.Errorf("%w live_id=%s status=%d body_len=%d has_user_unique_id=%t",
-			errLivePageStateNotFound,
-			dl.liveID,
-			resp.GetStatusCode(),
-			len(body),
-			pageState.userUniqueID != "",
-		)
+		return &livePageStateNotFoundError{
+			liveID:          dl.liveID,
+			statusCode:      resp.GetStatusCode(),
+			bodyLength:      len(body),
+			hasUserUniqueID: pageState.userUniqueID != "",
+		}
 	}
 	dl.updateRoomInfoFromLivePage(pageState.info)
 	if pageState.statusKnown {
@@ -944,13 +977,13 @@ func (dl *DouyinLive) roomNotFoundErrorAfterRoomEnter(err error, livePageErr err
 }
 
 func isDefinitiveRoomNotFoundPageError(err error) bool {
-	if !errors.Is(err, errLivePageStateNotFound) || err == nil {
+	var pageErr *livePageStateNotFoundError
+	if !errors.As(err, &pageErr) {
 		return false
 	}
 	// 只有明确的 404/410 页面才允许进入 ROOM_NOT_FOUND；
 	// status=200 的验证页、空壳页和暂时风控页都不能当作不存在。
-	message := err.Error()
-	return strings.Contains(message, "status=404") || strings.Contains(message, "status=410")
+	return pageErr.statusCode == 404 || pageErr.statusCode == 410
 }
 
 func (dl *DouyinLive) roomEnterFallbackBody(err error) (string, bool) {
@@ -1018,6 +1051,9 @@ func (dl *DouyinLive) fetchLiveStatusFromAPIWithContext(ctx context.Context) (bo
 	}
 	dl.contextMu.Lock()
 	defer dl.contextMu.Unlock()
+	if err := dl.ensureUsable(); err != nil {
+		return false, err
+	}
 
 	if err := dl.prepareRequestContextLocked(ctx); err != nil {
 		return false, err
@@ -1083,6 +1119,9 @@ func (dl *DouyinLive) fetchLiveStatusFromAPIWithContext(ctx context.Context) (bo
 // IsLive 检查直播间当前是否开播。
 // IsLive checks whether the live room is currently live.
 func (dl *DouyinLive) IsLive() (bool, error) {
+	if err := dl.ensureUsable(); err != nil {
+		return false, err
+	}
 	isLive, err := dl.refreshLiveStatusFromAPI()
 	if err != nil {
 		dl.clearLiveStatus()

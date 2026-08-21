@@ -99,7 +99,7 @@ func (dl *DouyinLive) dialWebSocketWithSignerFallback(dialer *websocket.Dialer, 
 			"live_id", roomInfo.liveID,
 			"room_id", roomInfo.roomID,
 			"native_status_code", nativeStatusCode,
-			"native_response_body", nativeResponseBody,
+			"native_response_body_len", len(nativeResponseBody),
 			"sign_implementation", websocketSignerImplementationName(dl.signer),
 			"err", nativeErr,
 		)...,
@@ -169,6 +169,7 @@ func (dl *DouyinLive) configureWebSocket(conn *websocket.Conn) {
 		return
 	}
 
+	conn.SetReadLimit(wsReadMaxPayloadSize)
 	_ = setWebSocketReadDeadline(conn)
 	conn.SetPongHandler(func(string) error {
 		return setWebSocketReadDeadline(conn)

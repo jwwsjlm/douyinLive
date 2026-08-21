@@ -459,7 +459,7 @@ func TestRoomEnterEmptyResponseDoesNotRetryWhenKnownOffline(t *testing.T) {
 func TestRoomEnterEmptyAfterHTTPNotFoundPageIsRoomNotFound(t *testing.T) {
 	dl := &DouyinLive{}
 	err := fmt.Errorf("%w status=200 content_type=%q content_length=0 raw_len=0", errRoomInfoEmpty, "application/json")
-	livePageErr := fmt.Errorf("%w live_id=%s status=404 body_len=128 has_user_unique_id=false", errLivePageStateNotFound, "9122185334341")
+	livePageErr := &livePageStateNotFoundError{liveID: "9122185334341", statusCode: 404, bodyLength: 128}
 
 	if got := dl.roomNotFoundErrorAfterRoomEnter(err, livePageErr); !errors.Is(got, ErrRoomNotFound) {
 		t.Fatalf("roomNotFoundErrorAfterRoomEnter() = %v, want ErrRoomNotFound", got)
@@ -469,7 +469,7 @@ func TestRoomEnterEmptyAfterHTTPNotFoundPageIsRoomNotFound(t *testing.T) {
 func TestRoomEnterEmptyAfterHTTP200ChallengeIsNotRoomNotFound(t *testing.T) {
 	dl := &DouyinLive{}
 	err := fmt.Errorf("%w status=200 content_type=%q content_length=0 raw_len=0", errRoomInfoEmpty, "application/json")
-	livePageErr := fmt.Errorf("%w live_id=%s status=200 body_len=6297 has_user_unique_id=false", errLivePageStateNotFound, "139819566957")
+	livePageErr := &livePageStateNotFoundError{liveID: "139819566957", statusCode: 200, bodyLength: 6297}
 
 	if got := dl.roomNotFoundErrorAfterRoomEnter(err, livePageErr); got != nil {
 		t.Fatalf("roomNotFoundErrorAfterRoomEnter() = %v, want nil for HTTP 200 challenge page", got)

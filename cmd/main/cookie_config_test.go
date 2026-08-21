@@ -2,12 +2,15 @@ package main
 
 import (
 	"encoding/base64"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	douyinLive "github.com/jwwsjlm/douyinLive/v2"
+	"github.com/lxzan/gws"
 )
 
 func TestRoomManagerCookieForRoomPriority(t *testing.T) {
@@ -23,6 +26,31 @@ func TestRoomManagerCookieForRoomPriority(t *testing.T) {
 	}
 	if got := rm.cookieForRoom("1002", ""); got != "global-cookie" {
 		t.Fatalf("missing room cookie should fallback to global cookie, got %q", got)
+	}
+}
+
+func TestRoomManagerCanDisableStoredCookies(t *testing.T) {
+	rm := NewRoomManager(nil, false, "global-cookie", map[string]string{
+		"1001": "room-cookie",
+	}, signProviderLocal, "", 0, 0, false)
+	if got := rm.cookieForRoom("1001", ""); got != "" {
+		t.Fatalf("stored cookies should be disabled, got %q", got)
+	}
+	if got := rm.cookieForRoom("1001", "override-cookie"); got != "override-cookie" {
+		t.Fatalf("explicit override should remain usable, got %q", got)
+	}
+}
+
+func TestRoomManagerWithOptionsCopiesCookieConfiguration(t *testing.T) {
+	useStored := true
+	cookies := map[string]string{"1001": "room-cookie"}
+	rm := NewRoomManagerWithOptions(RoomManagerOptions{
+		RoomCookies: cookies, Cookie: "global-cookie", SignProvider: signProviderLocal,
+		PollInterval: time.Second, NotifyInterval: time.Second, UseStoredCookie: &useStored,
+	})
+	cookies["1001"] = "mutated"
+	if got := rm.cookieForRoom("1001", ""); got != "room-cookie" {
+		t.Fatalf("RoomManagerOptions did not copy cookie map, got %q", got)
 	}
 }
 
@@ -46,6 +74,24 @@ func TestParseCookieOverride(t *testing.T) {
 	}
 	if got != cookie {
 		t.Fatalf("unexpected cookie: got %q want %q", got, cookie)
+	}
+}
+
+func TestParseCookieOverrideRejectsAmbiguousAndUnsafeValues(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/ws/1001?cookie=a&cookie_b64=Yg", nil)
+	if _, err := parseCookieOverride(req); err == nil {
+		t.Fatal("cookie and cookie_b64 should not be accepted together")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/ws/1001?cookie=ttwid%3Dabc%0D%0AX-Test%3A+bad", nil)
+	if _, err := parseCookieOverride(req); err == nil {
+		t.Fatal("control characters in cookie should be rejected")
+	}
+
+	longCookie := strings.Repeat("a", maxCookieOverrideBytes+1)
+	req = httptest.NewRequest(http.MethodGet, "/ws/1001?cookie="+url.QueryEscape(longCookie), nil)
+	if _, err := parseCookieOverride(req); err == nil {
+		t.Fatal("oversized cookie should be rejected")
 	}
 }
 
@@ -74,6 +120,38 @@ func TestRoomManagerSharesOnlyMatchingRoomProfiles(t *testing.T) {
 	}
 
 	rm.CloseAll()
+}
+
+func TestSnapshotRoomsAggregatesCookieSpecificSessionsByLiveID(t *testing.T) {
+	rm := NewRoomManager(nil, false, "", nil, signProviderLocal, "", time.Second, time.Second)
+	defer rm.Close()
+	first := rm.GetOrCreateRoom("1001", "cookie-a")
+	second := rm.GetOrCreateRoom("1001", "cookie-b")
+	if first == second {
+		t.Fatal("different cookies unexpectedly shared one internal room session")
+	}
+	first.clientsMu.Lock()
+	first.clients["a"] = NewClient("a", nil)
+	first.clientsMu.Unlock()
+	second.clientsMu.Lock()
+	second.clients["b"] = NewClient("b", nil)
+	second.clientsMu.Unlock()
+	first.mu.Lock()
+	first.knownValid = true
+	first.title = "标题"
+	first.mu.Unlock()
+	second.mu.Lock()
+	second.upstreamReady = true
+	second.mu.Unlock()
+
+	snapshots := rm.SnapshotRooms()
+	if len(snapshots) != 1 {
+		t.Fatalf("SnapshotRooms() count = %d, want one logical room: %+v", len(snapshots), snapshots)
+	}
+	snapshot := snapshots[0]
+	if snapshot.LiveID != "1001" || snapshot.Status != "online" || snapshot.ClientCount != 2 || !snapshot.UpstreamReady || snapshot.Title != "标题" {
+		t.Fatalf("aggregated snapshot = %+v", snapshot)
+	}
 }
 
 func TestRoomRemoveIfIdleRemovesRoomFromManager(t *testing.T) {
@@ -191,10 +269,10 @@ func TestRoomCloseAllClientsClosesEveryWaitingClient(t *testing.T) {
 	room := NewRoom("1001", nil, false, "", signProviderLocal, "", time.Second, time.Second, nil)
 	first := NewClient("client-1", nil)
 	second := NewClient("client-2", nil)
-	room.addClient(first)
-	room.addClient(second)
+	addTestClient(room, first)
+	addTestClient(room, second)
 
-	room.closeAllClients(roomInvalidMessage)
+	room.closeAllClients(invalidRoomClientClose)
 
 	if got := room.clientCount(); got != 0 {
 		t.Fatalf("client count after closeAllClients = %d, want 0", got)
@@ -315,8 +393,40 @@ func TestRoomCloseMessagesUseReadableChineseCodes(t *testing.T) {
 func TestClientCloseAllowsNilConn(t *testing.T) {
 	client := NewClient("client-1", nil)
 
-	client.close(nil)
-	client.close(nil)
+	client.close(normalClientClose)
+	client.close(normalClientClose)
+}
+
+func TestClientEnqueueRejectsMessagesAfterClose(t *testing.T) {
+	client := NewClient("client-1", nil)
+	client.close(normalClientClose)
+	if client.enqueue(gws.OpcodeText, []byte("late")) {
+		t.Fatal("enqueue unexpectedly accepted a message after close")
+	}
+}
+
+func TestClientEnqueueRejectsOversizedMessages(t *testing.T) {
+	client := NewClient("client-1", nil)
+	if got := client.enqueueWithResult(gws.OpcodeText, make([]byte, maxClientMessageBytes+1)); got != enqueueMessageTooLarge {
+		t.Fatalf("enqueue result = %v, want enqueueMessageTooLarge", got)
+	}
+	if client.enqueue(gws.OpcodeText, make([]byte, maxClientMessageBytes+1)) {
+		t.Fatal("oversized message was accepted")
+	}
+}
+
+func TestClientEnqueueBoundsQueuedBytes(t *testing.T) {
+	client := NewClient("client-1", nil)
+	payload := make([]byte, maxClientMessageBytes)
+	if got := client.enqueueWithResult(gws.OpcodeText, payload); got != enqueueAccepted {
+		t.Fatalf("first enqueue result = %v", got)
+	}
+	if got := client.enqueueWithResult(gws.OpcodeText, payload); got != enqueueAccepted {
+		t.Fatalf("second enqueue result = %v", got)
+	}
+	if got := client.enqueueWithResult(gws.OpcodeText, []byte("extra")); got != enqueueQueueBytesExceeded {
+		t.Fatalf("third enqueue result = %v, want enqueueQueueBytesExceeded", got)
+	}
 }
 
 func TestRoomManagerPassesSignConfigToRoom(t *testing.T) {

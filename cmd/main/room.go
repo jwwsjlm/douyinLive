@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jwwsjlm/douyinLive/v2"
+	"github.com/lxzan/gws"
 )
 
 var (
@@ -16,39 +19,131 @@ var (
 	liveStartFailedMessage   = []byte(`{"type":"system","event":"live_status","code":"ROOM_CHECK_FAILED","valid":false,"live":false,"status":"error","status_text":"直播间状态检查失败","message":"直播间状态检查失败，请稍后重试","suggestion":"请稍后重新连接；如果多次失败，请开启 debug 日志并检查 Cookie 是否过期"}`)
 	slowClientClosingMessage = []byte(`{"type":"system","event":"client_status","code":"CLIENT_TOO_SLOW","message":"客户端接收消息太慢，服务端已关闭连接","suggestion":"请检查客户端消费逻辑，避免长时间阻塞消息读取"}`)
 
-	errRoomInactive = errors.New("房间已关闭或无客户端")
+	errRoomInactive      = errors.New("房间已关闭或无客户端")
+	errRoomManagerClosed = errors.New("RoomManager 已关闭")
+)
+
+// roomCloseTimeout bounds how long Close waits for room-owned background tasks.
+// roomCloseTimeout 限制 Close 等待房间后台任务退出的最长时间。
+const roomCloseTimeout = 5 * time.Second
+
+const (
+	defaultRoomPollInterval   = 15 * time.Second
+	defaultRoomNotifyInterval = 30 * time.Second
 )
 
 // Room 表示一个直播间及其下游客户端、上游抖音监听和离线监控状态。
 // Room represents one live room with downstream clients, upstream Douyin listener, and offline monitor state.
 type Room struct {
-	id             string
-	logger         *appLogger
-	clients        map[string]*Client
-	clientsMu      sync.RWMutex
-	douyinLive     *douyinLive.DouyinLive
-	probeLive      *douyinLive.DouyinLive
-	probeFailures  int
-	mu             sync.Mutex
-	onClose        func()
-	unknown        bool
-	cookie         string
-	signProvider   string
-	tikHubKey      string
-	pollInterval   time.Duration
-	notifyInterval time.Duration
-	liveName       string
-	title          string
-	avatarThumb    string
-	accountOnly    bool
-	knownValid     bool
-	statusUnknown  bool
-	pendingClients int
-	starting       bool
-	closed         bool
-	upstreamReady  bool
-	monitorStopCh  chan struct{}
-	monitorDoneCh  chan struct{}
+	// Lock order: acquire mu before clientsMu when both are needed. Never
+	// acquire mu while holding clientsMu in a new code path.
+	// 锁顺序：同时需要两把锁时先获取 mu，再获取 clientsMu；新增代码禁止反向加锁。
+	id                   string
+	logger               *appLogger
+	clients              map[string]*Client
+	connIDs              map[*gws.Conn]string
+	clientsMu            sync.RWMutex
+	douyinLive           *douyinLive.DouyinLive
+	probeLive            *douyinLive.DouyinLive
+	probeFailures        int
+	mu                   sync.Mutex
+	onClose              func()
+	unknown              bool
+	cookie               string
+	signProvider         string
+	tikHubKey            string
+	pollInterval         time.Duration
+	notifyInterval       time.Duration
+	liveName             string
+	title                string
+	avatarThumb          string
+	accountOnly          bool
+	knownValid           bool
+	statusUnknown        bool
+	pendingClients       int
+	starting             bool
+	closed               bool
+	upstreamReady        bool
+	monitorStopCh        chan struct{}
+	monitorDoneCh        chan struct{}
+	monitorStopRequested bool
+	lifecycleCtx         context.Context
+	lifecycleCancel      context.CancelFunc
+	tasks                sync.WaitGroup
+	activeTasks          int
+	closeDone            chan struct{}
+	closeDoneOnce        sync.Once
+}
+
+// roomSnapshot is a read-only view exposed by the HTTP API.
+// roomSnapshot 是 HTTP API 使用的只读房间快照。
+type roomSnapshot struct {
+	LiveID        string
+	RoomID        string
+	Status        string
+	IsLive        *bool
+	HasRoom       *bool
+	AccountOnly   *bool
+	Title         string
+	ClientCount   int
+	UpstreamReady bool
+	StatusUnknown bool
+}
+
+// snapshot returns a consistent room state without exposing internal locks.
+// snapshot 返回一致的房间状态，不向 HTTP 层暴露内部锁。
+func (r *Room) snapshot() roomSnapshot {
+	r.mu.Lock()
+	d := r.douyinLive
+	probe := r.probeLive
+	status := "unknown"
+	var isLive *bool
+	var hasRoom *bool
+	var accountOnly *bool
+	if r.upstreamReady {
+		status = "online"
+		value := true
+		isLive = &value
+		hasRoom = &value
+		accountOnlyValue := false
+		accountOnly = &accountOnlyValue
+	} else if r.accountOnly {
+		status = "account_no_room"
+		live := false
+		has := false
+		accountOnlyValue := true
+		isLive, hasRoom, accountOnly = &live, &has, &accountOnlyValue
+	} else if r.statusUnknown {
+		status = "unknown"
+	} else if r.monitorStopCh != nil || r.knownValid {
+		status = "offline"
+		value := false
+		isLive = &value
+		has := true
+		hasRoom = &has
+		accountOnlyValue := false
+		accountOnly = &accountOnlyValue
+	}
+	title := r.title
+	knownValid := r.knownValid
+	upstreamReady := r.upstreamReady
+	statusUnknown := r.statusUnknown
+	r.mu.Unlock()
+	if d == nil {
+		d = probe
+	}
+	roomID := ""
+	if d != nil {
+		roomID = d.GetRoomID()
+		if title == "" {
+			title = d.GetTitle()
+		}
+	}
+	if !knownValid && !upstreamReady && !statusUnknown {
+		status = "unknown"
+		isLive = nil
+	}
+	return roomSnapshot{LiveID: r.id, RoomID: roomID, Status: status, IsLive: isLive, HasRoom: hasRoom, AccountOnly: accountOnly, Title: title, ClientCount: r.clientCount(), UpstreamReady: upstreamReady, StatusUnknown: statusUnknown}
 }
 
 // setStatusUnknown 记录监控阶段当前是否只能得到“状态未知”。
@@ -112,18 +207,62 @@ func NewRoom(id string, logger *appLogger, unknown bool, cookie string, signProv
 	if err != nil {
 		normalizedProvider = signProviderLocal
 	}
-	return &Room{
-		id:             id,
-		logger:         logger,
-		clients:        make(map[string]*Client),
-		onClose:        onClose,
-		unknown:        unknown,
-		cookie:         cookie,
-		signProvider:   normalizedProvider,
-		tikHubKey:      strings.TrimSpace(tikHubKey),
-		pollInterval:   pollInterval,
-		notifyInterval: notifyInterval,
+	if pollInterval <= 0 {
+		pollInterval = defaultRoomPollInterval
 	}
+	if notifyInterval <= 0 {
+		notifyInterval = defaultRoomNotifyInterval
+	}
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	return &Room{
+		id:              id,
+		logger:          logger,
+		clients:         make(map[string]*Client),
+		connIDs:         make(map[*gws.Conn]string),
+		onClose:         onClose,
+		unknown:         unknown,
+		cookie:          cookie,
+		signProvider:    normalizedProvider,
+		tikHubKey:       strings.TrimSpace(tikHubKey),
+		pollInterval:    pollInterval,
+		notifyInterval:  notifyInterval,
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
+		closeDone:       make(chan struct{}),
+	}
+}
+
+// startTask starts a room-owned background task unless the room is already closed.
+// startTask 在房间关闭前启动一个由房间管理的后台任务；关闭后拒绝新任务。
+func (r *Room) startTask(task func()) bool {
+	if r == nil || task == nil {
+		return false
+	}
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return false
+	}
+	r.tasks.Add(1)
+	r.activeTasks++
+	r.mu.Unlock()
+	go func() {
+		defer func() {
+			r.tasks.Done()
+			r.mu.Lock()
+			if r.activeTasks > 0 {
+				r.activeTasks--
+			}
+			r.mu.Unlock()
+			r.removeIfIdle()
+		}()
+		task()
+	}()
+	return true
+}
+
+func newClientID() string {
+	return uuid.NewString()
 }
 
 // isClosed 判断房间是否已关闭。
@@ -184,15 +323,30 @@ func (r *Room) removeIfIdle() {
 	r.clientsMu.RLock()
 	clientCount := len(r.clients)
 	r.clientsMu.RUnlock()
-	idle := !r.closed && clientCount == 0 && r.pendingClients == 0 && r.douyinLive == nil && r.probeLive == nil && r.monitorStopCh == nil && !r.starting
+	idle := !r.closed && clientCount == 0 && r.pendingClients == 0 && r.douyinLive == nil && r.probeLive == nil && r.monitorStopCh == nil && !r.starting && r.activeTasks == 0
 	if idle {
 		r.closed = true
+		if r.lifecycleCancel != nil {
+			r.lifecycleCancel()
+		}
 	}
 	r.mu.Unlock()
 
 	if idle && r.onClose != nil {
 		r.onClose()
 	}
+	if idle {
+		r.finishClose()
+	}
+}
+
+// finishClose signals that all synchronous room-close bookkeeping has completed.
+// finishClose 标记房间关闭同步清理已经完成。
+func (r *Room) finishClose() {
+	if r == nil || r.closeDone == nil {
+		return
+	}
+	r.closeDoneOnce.Do(func() { close(r.closeDone) })
 }
 
 // Close 关闭房间、停止后台任务并释放上游监听资源。
@@ -201,9 +355,19 @@ func (r *Room) Close() {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
+		if r.closeDone != nil {
+			select {
+			case <-r.closeDone:
+			case <-time.After(roomCloseTimeout):
+				r.logger.Warn("等待房间关闭完成超时", "room_id", r.id, "active_tasks", r.activeTaskCount())
+			}
+		}
 		return
 	}
 	r.closed = true
+	if r.lifecycleCancel != nil {
+		r.lifecycleCancel()
+	}
 	d := r.douyinLive
 	probe := r.probeLive
 	r.douyinLive = nil
@@ -214,7 +378,7 @@ func (r *Room) Close() {
 
 	r.stopMonitorLoop()
 
-	r.closeAllClients(serviceClosingMessage)
+	r.closeAllClients(serviceClientClose)
 	r.logger.Info("房间所有客户端连接已关闭", "room_id", r.id)
 
 	if d != nil {
@@ -229,4 +393,24 @@ func (r *Room) Close() {
 	if onClose != nil {
 		onClose()
 	}
+	waitDone := make(chan struct{})
+	go func() {
+		r.tasks.Wait()
+		close(waitDone)
+	}()
+	select {
+	case <-waitDone:
+	case <-time.After(roomCloseTimeout):
+		r.logger.Warn("等待房间后台任务退出超时", "room_id", r.id, "active_tasks", r.activeTaskCount(), "clients", r.clientCount())
+	}
+	r.finishClose()
+}
+
+func (r *Room) activeTaskCount() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.activeTasks
 }

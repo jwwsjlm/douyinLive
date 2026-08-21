@@ -3,18 +3,22 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	douyinLive "github.com/jwwsjlm/douyinLive/v2"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
-// showVersion 标记是否只输出版本信息后退出。
-// showVersion marks whether the process should print version information and exit.
-var showVersion bool
+// ErrVersionRequested tells the CLI layer that only version output was requested.
+// ErrVersionRequested 表示调用者只请求输出版本信息。
+var ErrVersionRequested = errors.New("version requested")
 
 // validLogLevels 保存配置允许的日志级别。
 // validLogLevels stores the log levels accepted by configuration.
@@ -37,8 +41,9 @@ const (
 // CookieConfig 保存默认 Cookie 和按房间覆盖的 Cookie。
 // CookieConfig stores the default cookie and per-room cookie overrides.
 type CookieConfig struct {
-	Douyin string            // 抖音默认 Cookie。 Default Douyin Cookie.
-	Rooms  map[string]string // 按直播间 ID 配置的 Cookie。 Per-room Cookie overrides keyed by room ID.
+	UseStored bool              // 是否使用配置文件中的预存 Cookie。 Whether to use preconfigured cookies.
+	Douyin    string            // 抖音默认 Cookie。 Default Douyin Cookie.
+	Rooms     map[string]string // 按直播间 ID 配置的 Cookie。 Per-room Cookie overrides keyed by room ID.
 }
 
 // MonitorConfig 保存未开播轮询和通知间隔配置。
@@ -64,16 +69,136 @@ type TikHubConfig struct {
 	Key string
 }
 
+// APIConfig stores optional read-only HTTP API authentication settings.
+// APIConfig 保存可选的只读 HTTP API 认证配置。
+type APIConfig struct {
+	Key            string
+	AllowedDomains []string
+}
+
+// WebSocketConfig stores the configurable local WebSocket route.
+// WebSocketConfig 保存可自定义的本地 WebSocket 路由。
+type WebSocketConfig struct {
+	Path           string
+	AllowedOrigins []string
+}
+
+// configFileSchema is used only for strict YAML key validation. Runtime value
+// precedence remains owned by Viper so existing flag and environment behavior
+// is preserved.
+// configFileSchema 仅用于严格校验 YAML 字段；运行时优先级仍由 Viper 处理，
+// 因此不会改变已有的命令行和环境变量覆盖规则。
+type configFileSchema struct {
+	Port      string                    `yaml:"port"`
+	Unknown   bool                      `yaml:"unknown"`
+	Log       configFileLogSchema       `yaml:"log"`
+	Sign      configFileSignSchema      `yaml:"sign"`
+	TikHub    configFileTikHubSchema    `yaml:"tikhub"`
+	API       configFileAPISchema       `yaml:"api"`
+	WebSocket configFileWebSocketSchema `yaml:"websocket"`
+	Monitor   configFileMonitorSchema   `yaml:"monitor"`
+	Cookie    configFileCookieSchema    `yaml:"cookie"`
+}
+
+type configFileLogSchema struct {
+	Level string `yaml:"level"`
+}
+
+type configFileSignSchema struct {
+	Provider string `yaml:"provider"`
+}
+
+type configFileTikHubSchema struct {
+	Key string `yaml:"key"`
+}
+
+type configFileAPISchema struct {
+	Key            string   `yaml:"key"`
+	AllowedDomains []string `yaml:"allowed_domains"`
+}
+
+type configFileWebSocketSchema struct {
+	Path           string   `yaml:"path"`
+	AllowedOrigins []string `yaml:"allowed_origins"`
+}
+
+type configFileMonitorSchema struct {
+	PollInterval   string `yaml:"poll_interval"`
+	NotifyInterval string `yaml:"notify_interval"`
+}
+
+type configFileCookieSchema struct {
+	UseStored bool              `yaml:"use_stored"`
+	Douyin    string            `yaml:"douyin"`
+	Rooms     map[string]string `yaml:"rooms"`
+}
+
+func validateConfigFileSchema(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	decoder := yaml.NewDecoder(file)
+	decoder.KnownFields(true)
+	var schema configFileSchema
+	if err := decoder.Decode(&schema); err != nil {
+		return err
+	}
+	var extra interface{}
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("配置文件只能包含一个 YAML 文档")
+		}
+		return err
+	}
+	return nil
+}
+
+// normalizeAllowedOrigins normalizes optional browser Origin allowlist entries.
+// normalizeAllowedOrigins 规范化可选的浏览器 Origin 白名单。
+func normalizeAllowedOrigins(values []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for index, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if value == "*" {
+			return nil, fmt.Errorf("websocket.allowed_origins[%d] 不支持通配符 *；留空表示允许所有来源", index)
+		}
+		u, err := url.Parse(value)
+		if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+			return nil, fmt.Errorf("websocket.allowed_origins[%d] 配置无效: %q", index, raw)
+		}
+		scheme := strings.ToLower(u.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return nil, fmt.Errorf("websocket.allowed_origins[%d] 仅支持 http/https Origin: %q", index, raw)
+		}
+		origin := scheme + "://" + strings.ToLower(u.Host)
+		if _, ok := seen[origin]; ok {
+			continue
+		}
+		seen[origin] = struct{}{}
+		result = append(result, origin)
+	}
+	return result, nil
+}
+
 // Config 保存应用运行所需的全部配置。
 // Config stores all runtime configuration for the application.
 type Config struct {
-	Port    string
-	Unknown bool
-	Cookie  CookieConfig
-	Monitor MonitorConfig
-	Log     LogConfig
-	Sign    SignConfig
-	TikHub  TikHubConfig
+	Port      string
+	Unknown   bool
+	Cookie    CookieConfig
+	Monitor   MonitorConfig
+	Log       LogConfig
+	Sign      SignConfig
+	TikHub    TikHubConfig
+	API       APIConfig
+	WebSocket WebSocketConfig
 }
 
 // firstNonEmpty 返回第一个去空白后非空的字符串。
@@ -87,6 +212,57 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// normalizeAllowedDomains normalizes configured URL host suffixes.
+// normalizeAllowedDomains 规范化 URL 域名白名单。
+func normalizeAllowedDomains(values []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for index, value := range values {
+		domain := strings.ToLower(strings.TrimSpace(value))
+		domain = strings.TrimPrefix(domain, ".")
+		domain = strings.TrimSuffix(domain, ".")
+		if domain == "" {
+			continue
+		}
+		if strings.ContainsAny(domain, "/?#\\\\@ :\t\r\n") || strings.Contains(domain, "..") {
+			return nil, fmt.Errorf("api.allowed_domains[%d] 配置无效: %q", index, value)
+		}
+		if domain != "douyin.com" && !strings.HasSuffix(domain, ".douyin.com") {
+			return nil, fmt.Errorf("api.allowed_domains[%d] 只允许 douyin.com 及其子域名: %q", index, value)
+		}
+		if _, ok := seen[domain]; ok {
+			continue
+		}
+		seen[domain] = struct{}{}
+		result = append(result, domain)
+	}
+	if len(result) == 0 {
+		return []string{"douyin.com"}, nil
+	}
+	return result, nil
+}
+
+func normalizeWebSocketPath(value string) (string, error) {
+	path := strings.TrimSpace(value)
+	if path == "" {
+		path = "/ws"
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	path = strings.TrimRight(path, "/")
+	if path == "" {
+		return "", errors.New("websocket.path 不能为根路径")
+	}
+	if strings.ContainsAny(path, "?#\\\t\r\n ") || strings.Contains(path, "//") || strings.Contains(path, "..") {
+		return "", fmt.Errorf("websocket.path 配置无效: %q", value)
+	}
+	if path == "/health" || path == "/metrics" || path == "/api" || strings.HasPrefix(path, "/api/") {
+		return "", fmt.Errorf("websocket.path 与保留 HTTP 路由冲突: %q", path)
+	}
+	return path, nil
 }
 
 // normalizeSignProvider 规范化签名来源配置并校验合法性。
@@ -112,81 +288,75 @@ func normalizeSignProvider(provider string) (string, error) {
 // NewConfig 读取命令行、环境变量和配置文件并生成应用配置。
 // NewConfig reads flags, environment variables, and config files into application configuration.
 func NewConfig() (*Config, error) {
-	// 绑定命令行参数。
-	// Bind command-line flags.
-	pflag.String("port", "1088", "WebSocket 服务端口")
-	pflag.Bool("unknown", false, "是否输出未知源的 pb 消息")
-	pflag.String("log-level", "info", "日志级别: debug, info, warn, error")
-	pflag.String("sign-provider", defaultSignProvider, "WebSocket 签名来源: local, tikhub")
-	pflag.String("tikhub-key", "", "TikHub API Key，用于在线生成 WebSocket xb 签名")
-	configFile := pflag.String("config", "", "指定配置文件路径")
-	pflag.BoolVar(&showVersion, "version", false, "输出版本信息")
-	pflag.Parse()
-	if showVersion {
-		fmt.Println(VersionString())
-		os.Exit(0)
+	// Use per-call flag and Viper instances so tests and embedders can load
+	// configuration repeatedly without mutating process-global state.
+	flags := pflag.NewFlagSet("douyinLive", pflag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	portFlag := flags.String("port", "1088", "WebSocket 服务端口")
+	flags.Bool("unknown", false, "是否输出未知源的 pb 消息")
+	logLevelFlag := flags.String("log-level", "info", "日志级别: debug, info, warn, error")
+	signProviderFlag := flags.String("sign-provider", defaultSignProvider, "WebSocket 签名来源: local, tikhub")
+	tikHubKeyFlag := flags.String("tikhub-key", "", "TikHub API Key，用于在线生成 WebSocket 签名")
+	configFileFlag := flags.String("config", "", "指定配置文件路径")
+	versionFlag := flags.Bool("version", false, "输出版本信息")
+	if err := flags.Parse(os.Args[1:]); err != nil {
+		return nil, err
+	}
+	if *versionFlag {
+		return nil, ErrVersionRequested
 	}
 
-	// 绑定到 viper。
-	// Bind flags to viper.
-	if err := viper.BindPFlags(pflag.CommandLine); err != nil {
+	v := viper.New()
+	if err := v.BindPFlags(flags); err != nil {
 		return nil, err
 	}
 
-	// 配置文件设置。
-	// Configure config file lookup.
-	if *configFile != "" {
-		viper.SetConfigFile(*configFile)
+	if *configFileFlag != "" {
+		v.SetConfigFile(*configFileFlag)
 	} else {
-		viper.SetConfigName("config")
-		viper.SetConfigType("yaml")
-
-		// 优先从可执行文件所在目录读取配置，避免双击启动时找不到 config.yaml。
-		// Prefer the executable directory so double-click startup can find config.yaml.
-		exePath, err := os.Executable()
-		if err == nil {
-			exeDir := filepath.Dir(exePath)
-			viper.AddConfigPath(exeDir)
+		v.SetConfigName("config")
+		v.SetConfigType("yaml")
+		if exePath, err := os.Executable(); err == nil {
+			v.AddConfigPath(filepath.Dir(exePath))
 		}
-
-		viper.AddConfigPath(".")
-		viper.AddConfigPath("$HOME/.app")
-		viper.AddConfigPath("/etc/app/")
+		v.AddConfigPath(".")
+		v.AddConfigPath("$HOME/.app")
+		v.AddConfigPath("/etc/app/")
 	}
 
-	// 环境变量支持。
-	// Enable environment variable support.
-	viper.SetEnvPrefix("APP")
-	viper.AutomaticEnv()
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
+	v.SetEnvPrefix("APP")
+	v.AutomaticEnv()
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
+	v.SetDefault("port", "1088")
+	v.SetDefault("unknown", false)
+	v.SetDefault("cookie.douyin", "")
+	v.SetDefault("cookie.rooms", map[string]string{})
+	v.SetDefault("cookie.use_stored", true)
+	v.SetDefault("monitor.poll_interval", "15s")
+	v.SetDefault("monitor.notify_interval", "30s")
+	v.SetDefault("log.level", "info")
+	v.SetDefault("sign.provider", defaultSignProvider)
+	v.SetDefault("tikhub.key", "")
+	v.SetDefault("api.key", "")
+	v.SetDefault("api.allowed_domains", []string{"douyin.com"})
+	v.SetDefault("websocket.path", "/ws")
+	v.SetDefault("websocket.allowed_origins", []string{})
 
-	// 设置默认值。
-	// Set defaults.
-	viper.SetDefault("port", "1088")
-	viper.SetDefault("unknown", false)
-	viper.SetDefault("cookie.douyin", "")
-	viper.SetDefault("cookie.rooms", map[string]string{})
-	viper.SetDefault("monitor.poll_interval", "15s")
-	viper.SetDefault("monitor.notify_interval", "30s")
-	viper.SetDefault("log.level", "info")
-	viper.SetDefault("sign.provider", defaultSignProvider)
-	viper.SetDefault("tikhub.key", "")
-	// 读取配置。
-	// Read configuration.
-	if err := viper.ReadInConfig(); err != nil {
+	if err := v.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
 		if !errors.As(err, &configFileNotFoundError) {
 			return nil, fmt.Errorf("读取配置文件失败：%w", err)
 		}
-		// 配置文件不存在时给出提示。
-		// Print a hint when the config file does not exist.
 		fmt.Println("⚠️  配置文件未找到，使用默认值或命令行参数")
 		fmt.Println("💡 建议在同目录下创建 config.yaml 文件")
 	} else {
-		fmt.Printf("✅ 使用配置文件：%s\n", viper.ConfigFileUsed())
+		if err := validateConfigFileSchema(v.ConfigFileUsed()); err != nil {
+			return nil, fmt.Errorf("配置文件字段校验失败：%w", err)
+		}
+		fmt.Printf("✅ 使用配置文件：%s\n", v.ConfigFileUsed())
 	}
 
-	pollInterval, err := time.ParseDuration(viper.GetString("monitor.poll_interval"))
+	pollInterval, err := time.ParseDuration(v.GetString("monitor.poll_interval"))
 	if err != nil {
 		return nil, fmt.Errorf("monitor.poll_interval 配置无效：%w", err)
 	}
@@ -194,7 +364,7 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("monitor.poll_interval 必须大于 0")
 	}
 
-	notifyInterval, err := time.ParseDuration(viper.GetString("monitor.notify_interval"))
+	notifyInterval, err := time.ParseDuration(v.GetString("monitor.notify_interval"))
 	if err != nil {
 		return nil, fmt.Errorf("monitor.notify_interval 配置无效：%w", err)
 	}
@@ -202,46 +372,79 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("monitor.notify_interval 必须大于 0")
 	}
 
-	logLevel := viper.GetString("log.level")
-	if flag := pflag.Lookup("log-level"); flag != nil && flag.Changed {
-		logLevel = flag.Value.String()
+	logLevel := v.GetString("log.level")
+	if flags.Changed("log-level") {
+		logLevel = *logLevelFlag
 	}
 	logLevel = strings.ToLower(firstNonEmpty(logLevel, "info"))
 	if _, ok := validLogLevels[logLevel]; !ok {
 		return nil, fmt.Errorf("log.level 配置无效: %s", logLevel)
 	}
 
-	signProvider := viper.GetString("sign.provider")
-	if flag := pflag.Lookup("sign-provider"); flag != nil && flag.Changed {
-		signProvider = flag.Value.String()
+	signProvider := v.GetString("sign.provider")
+	if flags.Changed("sign-provider") {
+		signProvider = *signProviderFlag
 	}
 	signProvider, err = normalizeSignProvider(signProvider)
 	if err != nil {
 		return nil, err
 	}
 
-	tikHubKey := viper.GetString("tikhub.key")
-	if flag := pflag.Lookup("tikhub-key"); flag != nil && flag.Changed {
-		tikHubKey = flag.Value.String()
+	tikHubKey := v.GetString("tikhub.key")
+	if flags.Changed("tikhub-key") {
+		tikHubKey = *tikHubKeyFlag
 	}
 	tikHubKey = strings.TrimSpace(tikHubKey)
 	if signProvider == signProviderTikHub && tikHubKey == "" {
 		return nil, errors.New("sign.provider=tikhub 时必须配置 tikhub.key、APP_TIKHUB_KEY 或 --tikhub-key")
 	}
 
-	port := viper.GetString("port")
+	port := v.GetString("port")
+	if flags.Changed("port") {
+		port = *portFlag
+	}
 	if _, err := parseConfiguredPort(port); err != nil {
 		return nil, err
+	}
+	websocketPath, err := normalizeWebSocketPath(v.GetString("websocket.path"))
+	if err != nil {
+		return nil, err
+	}
+	allowedOrigins, err := normalizeAllowedOrigins(v.GetStringSlice("websocket.allowed_origins"))
+	if err != nil {
+		return nil, err
+	}
+	allowedDomains, err := normalizeAllowedDomains(v.GetStringSlice("api.allowed_domains"))
+	if err != nil {
+		return nil, err
+	}
+	douyinCookie := strings.TrimSpace(v.GetString("cookie.douyin"))
+	if err := validateCookieOverride(douyinCookie); err != nil {
+		return nil, fmt.Errorf("cookie.douyin 配置无效: %w", err)
+	}
+	roomCookies := v.GetStringMapString("cookie.rooms")
+	normalizedRoomCookies := make(map[string]string, len(roomCookies))
+	for roomID, rawCookie := range roomCookies {
+		roomID = strings.TrimSpace(roomID)
+		if _, err := douyinLive.ValidateLiveID(roomID); err != nil {
+			return nil, fmt.Errorf("cookie.rooms 中包含无效直播间标识: %q", roomID)
+		}
+		cookie := strings.TrimSpace(rawCookie)
+		if err := validateCookieOverride(cookie); err != nil {
+			return nil, fmt.Errorf("cookie.rooms[%q] 配置无效: %w", roomID, err)
+		}
+		normalizedRoomCookies[roomID] = cookie
 	}
 
 	// 填充 Config 结构体。
 	// Populate the Config struct.
 	cfg := &Config{
 		Port:    port,
-		Unknown: viper.GetBool("unknown"),
+		Unknown: v.GetBool("unknown"),
 		Cookie: CookieConfig{
-			Douyin: viper.GetString("cookie.douyin"),
-			Rooms:  viper.GetStringMapString("cookie.rooms"),
+			UseStored: v.GetBool("cookie.use_stored"),
+			Douyin:    douyinCookie,
+			Rooms:     normalizedRoomCookies,
 		},
 		Monitor: MonitorConfig{
 			PollInterval:   pollInterval,
@@ -256,6 +459,11 @@ func NewConfig() (*Config, error) {
 		TikHub: TikHubConfig{
 			Key: tikHubKey,
 		},
+		API: APIConfig{
+			Key:            strings.TrimSpace(v.GetString("api.key")),
+			AllowedDomains: allowedDomains,
+		},
+		WebSocket: WebSocketConfig{Path: websocketPath, AllowedOrigins: allowedOrigins},
 	}
 
 	return cfg, nil

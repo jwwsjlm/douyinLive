@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jwwsjlm/douyinLive/v2"
 	"github.com/jwwsjlm/douyinlive-proto/generated"
@@ -179,7 +180,10 @@ func (r *Room) startLiveSession() error {
 	}
 	r.mu.Unlock()
 
-	go r.runLiveSession(d)
+	if !r.startTask(func() { r.runLiveSession(d) }) {
+		r.disposePendingLive(d)
+		return errRoomInactive
+	}
 	r.logger.Info("抖音直播监听后台任务已启动，等待上游 WebSocket 握手", "room_id", r.id)
 	return nil
 }
@@ -233,30 +237,38 @@ func (r *Room) disposePendingLive(d *douyinLive.DouyinLive) {
 func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 	readyCh := d.Ready()
 	startErrCh := make(chan error, 1)
-	go func() {
+	if !r.startTask(func() {
 		startErrCh <- d.Start()
-	}()
+	}) {
+		d.Dispose()
+		return
+	}
 
 	connected := false
+	startFinished := false
+	var startErr error
 	select {
 	case <-readyCh:
 		connected = r.markUpstreamReady(d)
-	case err := <-startErrCh:
-		if err != nil {
-			r.logger.Warn("直播监听运行结束", "room_id", r.id, "err", err)
+		if !connected {
+			d.Close()
 		}
+	case startErr = <-startErrCh:
+		startFinished = true
 	}
 
-	var startErr error
-	if connected {
+	if !startFinished && connected {
 		startErr = <-startErrCh
-	} else {
+		startFinished = true
+	} else if !startFinished {
 		select {
 		case startErr = <-startErrCh:
-		default:
+			startFinished = true
+		case <-time.After(roomCloseTimeout):
+			r.logger.Warn("等待已取消的直播监听退出超时", "room_id", r.id)
 		}
 	}
-	if startErr != nil {
+	if startFinished && startErr != nil {
 		r.logger.Warn("直播监听运行结束", "room_id", r.id, "err", startErr)
 	}
 

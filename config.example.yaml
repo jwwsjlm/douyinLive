@@ -4,6 +4,12 @@
 # WebSocket 服务端口
 port: "1088"
 
+# 本地 WebSocket 路由，默认 /ws；例如可改为 /live-stream
+websocket:
+  path: "/ws"
+  # 可选浏览器 Origin 白名单；留空表示兼容所有客户端来源
+  allowed_origins: []
+
 # 是否输出未知消息类型（调试用）
 unknown: false
 
@@ -22,6 +28,14 @@ tikhub:
   # 当 sign.provider 为 tikhub 时必填，也可用 APP_TIKHUB_KEY 或 --tikhub-key 覆盖
   key: ""
 
+# 只读 HTTP API 配置（可选）
+api:
+  # 配置后，/api/v1/* 必须使用 Authorization: Bearer <key>
+  key: ""
+  # URL 解析允许的抖音域名；只能填写 douyin.com 或其子域名
+  allowed_domains:
+    - "douyin.com"
+
 # 未开播监控配置
 monitor:
   # 检查是否开播的时间间隔
@@ -31,6 +45,8 @@ monitor:
 
 # Cookie 配置（可选，不配置则自动获取）
 cookie:
+  # 是否使用下面配置的预存 Cookie；默认 true。设为 false 时忽略 cookie.douyin 和 cookie.rooms，使用匿名会话
+  use_stored: true
   # 默认 Cookie：没有单独配置房间 Cookie 时，会回退使用它
   douyin: ""
   # 按直播间 ID 单独配置 Cookie

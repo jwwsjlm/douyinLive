@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,6 +27,13 @@ const (
 	// httpMaxHeaderBytes 限制 HTTP 请求头最大字节数。
 	// httpMaxHeaderBytes limits the maximum HTTP request header size.
 	httpMaxHeaderBytes = 16 << 10
+	// downstreamReadMaxPayloadSize limits client messages because the local
+	// WebSocket protocol only accepts the small text heartbeat "ping".
+	// downstreamReadMaxPayloadSize 限制下游客户端消息；本地协议只接受很小的文本心跳 "ping"。
+	downstreamReadMaxPayloadSize = 4 << 10
+	// downstreamHandshakeTimeout bounds the local WebSocket upgrade handshake.
+	// downstreamHandshakeTimeout 限制本地 WebSocket 升级握手耗时。
+	downstreamHandshakeTimeout = 5 * time.Second
 	// maxAutomaticPortAttempts 限制端口占用时自动顺延的次数，避免配置错误导致无限循环。
 	// maxAutomaticPortAttempts bounds automatic port fallback to prevent endless loops.
 	maxAutomaticPortAttempts = 100
@@ -35,13 +44,16 @@ type tcpListenFunc func(network, address string) (net.Listener, error)
 // App 封装 HTTP 服务、房间管理器和运行配置。
 // App bundles the HTTP server, room manager, and runtime configuration.
 type App struct {
-	ctx         context.Context
-	logger      *appLogger
-	config      *Config
-	roomManager *RoomManager
-	httpServer  *http.Server
-	runningPort string
-	ready       chan struct{}
+	ctx          context.Context
+	logger       *appLogger
+	config       *Config
+	roomManager  *RoomManager
+	httpServer   *http.Server
+	runningPort  string
+	ready        chan struct{}
+	metrics      *apiMetrics
+	shutdownOnce sync.Once
+	shutdownErr  error
 }
 
 // NewApp 创建应用实例并初始化房间管理器。
@@ -54,26 +66,55 @@ func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error
 	if config == nil {
 		return nil, errors.New("config 不能为空")
 	}
+	// Keep the caller-owned configuration immutable after application creation.
+	// 应用创建后不再修改调用方持有的配置对象，避免共享配置产生数据竞争。
+	configCopy := *config
+	if config.Cookie.Rooms != nil {
+		configCopy.Cookie.Rooms = make(map[string]string, len(config.Cookie.Rooms))
+		for roomID, cookie := range config.Cookie.Rooms {
+			configCopy.Cookie.Rooms[roomID] = cookie
+		}
+	}
+	configCopy.WebSocket.AllowedOrigins = append([]string(nil), config.WebSocket.AllowedOrigins...)
+	configCopy.API.AllowedDomains = append([]string(nil), config.API.AllowedDomains...)
+	config = &configCopy
+	websocketPath, err := normalizeWebSocketPath(config.WebSocket.Path)
+	if err != nil {
+		return nil, err
+	}
+	allowedOrigins, err := normalizeAllowedOrigins(config.WebSocket.AllowedOrigins)
+	if err != nil {
+		return nil, err
+	}
+	allowedDomains, err := normalizeAllowedDomains(config.API.AllowedDomains)
+	if err != nil {
+		return nil, err
+	}
+	config.WebSocket.Path = websocketPath
+	config.WebSocket.AllowedOrigins = allowedOrigins
+	config.API.AllowedDomains = allowedDomains
 	if logger == nil {
 		logger = newAppLogger(nil)
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	roomManager := NewRoomManager(
-		logger,
-		config.Unknown,
-		config.Cookie.Douyin,
-		config.Cookie.Rooms,
-		config.Sign.Provider,
-		config.TikHub.Key,
-		config.Monitor.PollInterval,
-		config.Monitor.NotifyInterval,
-	)
+	roomManager := NewRoomManagerWithOptions(RoomManagerOptions{
+		Logger: logger, Unknown: config.Unknown, Cookie: config.Cookie.Douyin,
+		RoomCookies: config.Cookie.Rooms, SignProvider: config.Sign.Provider,
+		TikHubKey: config.TikHub.Key, PollInterval: config.Monitor.PollInterval,
+		NotifyInterval: config.Monitor.NotifyInterval, UseStoredCookie: boolPtr(config.Cookie.UseStored),
+	})
+	metrics := newAPIMetrics()
+	roomManager.metrics = metrics
 	return &App{
 		ctx:         ctx,
 		logger:      logger,
 		config:      config,
 		roomManager: roomManager,
 		ready:       make(chan struct{}),
+		metrics:     metrics,
 	}, nil
 }
 
@@ -81,7 +122,8 @@ func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error
 // Run starts the WebSocket HTTP server and tries the next port when the configured one is busy.
 func (a *App) Run() error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws/", a.handleWebSocket)
+	mux.HandleFunc(a.websocketRoutePrefix(), a.handleWebSocket)
+	a.registerHTTPAPI(mux)
 
 	port, err := parseConfiguredPort(a.config.Port)
 	if err != nil {
@@ -95,10 +137,28 @@ func (a *App) Run() error {
 	addr := ":" + strconv.Itoa(selectedPort)
 	a.httpServer = newHTTPServer(addr, mux)
 	a.runningPort = strconv.Itoa(selectedPort)
+	serverDone := make(chan struct{})
+	defer close(serverDone)
+	if a.ctx != nil && a.ctx.Done() != nil {
+		go func() {
+			select {
+			case <-a.ctx.Done():
+				_ = a.Shutdown()
+			case <-serverDone:
+			}
+		}()
+	}
 
 	close(a.ready)
 	a.logger.Info("WebSocket 服务监听中", "port", a.runningPort)
 	return a.httpServer.Serve(listener)
+}
+
+func (a *App) websocketRoutePrefix() string {
+	if a == nil || a.config == nil {
+		return "/ws/"
+	}
+	return a.config.WebSocket.Path + "/"
 }
 
 // parseConfiguredPort 校验配置端口并转换为整数。
@@ -152,16 +212,24 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 // Shutdown 优雅关闭房间管理器和 HTTP 服务。
 // Shutdown gracefully stops the room manager and HTTP server.
 func (a *App) Shutdown() error {
-	a.logger.Info("正在关闭 RoomManager")
-	a.roomManager.CloseAll()
-
-	if a.httpServer != nil {
-		a.logger.Info("正在关闭 HTTP 服务")
-		shutdownCtx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
-		defer cancel()
-		return a.httpServer.Shutdown(shutdownCtx)
+	if a == nil {
+		return nil
 	}
-	return nil
+	a.shutdownOnce.Do(func() {
+		a.logger.Info("正在关闭 RoomManager")
+		if a.roomManager != nil {
+			a.roomManager.Close()
+		}
+
+		if a.httpServer != nil {
+			a.logger.Info("正在关闭 HTTP 服务")
+			// Shutdown must not inherit an already-cancelled application context.
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			a.shutdownErr = a.httpServer.Shutdown(shutdownCtx)
+		}
+	})
+	return a.shutdownErr
 }
 
 // handleWebSocket 解析房间 ID 并升级客户端 WebSocket 连接。
@@ -170,8 +238,24 @@ func (a *App) Shutdown() error {
 //   - w: HTTP 响应写入器。 HTTP response writer.
 //   - r: 包含房间 ID 和可选 Cookie 覆盖的 HTTP 请求。 HTTP request carrying room ID and optional cookie override.
 func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	roomID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/ws/"), "/")
-	if roomID == "" {
+	requestID := requestIDForRequest(r)
+	w.Header().Set("X-Request-ID", requestID)
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "仅支持 GET 请求", http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.authorizeAPI(r) {
+		w.Header().Set("WWW-Authenticate", "Bearer realm=\"douyinlive\"")
+		http.Error(w, "缺少或无效的 API Key", http.StatusUnauthorized)
+		return
+	}
+	if !a.authorizeWebSocketOrigin(r) {
+		http.Error(w, "WebSocket Origin 不被允许", http.StatusForbidden)
+		return
+	}
+	roomID, err := parseLiveIDPath(r.URL.Path, a.websocketRoutePrefix())
+	if err != nil {
 		http.Error(w, "无效的房间ID", http.StatusBadRequest)
 		return
 	}
@@ -185,13 +269,13 @@ func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	a.logger.Info("接收到 WebSocket 连接请求", "room_id", roomID, "remote_addr", r.RemoteAddr)
 
 	room := a.roomManager.AcquireRoom(roomID, cookieOverride)
+	if room == nil {
+		http.Error(w, "服务正在关闭", http.StatusServiceUnavailable)
+		return
+	}
 	handler := NewWsHandler(room)
 
-	upgrader := gws.NewUpgrader(handler, &gws.ServerOption{
-		ParallelEnabled:   true,
-		Recovery:          gws.Recovery,
-		PermessageDeflate: gws.PermessageDeflate{Enabled: true},
-	})
+	upgrader := gws.NewUpgrader(handler, downstreamServerOption())
 
 	socket, err := upgrader.Upgrade(w, r)
 	if err != nil {
@@ -203,26 +287,93 @@ func (a *App) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	go socket.ReadLoop()
 }
 
+func downstreamServerOption() *gws.ServerOption {
+	return &gws.ServerOption{
+		ParallelEnabled:     false,
+		Recovery:            gws.Recovery,
+		PermessageDeflate:   gws.PermessageDeflate{Enabled: true},
+		ReadMaxPayloadSize:  downstreamReadMaxPayloadSize,
+		WriteMaxPayloadSize: maxClientMessageBytes,
+		HandshakeTimeout:    downstreamHandshakeTimeout,
+		CheckUtf8Enabled:    true,
+	}
+}
+
+// authorizeWebSocketOrigin checks the optional browser Origin allowlist.
+// authorizeWebSocketOrigin 校验可选的浏览器 Origin 白名单；未配置时保持兼容并允许所有来源。
+func (a *App) authorizeWebSocketOrigin(r *http.Request) bool {
+	allowed := a.config.WebSocket.AllowedOrigins
+	if len(allowed) == 0 {
+		return true
+	}
+	raw := strings.TrimSpace(r.Header.Get("Origin"))
+	if raw == "" {
+		return true
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	origin := strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
+	for _, candidate := range allowed {
+		if strings.EqualFold(origin, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
 // parseCookieOverride 从查询参数读取本次连接专用 Cookie。
 // parseCookieOverride reads the per-connection cookie override from query parameters.
 // 参数/Parameters:
 //   - r: 当前 HTTP 请求。 Current HTTP request.
 func parseCookieOverride(r *http.Request) (string, error) {
+	if r == nil || r.URL == nil {
+		return "", nil
+	}
 	q := r.URL.Query()
-	if cookie := strings.TrimSpace(q.Get("cookie")); cookie != "" {
-		return cookie, nil
+	rawCookie := strings.TrimSpace(q.Get("cookie"))
+	rawCookieB64 := strings.TrimSpace(q.Get("cookie_b64"))
+	if rawCookie != "" && rawCookieB64 != "" {
+		return "", fmt.Errorf("cookie 和 cookie_b64 不能同时使用")
+	}
+	if rawCookie != "" {
+		if err := validateCookieOverride(rawCookie); err != nil {
+			return "", err
+		}
+		return rawCookie, nil
 	}
 
-	cookieB64 := strings.TrimSpace(q.Get("cookie_b64"))
-	if cookieB64 == "" {
+	if rawCookieB64 == "" {
 		return "", nil
 	}
 
-	cookie, err := decodeCookieBase64(cookieB64)
+	cookie, err := decodeCookieBase64(rawCookieB64)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(cookie), nil
+	cookie = strings.TrimSpace(cookie)
+	if err := validateCookieOverride(cookie); err != nil {
+		return "", err
+	}
+	return cookie, nil
+}
+
+const maxCookieOverrideBytes = 16 << 10
+
+func validateCookieOverride(cookie string) error {
+	if cookie == "" {
+		return nil
+	}
+	if len(cookie) > maxCookieOverrideBytes {
+		return fmt.Errorf("cookie 参数过长")
+	}
+	for _, ch := range cookie {
+		if ch < 0x20 || ch == 0x7f {
+			return fmt.Errorf("cookie 参数包含非法控制字符")
+		}
+	}
+	return nil
 }
 
 // decodeCookieBase64 解码 URL 安全或标准 Base64 Cookie。

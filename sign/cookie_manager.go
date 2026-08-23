@@ -1,11 +1,18 @@
 package sign
 
 import (
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,6 +28,7 @@ type cookieConfig struct {
 // CookieManager 管理抖音 Cookie 配置和请求用 Cookie jar。
 // CookieManager manages Douyin cookie configuration and the request cookie jar.
 type CookieManager struct {
+	mu     sync.RWMutex
 	config *cookieConfig
 	jar    *cookiejar.Jar
 }
@@ -48,13 +56,17 @@ func (cm *CookieManager) LoadConfig(path string) error {
 		return err
 	}
 
+	cm.mu.Lock()
 	cm.config = &config
+	cm.mu.Unlock()
 	return nil
 }
 
 // LoadFromEnv 从环境变量加载 Cookie。
 // LoadFromEnv loads cookies from environment variables.
 func (cm *CookieManager) LoadFromEnv() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	if cm.config == nil {
 		cm.config = &cookieConfig{}
 	}
@@ -65,6 +77,8 @@ func (cm *CookieManager) LoadFromEnv() {
 // GetDouyinCookie 获取当前抖音 Cookie。
 // GetDouyinCookie returns the current Douyin cookie.
 func (cm *CookieManager) GetDouyinCookie() string {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
 	if cm.config != nil {
 		return cm.config.Cookie.Douyin
 	}
@@ -76,6 +90,8 @@ func (cm *CookieManager) GetDouyinCookie() string {
 // 参数/Parameters:
 //   - cookie: 抖音 Cookie 字符串。 Douyin cookie string.
 func (cm *CookieManager) SetDouyinCookie(cookie string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	if cm.config == nil {
 		cm.config = &cookieConfig{}
 	}
@@ -119,6 +135,11 @@ func (cm *CookieManager) SetCookies(rawURL string, cookieStr string) error {
 	}
 
 	cookies := cm.ParseCookies(cookieStr)
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if cm.jar == nil {
+		return errors.New("cookie jar 未初始化")
+	}
 	cm.jar.SetCookies(parsedURL, cookies)
 	return nil
 }
@@ -133,6 +154,11 @@ func (cm *CookieManager) GetCookies(rawURL string) []*http.Cookie {
 		return nil
 	}
 
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	if cm.jar == nil {
+		return nil
+	}
 	return cm.jar.Cookies(parsedURL)
 }
 
@@ -142,6 +168,8 @@ func (cm *CookieManager) GetCookies(rawURL string) []*http.Cookie {
 //   - name: Cookie 名称。 Cookie name.
 //   - value: Cookie 新值。 New cookie value.
 func (cm *CookieManager) UpdateCookie(name, value string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	if cm.config == nil {
 		cm.config = &cookieConfig{}
 	}
@@ -157,12 +185,86 @@ func (cm *CookieManager) UpdateCookie(name, value string) {
 // 参数/Parameters:
 //   - path: YAML 配置文件路径。 YAML config file path.
 func (cm *CookieManager) SaveConfig(path string) error {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
 	data, err := yaml.Marshal(cm.config)
 	if err != nil {
 		return err
 	}
+	return writeFileAtomically(path, data, 0o600)
+}
 
-	return os.WriteFile(path, data, 0644)
+func writeFileAtomically(path string, data []byte, perm fs.FileMode) error {
+	return writeFileAtomicallyUsing(path, data, perm, os.Rename)
+}
+
+// writeFileAtomicallyUsing writes a complete temporary file in the target
+// directory before replacing the destination. Keeping the temporary file on
+// the same volume makes the final rename atomic on supported filesystems and
+// ensures a failed write never truncates the previous configuration.
+// writeFileAtomicallyUsing 先在目标目录写入完整临时文件，再原子替换目标文件；
+// 写入或替换失败时不会截断旧配置。
+func writeFileAtomicallyUsing(path string, data []byte, perm fs.FileMode, rename func(string, string) error) error {
+	if rename == nil {
+		return errors.New("rename function 不能为空")
+	}
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if info, err := os.Lstat(absolutePath); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("拒绝通过符号链接保存 Cookie 配置: %s", path)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	directory := filepath.Dir(absolutePath)
+	temporary, err := os.CreateTemp(directory, "."+filepath.Base(absolutePath)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	committed := false
+	defer func() {
+		_ = temporary.Close()
+		if !committed {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+
+	if err := temporary.Chmod(perm); err != nil {
+		return err
+	}
+	written, err := temporary.Write(data)
+	if err != nil {
+		return err
+	}
+	if written != len(data) {
+		return io.ErrShortWrite
+	}
+	if err := temporary.Sync(); err != nil {
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := rename(temporaryPath, absolutePath); err != nil {
+		return err
+	}
+	committed = true
+
+	// Persist the directory entry when the platform supports syncing
+	// directories. Windows and some filesystems reject it, so this is a
+	// best-effort durability step after the atomic replacement has succeeded.
+	if runtime.GOOS != "windows" {
+		if parent, err := os.Open(directory); err == nil {
+			_ = parent.Sync()
+			_ = parent.Close()
+		}
+	}
+	return nil
 }
 
 // ValidateCookie 简单检查 Cookie 是否包含关键抖音字段。

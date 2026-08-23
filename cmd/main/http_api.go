@@ -57,11 +57,29 @@ type apiRoom struct {
 	AccountOnly   *bool      `json:"account_only,omitempty"`
 	RoomID        string     `json:"room_id,omitempty"`
 	Title         string     `json:"title,omitempty"`
+	Anchor        *apiAnchor `json:"anchor,omitempty"`
 	ClientCount   *int       `json:"client_count,omitempty"`
 	UpstreamReady *bool      `json:"upstream_ready,omitempty"`
 	StatusUnknown *bool      `json:"status_unknown,omitempty"`
 	Source        string     `json:"source"`
 	CheckedAt     *time.Time `json:"checked_at,omitempty"`
+}
+
+type apiAnchor struct {
+	UserUniqueID string `json:"user_unique_id,omitempty"`
+	Nickname     string `json:"nickname,omitempty"`
+	AvatarThumb  string `json:"avatar_thumb,omitempty"`
+}
+
+type apiAnchorProfile struct {
+	LiveID      string    `json:"live_id"`
+	RoomID      string    `json:"room_id,omitempty"`
+	Status      string    `json:"status"`
+	HasRoom     *bool     `json:"has_room,omitempty"`
+	AccountOnly *bool     `json:"account_only,omitempty"`
+	Anchor      apiAnchor `json:"anchor"`
+	Source      string    `json:"source"`
+	CheckedAt   time.Time `json:"checked_at"`
 }
 
 // parseLiveIDPath validates a single live-room path segment for HTTP and WebSocket routes.
@@ -81,6 +99,7 @@ func parseLiveIDPath(path, prefix string) (string, error) {
 func (a *App) registerHTTPAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/health", a.handleHealthAlias)
 	mux.HandleFunc("/metrics", a.handleMetrics)
+	mux.HandleFunc("/api/v1", a.handleAPI)
 	mux.HandleFunc("/api/v1/", a.handleAPI)
 }
 
@@ -101,32 +120,36 @@ func (a *App) handleAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
-	if path == "/rooms/status:batch" {
-		if r.Method != http.MethodPost {
-			w.Header().Set("Allow", http.MethodPost)
-			a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "批量状态接口仅支持 POST", "请使用 POST")
-			return
-		}
-		a.handleBatchRoomStatus(w, r, requestID)
-		return
-	}
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "仅支持 GET 请求", "请使用 GET")
-		return
-	}
 	switch path {
 	case "/health":
+		if !a.requireAPIMethod(w, r, requestID, http.MethodGet) {
+			return
+		}
 		a.handleHealth(w, r, requestID)
 		return
 	case "/capabilities":
+		if !a.requireAPIMethod(w, r, requestID, http.MethodGet) {
+			return
+		}
 		a.handleCapabilities(w, r, requestID)
 		return
 	case "/rooms":
+		if !a.requireAPIMethod(w, r, requestID, http.MethodGet) {
+			return
+		}
 		a.handleRoomList(w, r, requestID)
 		return
 	case "/rooms/resolve":
+		if !a.requireAPIMethod(w, r, requestID, http.MethodGet) {
+			return
+		}
 		a.handleRoomResolve(w, r, requestID)
+		return
+	case "/rooms/status:batch":
+		if !a.requireAPIMethod(w, r, requestID, http.MethodPost) {
+			return
+		}
+		a.handleBatchRoomStatus(w, r, requestID)
 		return
 	}
 	if !strings.HasPrefix(path, "/rooms/") {
@@ -134,37 +157,60 @@ func (a *App) handleAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) < 2 || len(parts) > 3 || parts[0] != "rooms" || !isValidLiveID(parts[1]) {
+	if len(parts) < 2 || parts[0] != "rooms" {
+		a.writeAPIError(w, requestID, http.StatusNotFound, "not_found", "接口不存在", "请查看 API 文档")
+		return
+	}
+	if !isValidLiveID(parts[1]) {
 		a.writeAPIError(w, requestID, http.StatusBadRequest, "invalid_live_id", "直播间标识无效", "仅支持字母、数字、下划线和短横线")
 		return
 	}
-	statusOnly := len(parts) == 3 && parts[2] == "status"
-	if len(parts) == 3 && !statusOnly {
+	if len(parts) > 3 {
 		a.writeAPIError(w, requestID, http.StatusNotFound, "not_found", "接口不存在", "请查看 API 文档")
+		return
+	}
+	statusOnly := len(parts) == 3 && parts[2] == "status"
+	anchorOnly := len(parts) == 3 && parts[2] == "anchor"
+	if len(parts) == 3 && !statusOnly && !anchorOnly {
+		a.writeAPIError(w, requestID, http.StatusNotFound, "not_found", "接口不存在", "请查看 API 文档")
+		return
+	}
+	if !a.requireAPIMethod(w, r, requestID, http.MethodGet) {
+		return
+	}
+	if anchorOnly {
+		a.handleAnchorProfile(w, r, requestID, parts[1])
 		return
 	}
 	a.handleRoomProbe(w, r, requestID, parts[1], statusOnly)
 }
 
+func (a *App) requireAPIMethod(w http.ResponseWriter, r *http.Request, requestID, method string) bool {
+	if r.Method == method {
+		return true
+	}
+	w.Header().Set("Allow", method)
+	a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "请求方法不受支持", "请使用 "+method)
+	return false
+}
+
 func (a *App) handleHealthAlias(w http.ResponseWriter, r *http.Request) {
-	if a.metrics != nil {
-		a.metrics.httpRequests.Add(1)
-	}
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		requestID := requestIDForRequest(r)
-		w.Header().Set("X-Request-ID", requestID)
-		a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "健康检查仅支持 GET 请求", "请使用 GET")
-		return
-	}
-	requestID := requestIDForRequest(r)
-	w.Header().Set("X-Request-ID", requestID)
 	startedAt := time.Now()
 	defer func() {
 		if a.metrics != nil {
 			a.metrics.observeHTTPDuration(time.Since(startedAt))
 		}
 	}()
+	if a.metrics != nil {
+		a.metrics.httpRequests.Add(1)
+	}
+	requestID := requestIDForRequest(r)
+	w.Header().Set("X-Request-ID", requestID)
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "健康检查仅支持 GET 请求", "请使用 GET")
+		return
+	}
 	a.handleHealth(w, r, requestID)
 }
 
@@ -206,18 +252,25 @@ func (a *App) writeAPIJSONCached(w http.ResponseWriter, r *http.Request, request
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if status >= 400 || maxAge <= 0 {
 		w.Header().Set("Cache-Control", "no-store")
-	} else {
-		w.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d", int(maxAge/time.Second)))
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+		return
 	}
+	w.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d", int(maxAge/time.Second)))
 	stable, err := json.Marshal(apiEnvelope{OK: status < 400, Data: data})
 	if err != nil {
 		a.writeAPIError(w, requestID, http.StatusInternalServerError, "internal_error", "响应编码失败", "请稍后重试")
 		return
 	}
 	hash := sha256.Sum256(stable)
-	etag := fmt.Sprintf("\"%x\"", hash[:])
+	// request_id intentionally changes for every request. Publish a weak ETag
+	// for the stable representation data instead of claiming byte identity for
+	// the complete envelope.
+	// request_id 每次请求都会变化，因此对稳定业务数据发布弱 ETag，避免错误
+	// 声称完整 envelope 的字节完全一致。
+	etag := fmt.Sprintf("W/\"%x\"", hash[:])
 	w.Header().Set("ETag", etag)
-	if r != nil && status < 400 && maxAge > 0 && ifNoneMatchMatches(r.Header.Get("If-None-Match"), etag) {
+	if r != nil && (r.Method == http.MethodGet || r.Method == http.MethodHead) && ifNoneMatchMatches(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
@@ -226,13 +279,34 @@ func (a *App) writeAPIJSONCached(w http.ResponseWriter, r *http.Request, request
 }
 
 func ifNoneMatchMatches(header, etag string) bool {
+	target, ok := weakETagOpaque(etag)
+	if !ok {
+		return false
+	}
 	for _, candidate := range strings.Split(header, ",") {
 		candidate = strings.TrimSpace(candidate)
-		if candidate == "*" || candidate == etag || strings.TrimPrefix(candidate, "W/") == etag {
+		if candidate == "*" {
+			return true
+		}
+		if opaque, valid := weakETagOpaque(candidate); valid && opaque == target {
 			return true
 		}
 	}
 	return false
+}
+
+func weakETagOpaque(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, "W/")
+	if len(value) < 2 || value[0] != '"' || value[len(value)-1] != '"' {
+		return "", false
+	}
+	for _, ch := range value[1 : len(value)-1] {
+		if ch == '"' || ch < 0x21 || ch == 0x7f {
+			return "", false
+		}
+	}
+	return value, true
 }
 
 func (a *App) writeAPIError(w http.ResponseWriter, requestID string, status int, code, message, suggestion string) {
@@ -261,7 +335,7 @@ func (a *App) handleCapabilities(w http.ResponseWriter, r *http.Request, request
 		"api_version": "v1", "read_only": true, "message_transport": "websocket", "http_send_supported": false,
 		"websocket_path": strings.TrimSuffix(a.websocketRoutePrefix(), "/"), "websocket_endpoint": "GET " + a.websocketRoutePrefix() + "{live_id}",
 		"websocket_auth": map[string]interface{}{"required": apiKeyConfigured, "scheme": "bearer", "header": "Authorization", "browser_native_supported": !apiKeyConfigured},
-		"endpoints":      []string{"GET /health", "GET /metrics", "GET /api/v1/health", "GET /api/v1/capabilities", "GET /api/v1/rooms", "GET /api/v1/rooms/{live_id}", "GET /api/v1/rooms/{live_id}/status", "POST /api/v1/rooms/status:batch", "GET /api/v1/rooms/resolve"},
+		"endpoints":      []string{"GET /health", "GET /metrics", "GET /api/v1/health", "GET /api/v1/capabilities", "GET /api/v1/rooms", "GET /api/v1/rooms/{live_id}", "GET /api/v1/rooms/{live_id}/status", "GET /api/v1/rooms/{live_id}/anchor", "POST /api/v1/rooms/status:batch", "GET /api/v1/rooms/resolve"},
 		"message_types":  []string{douyinLive.WebcastChatMessage, douyinLive.WebcastGiftMessage, douyinLive.WebcastLikeMessage, douyinLive.WebcastMemberMessage, douyinLive.WebcastSocialMessage, douyinLive.WebcastRoomUserSeqMessage, douyinLive.WebcastFansclubMessage, douyinLive.WebcastControlMessage, douyinLive.WebcastEmojiChatMessage, douyinLive.WebcastRoomStatsMessage, douyinLive.WebcastRoomMessage, douyinLive.WebcastRoomRankMessage},
 	}, time.Minute)
 }
@@ -277,6 +351,35 @@ func (a *App) handleRoomList(w http.ResponseWriter, r *http.Request, requestID s
 }
 
 func (a *App) handleRoomProbe(w http.ResponseWriter, r *http.Request, requestID, liveID string, statusOnly bool) {
+	status, checkedAt, ok := a.lookupRoomForAPI(w, r, requestID, liveID)
+	if !ok {
+		return
+	}
+	if statusOnly {
+		a.writeAPIJSONCached(w, r, requestID, http.StatusOK, map[string]interface{}{"live_id": status.LiveID, "status": status.Code, "is_live": status.Live, "has_room": status.HasRoom, "checked_at": checkedAt}, 5*time.Second)
+		return
+	}
+	a.writeAPIJSONCached(w, r, requestID, http.StatusOK, liveStatusToAPI(status, "probe", checkedAt), 5*time.Second)
+}
+
+func (a *App) handleAnchorProfile(w http.ResponseWriter, r *http.Request, requestID, liveID string) {
+	status, checkedAt, ok := a.lookupRoomForAPI(w, r, requestID, liveID)
+	if !ok {
+		return
+	}
+	anchor := anchorFromLiveStatus(status)
+	if !anchor.available() {
+		a.writeAPIError(w, requestID, http.StatusServiceUnavailable, "anchor_unverified", "暂时无法确认主播资料", "稍后重试")
+		return
+	}
+	a.writeAPIJSONCached(w, r, requestID, http.StatusOK, apiAnchorProfile{
+		LiveID: status.LiveID, RoomID: status.RoomID, Status: string(status.Code),
+		HasRoom: status.HasRoom, AccountOnly: status.AccountOnly, Anchor: anchor,
+		Source: "probe", CheckedAt: checkedAt,
+	}, 5*time.Second)
+}
+
+func (a *App) lookupRoomForAPI(w http.ResponseWriter, r *http.Request, requestID, liveID string) (douyinLive.LiveStatus, time.Time, bool) {
 	ctx, cancel := context.WithTimeout(r.Context(), apiSingleProbeTimeout)
 	defer cancel()
 	if a.metrics != nil {
@@ -289,14 +392,10 @@ func (a *App) handleRoomProbe(w http.ResponseWriter, r *http.Request, requestID,
 		}
 		code, httpStatus, message, suggestion := apiProbeFailure(status, err)
 		a.writeAPIError(w, requestID, httpStatus, code, message, suggestion)
-		return
+		return douyinLive.LiveStatus{}, time.Time{}, false
 	}
 	checkedAt := time.Now().UTC().Truncate(5 * time.Second)
-	if statusOnly {
-		a.writeAPIJSONCached(w, r, requestID, http.StatusOK, map[string]interface{}{"live_id": status.LiveID, "status": status.Code, "is_live": status.Live, "has_room": status.HasRoom, "checked_at": checkedAt}, 5*time.Second)
-		return
-	}
-	a.writeAPIJSONCached(w, r, requestID, http.StatusOK, liveStatusToAPI(status, "probe", checkedAt), 5*time.Second)
+	return status, checkedAt, true
 }
 
 type batchStatusRequest struct {
@@ -323,9 +422,9 @@ func (a *App) handleBatchRoomStatus(w http.ResponseWriter, r *http.Request, requ
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	var request batchStatusRequest
+	var maxBytesErr *http.MaxBytesError
 	if err := decoder.Decode(&request); err != nil {
 		_ = controller.SetReadDeadline(time.Time{})
-		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			a.writeAPIError(w, requestID, http.StatusRequestEntityTooLarge, "request_too_large", "请求体超过 1 MiB 限制", "请减少批量请求内容")
 			return
@@ -337,6 +436,10 @@ func (a *App) handleBatchRoomStatus(w http.ResponseWriter, r *http.Request, requ
 	if err := decoder.Decode(&extra); err == nil {
 		_ = controller.SetReadDeadline(time.Time{})
 		a.writeAPIError(w, requestID, http.StatusBadRequest, "invalid_json", "请求体只能包含一个 JSON 对象", "请移除多余内容")
+		return
+	} else if errors.As(err, &maxBytesErr) {
+		_ = controller.SetReadDeadline(time.Time{})
+		a.writeAPIError(w, requestID, http.StatusRequestEntityTooLarge, "request_too_large", "请求体超过 1 MiB 限制", "请减少批量请求内容")
 		return
 	} else if !errors.Is(err, io.EOF) {
 		_ = controller.SetReadDeadline(time.Time{})
@@ -425,7 +528,7 @@ func (a *App) handleBatchRoomStatus(w http.ResponseWriter, r *http.Request, requ
 			unknown++
 		}
 	}
-	a.writeAPIJSONCached(w, r, requestID, http.StatusOK, map[string]interface{}{"items": items, "total": len(items), "online": online, "offline": offline, "account_no_room": accountNoRoom, "not_found": notFound, "unknown": unknown}, 3*time.Second)
+	a.writeAPIJSONCached(w, r, requestID, http.StatusOK, map[string]interface{}{"items": items, "total": len(items), "online": online, "offline": offline, "account_no_room": accountNoRoom, "not_found": notFound, "unknown": unknown}, 0)
 }
 
 // probeResultIsFailure reports whether a probe result cannot be safely exposed as a verified status.
@@ -544,7 +647,12 @@ func roomSnapshotToAPI(s roomSnapshot, source string, checkedAt time.Time) apiRo
 	clientCount := s.ClientCount
 	upstreamReady := s.UpstreamReady
 	statusUnknown := s.StatusUnknown
-	return apiRoom{LiveID: s.LiveID, Status: s.Status, IsLive: s.IsLive, HasRoom: s.HasRoom, AccountOnly: s.AccountOnly, RoomID: s.RoomID, Title: s.Title, ClientCount: &clientCount, UpstreamReady: &upstreamReady, StatusUnknown: &statusUnknown, Source: source, CheckedAt: checkedAtPtr}
+	anchor := apiAnchor{UserUniqueID: s.UserUniqueID, Nickname: s.LiveName, AvatarThumb: s.AvatarThumb}
+	var anchorPtr *apiAnchor
+	if anchor.available() {
+		anchorPtr = &anchor
+	}
+	return apiRoom{LiveID: s.LiveID, Status: s.Status, IsLive: s.IsLive, HasRoom: s.HasRoom, AccountOnly: s.AccountOnly, RoomID: s.RoomID, Title: s.Title, Anchor: anchorPtr, ClientCount: &clientCount, UpstreamReady: &upstreamReady, StatusUnknown: &statusUnknown, Source: source, CheckedAt: checkedAtPtr}
 }
 
 func liveStatusToAPI(s douyinLive.LiveStatus, source string, checkedAt time.Time) apiRoom {
@@ -554,5 +662,18 @@ func liveStatusToAPI(s douyinLive.LiveStatus, source string, checkedAt time.Time
 		hasRoom = &value
 	}
 	accountOnly := s.AccountOnly
-	return apiRoom{LiveID: s.LiveID, Status: string(s.Code), IsLive: s.Live, HasRoom: hasRoom, AccountOnly: accountOnly, RoomID: s.RoomID, Title: s.Title, Source: source, CheckedAt: &checkedAt}
+	anchor := anchorFromLiveStatus(s)
+	var anchorPtr *apiAnchor
+	if anchor.available() {
+		anchorPtr = &anchor
+	}
+	return apiRoom{LiveID: s.LiveID, Status: string(s.Code), IsLive: s.Live, HasRoom: hasRoom, AccountOnly: accountOnly, RoomID: s.RoomID, Title: s.Title, Anchor: anchorPtr, Source: source, CheckedAt: &checkedAt}
+}
+
+func anchorFromLiveStatus(s douyinLive.LiveStatus) apiAnchor {
+	return apiAnchor{UserUniqueID: s.UserUniqueID, Nickname: s.LiveName, AvatarThumb: s.AvatarThumb}
+}
+
+func (a apiAnchor) available() bool {
+	return a.UserUniqueID != "" || a.Nickname != "" || a.AvatarThumb != ""
 }

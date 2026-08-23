@@ -30,6 +30,12 @@ const clientWriteTimeout = 5 * time.Second
 // clientControlWriteTimeout 限制 close 和 pong 控制帧的写入耗时。
 const clientControlWriteTimeout = time.Second
 
+// clientBatchCloseWaitTimeout is a single shared budget for a batch of client
+// close handshakes. Each transport closes concurrently, so shutdown time does
+// not grow linearly with the number of slow clients.
+// clientBatchCloseWaitTimeout 是一批客户端关闭握手共享的总等待预算。
+const clientBatchCloseWaitTimeout = clientControlWriteTimeout + 500*time.Millisecond
+
 type enqueueResult uint8
 
 const (
@@ -57,6 +63,7 @@ type clientCloseDirective struct {
 }
 
 var (
+	errClientClosing           = errors.New("client connection is closing")
 	normalClientClose          = clientCloseDirective{code: 1000, reason: "normal_close"}
 	serviceClientClose         = clientCloseDirective{message: serviceClosingMessage, code: 1001, reason: "service_shutdown"}
 	invalidRoomClientClose     = clientCloseDirective{message: roomInvalidMessage, code: 1008, reason: "room_not_found"}
@@ -71,10 +78,14 @@ type Client struct {
 	conn        *gws.Conn
 	sendQueue   chan outboundMessage
 	stopCh      chan struct{}
+	closeDone   chan struct{}
 	closeOnce   sync.Once
 	stateMu     sync.RWMutex
 	writeMu     sync.Mutex
 	queuedBytes int
+	// closeTransport is an optional test seam. Production clients use
+	// closeNetworkTransport when it is nil.
+	closeTransport func(*Client, clientCloseDirective)
 }
 
 // NewClient 创建客户端连接包装器。
@@ -88,6 +99,7 @@ func NewClient(id string, conn *gws.Conn) *Client {
 		conn:      conn,
 		sendQueue: make(chan outboundMessage, clientSendQueueSize),
 		stopCh:    make(chan struct{}),
+		closeDone: make(chan struct{}),
 	}
 }
 
@@ -162,23 +174,53 @@ func (c *Client) writeLoop(onWriteError func()) {
 	}
 }
 
-// close 幂等停止发送循环，发送可选的最终业务消息，再以简短 reason 关闭连接。
-// close idempotently stops the send loop, sends an optional final application message, and closes with a short reason.
+// beginClose idempotently stops the send loop and starts the bounded
+// transport-close handshake. Batch owners can start every client first and
+// then wait with one shared deadline.
+// beginClose 幂等停止发送循环并启动有界的传输层关闭握手。
 // 参数/Parameters:
 //   - directive: 最终消息、关闭码和简短关闭原因。 Final message, close code, and short close reason.
-func (c *Client) close(directive clientCloseDirective) {
+func (c *Client) beginClose(directive clientCloseDirective) <-chan struct{} {
+	if c == nil {
+		closed := make(chan struct{})
+		close(closed)
+		return closed
+	}
 	c.closeOnce.Do(func() {
 		c.stateMu.Lock()
 		close(c.stopCh)
 		c.stateMu.Unlock()
-		if c.conn == nil {
+		if c.conn == nil && c.closeTransport == nil {
+			close(c.closeDone)
 			return
 		}
-		_ = c.writeFinalAndClose(directive)
-		if nc := c.conn.NetConn(); nc != nil {
-			_ = nc.Close()
-		}
+		go func() {
+			defer close(c.closeDone)
+			if c.closeTransport != nil {
+				c.closeTransport(c, directive)
+				return
+			}
+			closeNetworkTransport(c, directive)
+		}()
 	})
+	return c.closeDone
+}
+
+// close preserves the synchronous single-client contract. Batch and slow-
+// client paths use beginClose so all handshakes start before they wait.
+// close 保留单客户端同步关闭语义；批量路径使用 beginClose 并发启动。
+func (c *Client) close(directive clientCloseDirective) {
+	<-c.beginClose(directive)
+}
+
+func closeNetworkTransport(c *Client, directive clientCloseDirective) {
+	if c == nil || c.conn == nil {
+		return
+	}
+	_ = c.writeFinalAndClose(directive)
+	if nc := c.conn.NetConn(); nc != nil {
+		_ = nc.Close()
+	}
 }
 
 func (c *Client) writeFinalAndClose(directive clientCloseDirective) error {
@@ -212,8 +254,24 @@ func (c *Client) writeMessage(opcode gws.Opcode, payload []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	nc := c.conn.NetConn()
+	// Check the lifecycle state while holding stateMu before installing the
+	// normal data-write deadline. Close() takes the same lock before applying
+	// its shorter control-frame deadline, so a close that wins the race cannot
+	// be overwritten with five seconds by a late queued write.
+	// 在设置普通数据写 deadline 前持有 stateMu 检查生命周期，避免关闭流程
+	// 已经先获胜时又被迟到的队列写覆盖为 5 秒 deadline。
+	c.stateMu.RLock()
+	select {
+	case <-c.stopCh:
+		c.stateMu.RUnlock()
+		return errClientClosing
+	default:
+	}
 	if nc != nil {
 		_ = nc.SetWriteDeadline(time.Now().Add(clientWriteTimeout))
+	}
+	c.stateMu.RUnlock()
+	if nc != nil {
 		defer nc.SetWriteDeadline(time.Time{})
 	}
 	return c.conn.WriteMessage(opcode, payload)
@@ -226,8 +284,18 @@ func (c *Client) writePong(payload []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	nc := c.conn.NetConn()
+	c.stateMu.RLock()
+	select {
+	case <-c.stopCh:
+		c.stateMu.RUnlock()
+		return errClientClosing
+	default:
+	}
 	if nc != nil {
 		_ = nc.SetWriteDeadline(time.Now().Add(clientControlWriteTimeout))
+	}
+	c.stateMu.RUnlock()
+	if nc != nil {
 		defer nc.SetWriteDeadline(time.Time{})
 	}
 	return c.conn.WritePong(payload)
@@ -253,8 +321,8 @@ func (r *Room) closeClient(clientID string, directive clientCloseDirective) {
 
 	if remaining == 0 {
 		r.logger.Info("最后一个客户端已断开，正在关闭后台监听", "room_id", r.id)
-		if !r.startTask(r.closeBackgroundWorkers) {
-			r.closeBackgroundWorkers()
+		if !r.startTask(r.closeBackgroundWorkersIfIdle) {
+			r.closeBackgroundWorkersIfIdle()
 		}
 	}
 }
@@ -296,6 +364,41 @@ func (r *Room) removeClient(clientID string) (*Client, int, bool) {
 		delete(r.connIDs, client.conn)
 	}
 	return client, len(r.clients), true
+}
+
+// removeClients removes a de-duplicated set of clients while holding the
+// client-map lock only once. The caller must not hold r.mu while invoking this
+// helper; callers may acquire r.mu after it returns, preserving the global
+// lock order (mu -> clientsMu).
+// removeClients 在一次 clientsMu 持有期间批量摘除去重后的客户端。
+func (r *Room) removeClients(clientIDs []string) ([]*Client, int) {
+	if r == nil {
+		return nil, 0
+	}
+	if len(clientIDs) == 0 {
+		return nil, r.clientCount()
+	}
+	r.clientsMu.Lock()
+	defer r.clientsMu.Unlock()
+
+	seen := make(map[string]struct{}, len(clientIDs))
+	removed := make([]*Client, 0, len(clientIDs))
+	for _, clientID := range clientIDs {
+		if _, ok := seen[clientID]; ok {
+			continue
+		}
+		seen[clientID] = struct{}{}
+		client, ok := r.clients[clientID]
+		if !ok {
+			continue
+		}
+		delete(r.clients, clientID)
+		if client != nil && client.conn != nil {
+			delete(r.connIDs, client.conn)
+		}
+		removed = append(removed, client)
+	}
+	return removed, len(r.clients)
 }
 
 // clientCount 返回当前客户端数量。
@@ -357,6 +460,7 @@ func (r *Room) AddClient(socket *gws.Conn) string {
 	count := len(r.clients)
 	r.clientsMu.Unlock()
 
+	var sessionGeneration uint64
 	switch {
 	case r.douyinLive != nil:
 		upstreamReady := r.upstreamReady
@@ -369,7 +473,7 @@ func (r *Room) AddClient(socket *gws.Conn) string {
 			r.sendToClient(clientID, gws.OpcodeText, r.onlineStatusMessage())
 		}
 		return clientID
-	case r.monitorStopCh != nil:
+	case r.monitor != nil:
 		statusUnknown := r.statusUnknown
 		r.mu.Unlock()
 		go client.writeLoop(func() {
@@ -391,6 +495,7 @@ func (r *Room) AddClient(socket *gws.Conn) string {
 		return clientID
 	default:
 		r.starting = true
+		sessionGeneration = r.sessionGeneration
 		r.mu.Unlock()
 	}
 
@@ -402,60 +507,96 @@ func (r *Room) AddClient(socket *gws.Conn) string {
 
 	// Do not hold the WebSocket upgrade/read-loop path while talking to Douyin.
 	// 上游 HTTP 初始化可能耗时较长，必须异步执行，避免阻塞客户端握手。
-	if !r.startTask(r.initializeLiveSession) {
+	if !r.startTask(func() { r.initializeLiveSession(sessionGeneration) }) {
 		r.closeClient(clientID, serviceClientClose)
 	}
 	return clientID
 }
 
-func (r *Room) initializeLiveSession() {
+func (r *Room) initializeLiveSession(sessionGeneration uint64) {
 	r.logger.Info("第一个客户端连接，正在检查直播状态", "room_id", r.id)
-	err := r.startLiveSession()
+	err := r.startLiveSession(sessionGeneration)
+	r.handleLiveSessionStartResult(sessionGeneration, err)
+}
 
-	r.mu.Lock()
-	r.starting = false
-	r.mu.Unlock()
-
+func (r *Room) handleLiveSessionStartResult(sessionGeneration uint64, err error) {
 	if err == nil {
+		if !r.clearStartingForGeneration(sessionGeneration) {
+			return
+		}
 		r.logger.Info("直播连接初始化已提交，等待上游 WebSocket 握手", "room_id", r.id)
 		return
 	}
 	if errors.Is(err, errRoomInactive) {
-		r.removeIfIdle()
+		if !r.clearStartingForGeneration(sessionGeneration) {
+			return
+		}
+		if r.clientCount() == 0 {
+			r.closeBackgroundWorkersIfIdle()
+		} else {
+			r.removeIfIdle()
+		}
 		return
 	}
 	if errors.Is(err, douyinLive.ErrRoomNotFound) {
 		r.logger.Warn("直播间不存在，关闭客户端连接", "room_id", r.id, "err", err)
-		r.closeAllClients(invalidRoomClientClose)
+		if !r.closeClientsForFailedGeneration(sessionGeneration, invalidRoomClientClose) {
+			return
+		}
 		r.removeIfIdle()
 		return
 	}
 	if errors.Is(err, douyinLive.ErrLiveNotStarted) {
-		if r.clientCount() == 0 {
-			r.removeIfIdle()
+		monitor, clients, installed, ok := r.transitionToMonitorForGeneration(sessionGeneration, false)
+		if !ok {
+			return
+		}
+		if len(clients) == 0 {
+			r.closeBackgroundWorkersIfIdle()
 			return
 		}
 		r.logger.Info("当前未开播，进入后台轮询监控", "room_id", r.id)
-		r.setStatusUnknown(false)
-		r.notifyOfflineStatus()
-		r.startMonitorLoop()
+		r.broadcastToClients(clients, r.offlineStatusMessage())
+		if installed {
+			r.launchMonitorLoop(monitor)
+		}
 		return
 	}
 	if errors.Is(err, douyinLive.ErrLiveStatusUnknown) {
-		if r.clientCount() == 0 {
-			r.removeIfIdle()
+		monitor, clients, installed, ok := r.transitionToMonitorForGeneration(sessionGeneration, true)
+		if !ok {
+			return
+		}
+		if len(clients) == 0 {
+			r.closeBackgroundWorkersIfIdle()
 			return
 		}
 		r.logger.Warn("暂时无法确认直播状态，保留客户端并进入轮询", "room_id", r.id, "err", err)
-		r.setStatusUnknown(true)
-		r.notifyStatusUnknown()
-		r.startMonitorLoop()
+		r.broadcastToClients(clients, r.statusUnknownMessage())
+		if installed {
+			r.launchMonitorLoop(monitor)
+		}
 		return
 	}
 
 	r.logger.Error("启动抖音直播监听失败", "room_id", r.id, "err", err)
-	r.closeAllClients(liveStartFailedClientClose)
+	if !r.closeClientsForFailedGeneration(sessionGeneration, liveStartFailedClientClose) {
+		return
+	}
 	r.removeIfIdle()
+}
+
+// clearStartingForGeneration clears startup state only while the completing
+// room-session generation is still current.
+// clearStartingForGeneration 仅在启动结果仍属于当前房间会话代次时清除启动状态。
+func (r *Room) clearStartingForGeneration(sessionGeneration uint64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.sessionGeneration != sessionGeneration {
+		return false
+	}
+	r.starting = false
+	return true
 }
 
 func (r *Room) writePong(socket *gws.Conn, payload []byte) bool {
@@ -498,7 +639,7 @@ func (r *Room) sendToClient(clientID string, opcode gws.Opcode, payload []byte) 
 	}
 
 	r.logger.Warn("客户端消费过慢，关闭连接", "client_id", clientID, "room_id", r.id)
-	r.closeClient(clientID, slowClientClose)
+	r.closeSlowClients([]string{clientID})
 }
 
 // closeAllClients 按指定关闭策略关闭并移除房间内所有客户端。
@@ -507,9 +648,110 @@ func (r *Room) sendToClient(clientID string, opcode gws.Opcode, payload []byte) 
 //   - directive: 最终业务消息和 WebSocket 关闭信息。 Final application message and WebSocket close information.
 func (r *Room) closeAllClients(directive clientCloseDirective) {
 	clients := r.clearClients()
+	r.closeClientsAndWait(clients, directive)
+}
+
+// closeClientsAndWait starts every close handshake before waiting, then uses a
+// single deadline for the whole batch. This preserves the final WebSocket close
+// frame without making shutdown latency proportional to client count.
+// closeClientsAndWait 先并发启动全部关闭握手，再用一个总超时等待整批客户端。
+func (r *Room) closeClientsAndWait(clients []*Client, directive clientCloseDirective) {
 	for _, client := range clients {
-		client.close(directive)
+		if client != nil {
+			client.beginClose(directive)
+		}
 	}
+	if waitForClientClosures(clients, clientBatchCloseWaitTimeout) {
+		return
+	}
+	for _, client := range clients {
+		if client != nil {
+			client.forceCloseTransport()
+		}
+	}
+	if waitForClientClosures(clients, 250*time.Millisecond) {
+		return
+	}
+	pending := 0
+	for _, client := range clients {
+		if client == nil {
+			continue
+		}
+		select {
+		case <-client.closeDone:
+		default:
+			pending++
+		}
+	}
+	r.logger.Warn("等待客户端关闭握手超时，继续释放房间资源", "room_id", r.id, "pending_clients", pending)
+}
+
+func (c *Client) forceCloseTransport() {
+	if c == nil || c.conn == nil {
+		return
+	}
+	if connection := c.conn.NetConn(); connection != nil {
+		_ = connection.SetWriteDeadline(time.Now())
+		_ = connection.Close()
+	}
+}
+
+func waitForClientClosures(clients []*Client, timeout time.Duration) bool {
+	nonNilClients := 0
+	for _, client := range clients {
+		if client != nil {
+			nonNilClients++
+		}
+	}
+	if nonNilClients == 0 {
+		return true
+	}
+	if timeout <= 0 {
+		return false
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for _, client := range clients {
+		if client == nil {
+			continue
+		}
+		select {
+		case <-client.closeDone:
+		case <-timer.C:
+			return false
+		}
+	}
+	return true
+}
+
+// closeClientsForFailedGeneration atomically retires a failed startup
+// generation, detaches its retained probe, and removes only clients that joined
+// that generation. Clients arriving after the retirement start on the next
+// generation and are not touched by this stale completion path.
+// closeClientsForFailedGeneration 原子退役启动失败的会话代次，并只关闭该代次已有客户端。
+func (r *Room) closeClientsForFailedGeneration(sessionGeneration uint64, directive clientCloseDirective) bool {
+	r.mu.Lock()
+	if r.closed || r.sessionGeneration != sessionGeneration {
+		r.mu.Unlock()
+		return false
+	}
+	probe := r.probeLive
+	r.probeLive = nil
+	r.probeFailures = 0
+	r.starting = false
+	if r.monitor != nil && r.monitor.generation == sessionGeneration {
+		r.monitor.stop()
+		r.monitor = nil
+	}
+	r.sessionGeneration++
+	clients := r.clearClients()
+	r.mu.Unlock()
+
+	if probe != nil {
+		probe.Dispose()
+	}
+	r.closeClientsAndWait(clients, directive)
+	return true
 }
 
 // Broadcast 向房间内所有客户端广播消息。
@@ -518,6 +760,13 @@ func (r *Room) closeAllClients(directive clientCloseDirective) {
 //   - message: 要广播的消息字节。 Message bytes to broadcast.
 func (r *Room) Broadcast(message []byte) {
 	clients := r.snapshotClients()
+	r.broadcastToClients(clients, message)
+}
+
+// broadcastToClients broadcasts only to an already captured client generation.
+// broadcastToClients 仅向已经取得的客户端代次快照广播消息。
+func (r *Room) broadcastToClients(clients []*Client, message []byte) {
+	slowClientIDs := make([]string, 0)
 	for _, client := range clients {
 		switch client.enqueueWithResult(gws.OpcodeText, message) {
 		case enqueueAccepted, enqueueClientClosed:
@@ -527,6 +776,30 @@ func (r *Room) Broadcast(message []byte) {
 			return
 		}
 		r.logger.Warn("客户端消费过慢，关闭连接", "client_id", client.id, "room_id", r.id)
-		r.closeClient(client.id, slowClientClose)
+		slowClientIDs = append(slowClientIDs, client.id)
+	}
+	if len(slowClientIDs) > 0 {
+		r.closeSlowClients(slowClientIDs)
+	}
+}
+
+// closeSlowClients removes all identified clients under one clients lock and
+// tracks the shared close operation as a Room task. Broadcast returns without
+// waiting, while Room.Close still waits for the task within its normal budget.
+// closeSlowClients 批量摘除慢客户端，并把共享关闭流程纳入 Room 生命周期。
+func (r *Room) closeSlowClients(clientIDs []string) {
+	clients, remaining := r.removeClients(clientIDs)
+	if len(clients) == 0 {
+		return
+	}
+	task := func() {
+		r.closeClientsAndWait(clients, slowClientClose)
+		if remaining == 0 {
+			r.logger.Info("最后一个客户端已断开，正在关闭后台监听", "room_id", r.id)
+			r.closeBackgroundWorkersIfIdle()
+		}
+	}
+	if !r.startTask(task) {
+		task()
 	}
 }

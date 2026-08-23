@@ -46,12 +46,11 @@ func (a *App) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Request-ID", requestID)
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "指标接口仅支持 GET 请求", "请使用 GET")
 		return
 	}
 	if !a.authorizeAPI(r) {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="douyinlive"`)
-		w.WriteHeader(http.StatusUnauthorized)
+		a.writeAPIError(w, requestID, http.StatusUnauthorized, "unauthorized", "缺少或无效的 API Key", "请使用 Authorization: Bearer <key>")
 		return
 	}
 	snapshots := a.roomManager.SnapshotRooms()
@@ -70,12 +69,13 @@ func (a *App) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		m = newAPIMetrics()
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	fmt.Fprintf(w, "# HELP douyinlive_active_rooms Number of managed active rooms.\n# TYPE douyinlive_active_rooms gauge\ndouyinlive_active_rooms %d\n", len(snapshots))
 	fmt.Fprintf(w, "# HELP douyinlive_online_rooms Number of active rooms confirmed online.\n# TYPE douyinlive_online_rooms gauge\ndouyinlive_online_rooms %d\n", online)
 	fmt.Fprintf(w, "# HELP douyinlive_monitoring_rooms Number of rooms in offline or unknown monitoring state.\n# TYPE douyinlive_monitoring_rooms gauge\ndouyinlive_monitoring_rooms %d\n", monitoring)
 	fmt.Fprintf(w, "# HELP douyinlive_active_clients Number of downstream WebSocket clients.\n# TYPE douyinlive_active_clients gauge\ndouyinlive_active_clients %d\n", clients)
 	fmt.Fprintf(w, "# HELP douyinlive_http_requests_total Total HTTP API requests.\n# TYPE douyinlive_http_requests_total counter\ndouyinlive_http_requests_total %d\n", m.httpRequests.Load())
-	fmt.Fprintf(w, "# HELP douyinlive_http_errors_total Total versioned HTTP API errors.\n# TYPE douyinlive_http_errors_total counter\ndouyinlive_http_errors_total %d\n", m.httpErrors.Load())
+	fmt.Fprintf(w, "# HELP douyinlive_http_errors_total Total HTTP API and operational endpoint errors.\n# TYPE douyinlive_http_errors_total counter\ndouyinlive_http_errors_total %d\n", m.httpErrors.Load())
 	fmt.Fprintf(w, "# HELP douyinlive_http_request_duration_seconds HTTP API request duration in seconds.\n# TYPE douyinlive_http_request_duration_seconds summary\ndouyinlive_http_request_duration_seconds_sum %.9f\ndouyinlive_http_request_duration_seconds_count %d\n", float64(m.httpDurationNanos.Load())/float64(time.Second), m.httpDurationCount.Load())
 	fmt.Fprintf(w, "# HELP douyinlive_room_probes_total Total one-shot room probes.\n# TYPE douyinlive_room_probes_total counter\ndouyinlive_room_probes_total %d\n", m.roomProbes.Load())
 	fmt.Fprintf(w, "# HELP douyinlive_probe_upstream_calls_total Total actual upstream room probe calls after request coalescing.\n# TYPE douyinlive_probe_upstream_calls_total counter\ndouyinlive_probe_upstream_calls_total %d\n", m.probeUpstreamCalls.Load())

@@ -38,41 +38,49 @@ type Room struct {
 	// Lock order: acquire mu before clientsMu when both are needed. Never
 	// acquire mu while holding clientsMu in a new code path.
 	// 锁顺序：同时需要两把锁时先获取 mu，再获取 clientsMu；新增代码禁止反向加锁。
-	id                   string
-	logger               *appLogger
-	clients              map[string]*Client
-	connIDs              map[*gws.Conn]string
-	clientsMu            sync.RWMutex
-	douyinLive           *douyinLive.DouyinLive
-	probeLive            *douyinLive.DouyinLive
-	probeFailures        int
-	mu                   sync.Mutex
-	onClose              func()
-	unknown              bool
-	cookie               string
-	signProvider         string
-	tikHubKey            string
-	pollInterval         time.Duration
-	notifyInterval       time.Duration
-	liveName             string
-	title                string
-	avatarThumb          string
-	accountOnly          bool
-	knownValid           bool
-	statusUnknown        bool
-	pendingClients       int
-	starting             bool
-	closed               bool
-	upstreamReady        bool
-	monitorStopCh        chan struct{}
-	monitorDoneCh        chan struct{}
-	monitorStopRequested bool
-	lifecycleCtx         context.Context
-	lifecycleCancel      context.CancelFunc
-	tasks                sync.WaitGroup
-	activeTasks          int
-	closeDone            chan struct{}
-	closeDoneOnce        sync.Once
+	id                string
+	logger            *appLogger
+	clients           map[string]*Client
+	connIDs           map[*gws.Conn]string
+	clientsMu         sync.RWMutex
+	douyinLive        *douyinLive.DouyinLive
+	probeLive         *douyinLive.DouyinLive
+	probeFailures     int
+	mu                sync.Mutex
+	onClose           func()
+	unknown           bool
+	cookie            string
+	signProvider      string
+	tikHubKey         string
+	pollInterval      time.Duration
+	notifyInterval    time.Duration
+	userUniqueID      string
+	liveName          string
+	title             string
+	avatarThumb       string
+	accountOnly       bool
+	knownValid        bool
+	statusUnknown     bool
+	pendingClients    int
+	starting          bool
+	sessionGeneration uint64
+	closed            bool
+	upstreamReady     bool
+	monitor           *roomMonitorLoop
+	lifecycleCtx      context.Context
+	lifecycleCancel   context.CancelFunc
+	tasks             sync.WaitGroup
+	activeTasks       int
+	closeDone         chan struct{}
+	closeDoneOnce     sync.Once
+}
+
+// detachedRoomWorkers contains one generation of room-owned upstream resources.
+// detachedRoomWorkers 保存一次房间会话代次中已经原子摘除的上游资源。
+type detachedRoomWorkers struct {
+	douyinLive  *douyinLive.DouyinLive
+	probeLive   *douyinLive.DouyinLive
+	monitorDone <-chan struct{}
 }
 
 // roomSnapshot is a read-only view exposed by the HTTP API.
@@ -85,6 +93,9 @@ type roomSnapshot struct {
 	HasRoom       *bool
 	AccountOnly   *bool
 	Title         string
+	UserUniqueID  string
+	LiveName      string
+	AvatarThumb   string
 	ClientCount   int
 	UpstreamReady bool
 	StatusUnknown bool
@@ -115,7 +126,7 @@ func (r *Room) snapshot() roomSnapshot {
 		isLive, hasRoom, accountOnly = &live, &has, &accountOnlyValue
 	} else if r.statusUnknown {
 		status = "unknown"
-	} else if r.monitorStopCh != nil || r.knownValid {
+	} else if r.monitor != nil || r.knownValid {
 		status = "offline"
 		value := false
 		isLive = &value
@@ -125,6 +136,9 @@ func (r *Room) snapshot() roomSnapshot {
 		accountOnly = &accountOnlyValue
 	}
 	title := r.title
+	userUniqueID := r.userUniqueID
+	liveName := r.liveName
+	avatarThumb := r.avatarThumb
 	knownValid := r.knownValid
 	upstreamReady := r.upstreamReady
 	statusUnknown := r.statusUnknown
@@ -135,15 +149,24 @@ func (r *Room) snapshot() roomSnapshot {
 	roomID := ""
 	if d != nil {
 		roomID = d.GetRoomID()
+		if userUniqueID == "" {
+			userUniqueID = d.GetUserUniqueID()
+		}
+		if liveName == "" {
+			liveName = d.GetName()
+		}
 		if title == "" {
 			title = d.GetTitle()
+		}
+		if avatarThumb == "" {
+			avatarThumb = d.GetAvatarThumb()
 		}
 	}
 	if !knownValid && !upstreamReady && !statusUnknown {
 		status = "unknown"
 		isLive = nil
 	}
-	return roomSnapshot{LiveID: r.id, RoomID: roomID, Status: status, IsLive: isLive, HasRoom: hasRoom, AccountOnly: accountOnly, Title: title, ClientCount: r.clientCount(), UpstreamReady: upstreamReady, StatusUnknown: statusUnknown}
+	return roomSnapshot{LiveID: r.id, RoomID: roomID, Status: status, IsLive: isLive, HasRoom: hasRoom, AccountOnly: accountOnly, Title: title, UserUniqueID: userUniqueID, LiveName: liveName, AvatarThumb: avatarThumb, ClientCount: r.clientCount(), UpstreamReady: upstreamReady, StatusUnknown: statusUnknown}
 }
 
 // setStatusUnknown 记录监控阶段当前是否只能得到“状态未知”。
@@ -235,11 +258,22 @@ func NewRoom(id string, logger *appLogger, unknown bool, cookie string, signProv
 // startTask starts a room-owned background task unless the room is already closed.
 // startTask 在房间关闭前启动一个由房间管理的后台任务；关闭后拒绝新任务。
 func (r *Room) startTask(task func()) bool {
+	return r.startTaskInternal(task, nil)
+}
+
+// startTaskForGeneration starts a task only while the specified room session
+// generation is still current.
+// startTaskForGeneration 仅在指定房间会话代次仍有效时启动任务。
+func (r *Room) startTaskForGeneration(sessionGeneration uint64, task func()) bool {
+	return r.startTaskInternal(task, &sessionGeneration)
+}
+
+func (r *Room) startTaskInternal(task func(), sessionGeneration *uint64) bool {
 	if r == nil || task == nil {
 		return false
 	}
 	r.mu.Lock()
-	if r.closed {
+	if r.closed || (sessionGeneration != nil && r.sessionGeneration != *sessionGeneration) {
 		r.mu.Unlock()
 		return false
 	}
@@ -289,31 +323,70 @@ func (r *Room) hasKnownValidRoom() bool {
 	return r.knownValid
 }
 
-// closeBackgroundWorkers 停止房间后台监控和上游直播监听。
-// closeBackgroundWorkers stops room background monitoring and upstream live listening.
-func (r *Room) closeBackgroundWorkers() {
-	r.stopMonitorLoop()
-	r.closeDouyinLive()
-	r.removeIfIdle()
-}
-
-// closeDouyinLive 关闭当前上游抖音直播连接。
-// closeDouyinLive closes the current upstream Douyin live connection.
-func (r *Room) closeDouyinLive() {
+// detachBackgroundWorkersIfIdle atomically retires the current session generation
+// only when the room is still clientless. A client that arrives before this
+// decision keeps the current generation; a client that arrives afterwards starts
+// against the next generation and cannot be affected by the stale cleanup.
+// detachBackgroundWorkersIfIdle 仅在房间仍无客户端时原子摘除当前会话代次。
+func (r *Room) detachBackgroundWorkersIfIdle() (detachedRoomWorkers, bool) {
 	r.mu.Lock()
-	d := r.douyinLive
-	probe := r.probeLive
+	r.clientsMu.RLock()
+	idle := len(r.clients) == 0 && r.pendingClients == 0
+	r.clientsMu.RUnlock()
+	if r.closed || !idle {
+		r.mu.Unlock()
+		return detachedRoomWorkers{}, false
+	}
+
+	workers := detachedRoomWorkers{
+		douyinLive: r.douyinLive,
+		probeLive:  r.probeLive,
+	}
+	if r.monitor != nil {
+		workers.monitorDone = r.monitor.doneCh
+		r.monitor.stop()
+		r.monitor = nil
+	}
 	r.douyinLive = nil
 	r.probeLive = nil
 	r.probeFailures = 0
+	r.upstreamReady = false
+	r.starting = false
+	r.sessionGeneration++
 	r.mu.Unlock()
+	return workers, true
+}
 
-	if d != nil {
-		d.Close()
+// close releases resources that were already detached from the room state.
+// close 释放已经从房间状态中摘除的资源，不会触碰后续代次的新会话。
+func (workers detachedRoomWorkers) close(r *Room) {
+	if workers.monitorDone != nil {
+		select {
+		case <-workers.monitorDone:
+		case <-time.After(1500 * time.Millisecond):
+			if r != nil {
+				r.logger.Warn("等待监控循环退出超时，跳过阻塞等待", "room_id", r.id)
+			}
+		}
 	}
-	if probe != nil && probe != d {
-		probe.Dispose()
+	if workers.douyinLive != nil {
+		workers.douyinLive.Close()
 	}
+	if workers.probeLive != nil && workers.probeLive != workers.douyinLive {
+		workers.probeLive.Dispose()
+	}
+}
+
+// closeBackgroundWorkersIfIdle stops the retired generation without touching a
+// client or upstream session that may have arrived in the meantime.
+// closeBackgroundWorkersIfIdle 仅清理确认无客户端时摘除的旧代次资源。
+func (r *Room) closeBackgroundWorkersIfIdle() {
+	workers, ok := r.detachBackgroundWorkersIfIdle()
+	if !ok {
+		return
+	}
+	workers.close(r)
+	r.removeIfIdle()
 }
 
 // removeIfIdle 在房间无客户端且无后台任务时从管理器移除房间。
@@ -323,7 +396,7 @@ func (r *Room) removeIfIdle() {
 	r.clientsMu.RLock()
 	clientCount := len(r.clients)
 	r.clientsMu.RUnlock()
-	idle := !r.closed && clientCount == 0 && r.pendingClients == 0 && r.douyinLive == nil && r.probeLive == nil && r.monitorStopCh == nil && !r.starting && r.activeTasks == 0
+	idle := !r.closed && clientCount == 0 && r.pendingClients == 0 && r.douyinLive == nil && r.probeLive == nil && r.monitor == nil && !r.starting && r.activeTasks == 0
 	if idle {
 		r.closed = true
 		if r.lifecycleCancel != nil {

@@ -1,6 +1,6 @@
 # DouyinLive HTTP API
 
-v2.2.0 在现有 WebSocket 端口上提供只读 HTTP API。查询未连接的直播间时，服务会执行一次 HTTP 状态探测，不会创建长期 WebSocket 房间。
+v2.2.1 在现有 WebSocket 端口上继续提供只读 HTTP API，并新增独立主播资料查询。查询未连接的直播间时，服务会执行一次 HTTP 状态探测，不会创建长期 WebSocket 房间。
 
 ## 认证
 
@@ -25,6 +25,7 @@ API Key 不支持通过 URL 参数传递，也不会写入日志。
 | GET | `/api/v1/rooms` | 当前已建立/监控中的房间，不触发上游请求 |
 | GET | `/api/v1/rooms/{live_id}` | 查询直播间状态、标题和房间标识 |
 | GET | `/api/v1/rooms/{live_id}/status` | 只返回状态的快捷查询 |
+| GET | `/api/v1/rooms/{live_id}/anchor` | 查询主播公开资料，不要求房间已建立 WebSocket |
 | POST | `/api/v1/rooms/status:batch` | 批量查询多个直播间状态，最多 50 个 |
 | GET | `/api/v1/rooms/resolve?url=...` | 解析 douyin.com 直播间 URL，不访问传入 URL |
 
@@ -41,15 +42,17 @@ API Key 不支持通过 URL 参数传递，也不会写入日志。
 
 `online`、`offline`、`account_no_room` 返回 HTTP 200；明确不存在返回 404；超时、风控页或无法验证返回 503；参数错误返回 400。
 
-所有响应都包含 `request_id`，同时写入响应头 `X-Request-ID`。错误响应不会包含 Cookie、`msToken`、`a_bogus`、WebSocket `signature` 或完整上游 URL。
+所有 JSON envelope 都包含 `request_id`；全部端点（包括 `/metrics` 和 `304`）都会写入响应头 `X-Request-ID`。错误响应不会包含 Cookie、`msToken`、`a_bogus`、WebSocket `signature` 或完整上游 URL。
 
 认证失败返回 `401` 和 `WWW-Authenticate`；方法不支持时返回 `405` 并带 `Allow`。批量请求严格要求单个 JSON 对象，最多 50 个直播间标识，请求体上限为 1 MiB，超过时返回 `413 request_too_large`。
 
 `GET /api/v1/rooms` 的活动房间条目始终包含 `client_count`、`upstream_ready` 和 `status_unknown`，即使对应值为 `0` 或 `false`；一次性查询接口不会返回这些仅属于活动连接的字段。同一 `live_id` 因不同 Cookie 建立多个内部上游会话时，此接口仍按逻辑直播间聚合为一个条目，并汇总客户端数量，不暴露 Cookie 或 Cookie 摘要。
 
-/health 与 /api/v1/health 使用相同的 JSON envelope；前者不要求 API Key，适合 Docker healthcheck。成功的 JSON 查询响应带有 ETag 和 Cache-Control: private, max-age=...，可使用 If-None-Match 获取 304 Not Modified。错误响应统一使用 Cache-Control: no-store；上游超时/不可验证的 503 响应包含 Retry-After: 5。
+/health 与 /api/v1/health 使用相同的 JSON envelope；前者不要求 API Key，适合 Docker healthcheck。成功的 GET JSON 查询响应带有弱 ETag（`W/"..."`）和 `Cache-Control: private, max-age=...`，可使用 `If-None-Match` 获取 `304 Not Modified`。弱 ETag 校验稳定业务数据，不把每次请求都会变化的 `request_id` 视为字节完全相同。批量 POST 始终使用 `Cache-Control: no-store`，不返回 ETag 或 304。错误响应统一使用 `Cache-Control: no-store`；上游超时/不可验证的 503 响应包含 `Retry-After: 5`。
 
-/metrics 返回 Prometheus 文本格式（不是 JSON envelope），其中 douyinlive_http_requests_total 统计 HTTP API 请求数，douyinlive_http_request_duration_seconds_sum 和 douyinlive_http_request_duration_seconds_count 用于统计 HTTP 请求耗时。
+/metrics 返回 Prometheus 文本格式（不是 JSON envelope）并使用 `Cache-Control: no-store`，其中 douyinlive_http_requests_total 统计 HTTP API 请求数，douyinlive_http_request_duration_seconds_sum 和 douyinlive_http_request_duration_seconds_count 用于统计 HTTP 请求耗时。
+
+`/api/v1/rooms/resolve` 通过是否存在 `url` 查询参数区分 URL 解析与普通房间查询：携带 `url` 时解析 URL；不携带时，合法直播间标识 `resolve` 仍可按 `/api/v1/rooms/{live_id}` 查询。
 
 配置 `api.key` 后，`/metrics` 也需要 `Authorization: Bearer <API_KEY>`；只有 `/health` 始终公开，便于 Docker healthcheck。
 
@@ -59,6 +62,7 @@ API Key 不支持通过 URL 参数传递，也不会写入日志。
 curl http://127.0.0.1:1088/api/v1/health
 curl http://127.0.0.1:1088/api/v1/rooms/516466932480
 curl http://127.0.0.1:1088/api/v1/rooms/516466932480/status
+curl http://127.0.0.1:1088/api/v1/rooms/516466932480/anchor
 curl -X POST -H 'Content-Type: application/json' \
   -d '{"live_ids":["516466932480","123456"]}' \
   http://127.0.0.1:1088/api/v1/rooms/status:batch
@@ -68,7 +72,7 @@ curl -H 'Authorization: Bearer YOUR_API_KEY' http://127.0.0.1:1088/api/v1/rooms
 
 URL 解析默认只允许 `douyin.com` 及其子域名。`api.allowed_domains` 只能填写 `douyin.com` 或其子域名，不能扩展到其他主域名；该字段用于收紧允许的抖音 Host 范围。仅接受 http/https、无 userinfo、无 query/fragment、无显式端口的 URL；解析接口只检查 URL 结构和域名，不会请求用户提交的 URL，避免形成 SSRF。
 
-HTTP API 仅提供直播间查询，不提供独立主播查询、发弹幕、点赞、礼物、配置修改或远程房间控制。返回字段只描述直播间状态、标题和房间标识，不承诺提供独立主播资料。批量接口中的 `live_ids` 必须唯一，重复标识返回 `400 duplicate_live_id`。
+完整房间查询会在上游可验证时返回 `anchor.user_unique_id`、`anchor.nickname` 和 `anchor.avatar_thumb`；主播资料子资源复用同一次性房间探测，不创建长期 Room 或 WebSocket。若房间状态可确认但主播资料暂时缺失，该子资源返回 `503 anchor_unverified`。HTTP API 不提供发弹幕、点赞、礼物、配置修改或远程房间控制。批量接口中的 `live_ids` 必须唯一，重复标识返回 `400 duplicate_live_id`。
 
 ## WebSocket 路由与认证
 

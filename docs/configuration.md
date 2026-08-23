@@ -60,7 +60,7 @@ unknown: false
 
 ### `websocket.path`
 
-本地 WebSocket 路由前缀，默认是 `/ws`。例如设置为 `/live-stream` 后，客户端使用 `/live-stream/{live_id}` 连接。不能与 `/health`、`/metrics` 或 `/api/*` 等保留 HTTP 路由冲突。
+本地 WebSocket 路由前缀，默认是 `/ws`。例如设置为 `/live-stream` 后，客户端使用 `/live-stream/{live_id}` 连接。不能与 `/health`、`/metrics` 或 `/api/*` 等保留 HTTP 路由冲突；配置值是字面路径，不允许 ServeMux 通配符花括号或百分号编码路径。
 
 ```yaml
 websocket:
@@ -269,8 +269,13 @@ ws://127.0.0.1:1088/ws/直播间ID?cookie=URL_ENCODED_COOKIE
 | `websocket.allowed_origins` | `APP_WEBSOCKET_ALLOWED_ORIGINS` |
 | `cookie.use_stored` | `APP_COOKIE_USE_STORED` |
 | `cookie.douyin` | `APP_COOKIE_DOUYIN` |
+| `cookie.rooms` | `APP_COOKIE_ROOMS` |
 | `monitor.poll_interval` | `APP_MONITOR_POLL_INTERVAL` |
 | `monitor.notify_interval` | `APP_MONITOR_NOTIFY_INTERVAL` |
+
+列表环境变量 `APP_API_ALLOWED_DOMAINS` 和 `APP_WEBSOCKET_ALLOWED_ORIGINS` 支持逗号分隔、空白分隔或 JSON 字符串数组。例如：`APP_API_ALLOWED_DOMAINS=live.douyin.com,www.douyin.com`。
+
+`APP_COOKIE_ROOMS` 使用 JSON 字符串对象，并完整覆盖配置文件中的 `cookie.rooms`，例如：`APP_COOKIE_ROOMS={"AbC123":"room-cookie"}`。房间号大小写会原样保留。
 
 命令行参数优先级高于环境变量，环境变量高于配置文件，配置文件高于程序默认值。Cookie 也可以通过 WebSocket URL 的 `cookie_b64` 或 `cookie` 参数临时覆盖，但不建议把 Cookie 长期放在 URL、Shell 历史或进程列表中。
 

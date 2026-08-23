@@ -64,9 +64,43 @@ func (r *Room) updateMetadataFromDouyinLive(d *douyinLive.DouyinLive) {
 	liveName := d.GetName()
 	title := d.GetTitle()
 	avatarThumb := d.GetAvatarThumb()
+	userUniqueID := d.GetUserUniqueID()
 	accountOnly := d.HasAnchorOnlyPageIdentity()
 
 	r.mu.Lock()
+	r.applyMetadataLocked(userUniqueID, liveName, title, avatarThumb, accountOnly)
+	r.mu.Unlock()
+}
+
+// commitProbeMetadataForGeneration applies one probe result only while the
+// probe instance and room-session generation are still current.
+// commitProbeMetadataForGeneration 仅在探测实例及房间会话代次仍有效时提交元数据。
+func (r *Room) commitProbeMetadataForGeneration(d *douyinLive.DouyinLive, sessionGeneration uint64, knownValid bool) bool {
+	if d == nil {
+		return false
+	}
+	userUniqueID := d.GetUserUniqueID()
+	liveName := d.GetName()
+	title := d.GetTitle()
+	avatarThumb := d.GetAvatarThumb()
+	accountOnly := d.HasAnchorOnlyPageIdentity()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.sessionGeneration != sessionGeneration || r.probeLive != d {
+		return false
+	}
+	r.applyMetadataLocked(userUniqueID, liveName, title, avatarThumb, accountOnly)
+	if knownValid {
+		r.knownValid = true
+	}
+	return true
+}
+
+func (r *Room) applyMetadataLocked(userUniqueID, liveName, title, avatarThumb string, accountOnly bool) {
+	if userUniqueID != "" {
+		r.userUniqueID = userUniqueID
+	}
 	if liveName != "" {
 		r.liveName = liveName
 	}
@@ -81,7 +115,6 @@ func (r *Room) updateMetadataFromDouyinLive(d *douyinLive.DouyinLive) {
 	} else {
 		r.accountOnly = false
 	}
-	r.mu.Unlock()
 }
 
 func (r *Room) metadataSnapshot() (string, string, string, bool) {
@@ -195,16 +228,4 @@ func (r *Room) notifyMonitorStatus() {
 		return
 	}
 	r.notifyOfflineStatus()
-}
-
-// notifyOfflineEndedStatus 广播已下播状态通知。
-// notifyOfflineEndedStatus broadcasts the ended-offline status notification.
-func (r *Room) notifyOfflineEndedStatus() {
-	r.Broadcast(r.offlineEndedStatusMessage())
-}
-
-// notifyOnlineStatus 广播已开播状态通知。
-// notifyOnlineStatus broadcasts the online status notification.
-func (r *Room) notifyOnlineStatus() {
-	r.Broadcast(r.onlineStatusMessage())
 }

@@ -2,8 +2,6 @@ package douyinLive
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -323,8 +321,10 @@ func (s *localWebsocketSigner) Close() {
 // tikhubWebsocketSigner 使用 TikHub 在线 API 计算 WebSocket 签名。
 // tikhubWebsocketSigner generates WebSocket signatures through TikHub's online API.
 type tikhubWebsocketSigner struct {
+	mu     sync.Mutex
 	token  string
 	client *tikhub.Client
+	closed bool
 }
 
 // newTikHubWebsocketSigner 创建 TikHub 在线签名器。
@@ -355,20 +355,15 @@ func (s *tikhubWebsocketSigner) LogStatus(logger logSink, liveID string) {
 	if logger == nil {
 		return
 	}
+	s.mu.Lock()
 	token := strings.TrimSpace(s.token)
+	s.mu.Unlock()
 	if token == "" {
 		logger.Warn("TikHub API Key 未配置", "live_id", liveID)
 		return
 	}
 
-	hash := sha256.Sum256([]byte(token))
-	logger.Info(
-		"TikHub API Key 已加载",
-		"live_id", liveID,
-		"key_len", len(token),
-		"key_mask", maskSecret(token),
-		"key_sha256_8", hex.EncodeToString(hash[:])[:8],
-	)
+	logger.Info("TikHub API Key 已加载", "live_id", liveID)
 }
 
 // UpdateUserAgent 将当前 UA 同步到 TikHub HTTP 客户端。
@@ -376,13 +371,19 @@ func (s *tikhubWebsocketSigner) LogStatus(logger logSink, liveID string) {
 // 参数/Parameters:
 //   - userAgent: 新的浏览器 User-Agent。 New browser User-Agent.
 func (s *tikhubWebsocketSigner) UpdateUserAgent(userAgent string) {
-	if s.client == nil {
-		s.client = newTikHubClient(s.token, userAgent)
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
 		return
 	}
-	client := s.client.ReqClient()
-	if client != nil {
-		client.SetUserAgent(userAgent)
+	oldClient := s.client
+	s.client = newTikHubClient(s.token, userAgent)
+	s.mu.Unlock()
+
+	// Replace the client instead of mutating one that may already be serving a
+	// Sign request. Closing idle connections does not interrupt active requests.
+	if oldClient != nil {
+		closeHTTPClientIdleConnections(oldClient.ReqClient())
 	}
 }
 
@@ -394,18 +395,29 @@ func (s *tikhubWebsocketSigner) UpdateUserAgent(userAgent string) {
 //   - userUniqueID: WebSocket 签名所需的用户唯一 ID。 User unique ID required for WebSocket signing.
 //   - userAgent: 当前浏览器 User-Agent。 Current browser User-Agent.
 func (s *tikhubWebsocketSigner) Sign(ctx context.Context, roomID, userUniqueID, userAgent string) (string, error) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return "", ErrDouyinLiveClosed
+	}
 	token := strings.TrimSpace(s.token)
 	if token == "" {
+		s.mu.Unlock()
 		return "", ErrTikHubTokenEmpty
 	}
 	if roomID == "" || userUniqueID == "" {
+		s.mu.Unlock()
 		return "", fmt.Errorf("%w: room_id 或 user_unique_id 为空", ErrTikHubSignInvalid)
 	}
 
-	if s.client == nil {
-		s.client = newTikHubClient(token, userAgent)
+	client := s.client
+	if client == nil {
+		client = newTikHubClient(token, userAgent)
+		s.client = client
 	}
-	resp, err := s.client.DouyinWeb.GenerateWssXbSignature(ctx, tikhub.DouyinWebGenerateWssXbSignatureRequest{
+	s.mu.Unlock()
+
+	resp, err := client.DouyinWeb.GenerateWssXbSignature(ctx, tikhub.DouyinWebGenerateWssXbSignatureRequest{
 		UserAgent:    userAgent,
 		RoomID:       roomID,
 		UserUniqueID: userUniqueID,
@@ -437,28 +449,34 @@ func (s *tikhubWebsocketSigner) Sign(ctx context.Context, roomID, userUniqueID, 
 	return signature, nil
 }
 
+// Close releases idle HTTP connections owned by the TikHub signer.
+// Close 释放 TikHub 签名器持有的 HTTP 空闲连接；可安全重复调用。
+func (s *tikhubWebsocketSigner) Close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.closed = true
+	client := s.client
+	s.client = nil
+	s.token = ""
+	s.mu.Unlock()
+
+	if client != nil {
+		closeHTTPClientIdleConnections(client.ReqClient())
+	}
+}
+
 // isTikHubSuccessCode 判断 TikHub 业务状态码是否表示成功。
 // isTikHubSuccessCode reports whether a TikHub business code indicates success.
 // 参数/Parameters:
 //   - code: TikHub 响应中的业务状态码。 Business status code returned by TikHub.
 func isTikHubSuccessCode(code int) bool {
 	return code == 0 || code == http.StatusOK
-}
-
-// maskSecret 掩码敏感值，仅保留首尾少量字符。
-// maskSecret masks a secret value while keeping a small prefix and suffix.
-// 参数/Parameters:
-//   - value: 待掩码的敏感字符串。 Sensitive string to mask.
-func maskSecret(value string) string {
-	value = strings.TrimSpace(value)
-	switch {
-	case value == "":
-		return ""
-	case len(value) <= 8:
-		return strings.Repeat("*", len(value))
-	default:
-		return value[:4] + strings.Repeat("*", len(value)-8) + value[len(value)-4:]
-	}
 }
 
 // firstNonEmptyString 返回第一个去空白后非空的字符串。

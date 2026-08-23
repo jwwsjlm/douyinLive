@@ -397,6 +397,130 @@ func TestClientCloseAllowsNilConn(t *testing.T) {
 	client.close(normalClientClose)
 }
 
+func TestClientBeginCloseStartsTransportAsynchronously(t *testing.T) {
+	client := NewClient("client-1", nil)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	client.closeTransport = func(*Client, clientCloseDirective) {
+		close(started)
+		<-release
+	}
+
+	client.beginClose(normalClientClose)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("transport close handshake did not start")
+	}
+	close(release)
+	released = true
+	select {
+	case <-client.closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("transport close handshake did not finish")
+	}
+}
+
+func TestRoomCloseAllClientsStartsSlowClosuresConcurrently(t *testing.T) {
+	room := NewRoom("1001", nil, false, "", signProviderLocal, "", time.Second, time.Second, nil)
+	started := make(chan string, 3)
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	for index := 0; index < 3; index++ {
+		client := NewClient(string(rune('a'+index)), nil)
+		client.closeTransport = func(client *Client, _ clientCloseDirective) {
+			started <- client.id
+			<-release
+		}
+		addTestClient(room, client)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		room.closeAllClients(serviceClientClose)
+		close(done)
+	}()
+	seen := make(map[string]struct{}, 3)
+	for len(seen) < 3 {
+		select {
+		case id := <-started:
+			seen[id] = struct{}{}
+		case <-time.After(time.Second):
+			t.Fatalf("only %d of 3 close handshakes started concurrently", len(seen))
+		}
+	}
+	close(release)
+	released = true
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("closeAllClients did not finish after all transports were released")
+	}
+	if got := room.clientCount(); got != 0 {
+		t.Fatalf("client count after closeAllClients = %d, want 0", got)
+	}
+}
+
+func TestBroadcastDoesNotBlockOnSlowClientClose(t *testing.T) {
+	room := NewRoom("1001", nil, false, "", signProviderLocal, "", time.Second, time.Second, nil)
+	client := NewClient("slow", nil)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	client.closeTransport = func(*Client, clientCloseDirective) {
+		close(started)
+		<-release
+	}
+	addTestClient(room, client)
+	for index := 0; index < cap(client.sendQueue); index++ {
+		if got := client.enqueueWithResult(gws.OpcodeText, []byte("queued")); got != enqueueAccepted {
+			t.Fatalf("fill send queue at %d: result=%v", index, got)
+		}
+	}
+
+	broadcastDone := make(chan struct{})
+	go func() {
+		room.Broadcast([]byte("overflow"))
+		close(broadcastDone)
+	}()
+	select {
+	case <-broadcastDone:
+	case <-time.After(time.Second):
+		t.Fatal("Broadcast blocked on a slow client's close handshake")
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("slow client close handshake did not start")
+	}
+	if got := room.clientCount(); got != 0 {
+		t.Fatalf("slow client remained in room: client_count=%d", got)
+	}
+	close(release)
+	released = true
+	select {
+	case <-client.closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("slow client close handshake did not finish")
+	}
+}
+
 func TestClientEnqueueRejectsMessagesAfterClose(t *testing.T) {
 	client := NewClient("client-1", nil)
 	client.close(normalClientClose)

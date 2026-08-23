@@ -100,11 +100,20 @@ func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error
 		ctx = context.Background()
 	}
 
+	// A zero-value Config remains compatible with the pre-v2.2.1 behavior:
+	// configured cookies are used unless the caller explicitly opts out. The
+	// config loader marks cookie.use_stored as explicit even when it is false.
+	// 零值 Config 保持 v2.2.1 前兼容语义：除非调用方显式关闭，否则使用预存
+	// Cookie；配置加载器会把 cookie.use_stored=false 标记为显式配置。
+	var useStoredCookie *bool
+	if config.Cookie.useStoredSet || config.Cookie.UseStored {
+		useStoredCookie = boolPtr(config.Cookie.UseStored)
+	}
 	roomManager := NewRoomManagerWithOptions(RoomManagerOptions{
 		Logger: logger, Unknown: config.Unknown, Cookie: config.Cookie.Douyin,
 		RoomCookies: config.Cookie.Rooms, SignProvider: config.Sign.Provider,
 		TikHubKey: config.TikHub.Key, PollInterval: config.Monitor.PollInterval,
-		NotifyInterval: config.Monitor.NotifyInterval, UseStoredCookie: boolPtr(config.Cookie.UseStored),
+		NotifyInterval: config.Monitor.NotifyInterval, UseStoredCookie: useStoredCookie,
 	})
 	metrics := newAPIMetrics()
 	roomManager.metrics = metrics
@@ -121,9 +130,10 @@ func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error
 // Run 启动 WebSocket HTTP 服务，并在端口占用时自动尝试下一个端口。
 // Run starts the WebSocket HTTP server and tries the next port when the configured one is busy.
 func (a *App) Run() error {
-	mux := http.NewServeMux()
-	mux.HandleFunc(a.websocketRoutePrefix(), a.handleWebSocket)
-	a.registerHTTPAPI(mux)
+	mux, err := a.buildHTTPMux()
+	if err != nil {
+		return err
+	}
 
 	port, err := parseConfiguredPort(a.config.Port)
 	if err != nil {
@@ -152,6 +162,24 @@ func (a *App) Run() error {
 	close(a.ready)
 	a.logger.Info("WebSocket 服务监听中", "port", a.runningPort)
 	return a.httpServer.Serve(listener)
+}
+
+// buildHTTPMux registers application routes and converts ServeMux pattern
+// panics into ordinary startup errors. Configuration validation should reject
+// invalid patterns first, but this guard also protects programmatic callers
+// that mutate an App configuration after construction.
+// buildHTTPMux 注册应用路由，并把 ServeMux pattern panic 转换为普通启动错误。
+func (a *App) buildHTTPMux() (mux *http.ServeMux, err error) {
+	mux = http.NewServeMux()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			mux = nil
+			err = fmt.Errorf("注册 HTTP 路由失败: %v", recovered)
+		}
+	}()
+	mux.HandleFunc(a.websocketRoutePrefix(), a.handleWebSocket)
+	a.registerHTTPAPI(mux)
+	return mux, nil
 }
 
 func (a *App) websocketRoutePrefix() string {

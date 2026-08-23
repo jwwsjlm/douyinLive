@@ -19,7 +19,7 @@ ws://127.0.0.1:1088/ws/直播间标识
 如果你需要固定版本，也可以直接拉指定 tag：
 
 ```bash
-docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:v2.1.0
+docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:v2.2.1
 ```
 
 测试版不会覆盖 `latest`。如果你要验证某个测试版，请把下面的 `<tag>` 替换为实际发布的 beta tag：
@@ -32,7 +32,7 @@ docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:<tag>
 Docker 镜像也支持查看构建信息：
 
 ```bash
-docker run --rm ghcr.io/jwwsjlm/douyinlive:v2.1.0 --version
+docker run --rm ghcr.io/jwwsjlm/douyinlive:v2.2.1 --version
 ```
 
 如果要使用 TikHub 在线签名，仍然使用同一个镜像，只需要在配置文件、环境变量或命令行里指定签名来源并提供 TikHub API Key：
@@ -41,7 +41,7 @@ docker run --rm ghcr.io/jwwsjlm/douyinlive:v2.1.0 --version
 docker run --rm -p 1088:1088 \
   -e APP_SIGN_PROVIDER=tikhub \
   -e APP_TIKHUB_KEY=YOUR_TIKHUB_KEY \
-  ghcr.io/jwwsjlm/douyinlive:v2.1.0
+  ghcr.io/jwwsjlm/douyinlive:v2.2.1
 ```
 
 ## 2. 通过 Docker 挂载 `config.yaml`

@@ -75,11 +75,13 @@ docker run --rm -p 1088:1088 ghcr.io/jwwsjlm/douyinlive:latest
 
 长期运行、配置挂载和 Docker Compose 请阅读 [Docker 部署文档](docs/docker.md)。
 
+> **公网部署提醒**：是否把服务暴露到公网由使用者自行决定，项目不会强制开启 API Key。默认未配置 Key 时，HTTP API 和 WebSocket 均可匿名访问；若端口可从公网访问，建议配置 `api.key` / `APP_API_KEY`，并配合防火墙、反向代理和限速策略。
+
 ## HTTP API 与后端服务
 
-很多项目会直接把 `douyinLive` 作为后端服务使用，因此 v2.2.0 在保留 Go 库用法和原有 WebSocket 行为的基础上，增强了独立服务能力：
+很多项目会直接把 `douyinLive` 作为后端服务使用，因此 v2.2 系列在保留 Go 库用法和原有 WebSocket 行为的基础上，持续增强独立服务能力；v2.2.1 进一步补充了主播资料查询与服务稳定性修复：
 
-- 不建立长期 WebSocket，也可以查询直播状态和直播间信息
+- 不建立长期 WebSocket，也可以查询直播状态、直播间信息和主播公开资料
 - 支持批量状态查询和 `douyin.com` 直播间 URL 解析
 - 提供 `/health`、`/metrics` 和 OpenAPI 描述
 - 支持自定义 WebSocket 路由，以及 HTTP/WebSocket 共用的可选 API Key
@@ -150,7 +152,7 @@ cp config.example.yaml config.yaml
 | [Docker 部署](docs/docker.md) | Docker、Compose、配置挂载和长期运行 |
 | [CLI 使用指南](docs/cli.md) | 参数、日志、签名方式和故障排查 |
 | [配置文件](docs/configuration.md) | YAML、环境变量、Cookie 和配置优先级 |
-| [HTTP API](docs/http-api.md) | 只读查询、批量状态、URL 解析、认证和指标 |
+| [HTTP API](docs/http-api.md) | 直播间与主播资料查询、批量状态、URL 解析、认证和指标 |
 | [OpenAPI](docs/openapi.yaml) | HTTP API 的机器可读接口定义 |
 | [作为 Go 库使用](docs/library.md) | 状态检查、订阅、protobuf 和生命周期 |
 | [WebSocket 客户端与消息格式](docs/websocket-client.md) | 客户端接入、系统状态和业务消息 |

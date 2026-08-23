@@ -142,6 +142,48 @@ func TestNewAppRejectsNilConfig(t *testing.T) {
 	}
 }
 
+func TestNewAppProgrammaticCookieDefaultsAndExplicitOptOut(t *testing.T) {
+	base := Config{
+		Port: "1088", Cookie: CookieConfig{Douyin: "global-cookie", Rooms: map[string]string{"room": "room-cookie"}},
+		Monitor: MonitorConfig{PollInterval: time.Second, NotifyInterval: time.Second}, Sign: SignConfig{Provider: signProviderLocal},
+	}
+	app, err := NewApp(context.Background(), &base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := app.roomManager.cookieForRoom("room", ""); got != "room-cookie" {
+		t.Fatalf("zero-value programmatic config cookie = %q, want room-cookie", got)
+	}
+	app.roomManager.Close()
+
+	base.Cookie.SetUseStoredCookie(false)
+	app, err = NewApp(context.Background(), &base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.roomManager.Close()
+	if got := app.roomManager.cookieForRoom("room", ""); got != "" {
+		t.Fatalf("explicit cookie opt-out = %q, want empty", got)
+	}
+}
+
+func TestBuildHTTPMuxConvertsInvalidPatternPanicToError(t *testing.T) {
+	app, err := NewApp(context.Background(), &Config{
+		Port:    "1088",
+		Monitor: MonitorConfig{PollInterval: time.Second, NotifyInterval: time.Second},
+		Sign:    SignConfig{Provider: signProviderLocal},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a programmatic mutation after NewApp validation. Run must still
+	// return an error instead of allowing net/http ServeMux to panic.
+	app.config.WebSocket.Path = "/live/{broken"
+	if mux, err := app.buildHTTPMux(); err == nil || mux != nil {
+		t.Fatalf("buildHTTPMux() = (%v, %v), want nil mux and pattern error", mux, err)
+	}
+}
+
 func TestAppRunAndShutdownGracefully(t *testing.T) {
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

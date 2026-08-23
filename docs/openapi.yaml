@@ -8,7 +8,10 @@ info:
   description: >-
     Read-only live-room status and metadata API. Queries do not create a
     long-lived WebSocket room. The WebSocket endpoint is configured separately
-    with websocket.path and defaults to /ws/{live_id}.
+    with websocket.path and defaults to /ws/{live_id}. Authentication is
+    runtime-conditional: anonymous access is allowed when api.key is empty;
+    when api.key is configured, bearerAuth is required everywhere except
+    /health. Every endpoint accepts X-Request-ID and returns X-Request-ID.
 servers:
   - url: http://127.0.0.1:1088
 security:
@@ -26,13 +29,22 @@ paths:
       operationId: getPublicHealth
       summary: Basic service health
       security: [{}]
+      parameters:
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: Health envelope
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Cache-Control: {$ref: '#/components/headers/CacheControl'}
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthEnvelope'
+        '304':
+          $ref: '#/components/responses/NotModified'
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /metrics:
@@ -44,29 +56,44 @@ paths:
       security:
         - bearerAuth: []
         - {}
+      parameters:
+        - $ref: '#/components/parameters/RequestID'
       responses:
         '200':
           description: Prometheus text exposition
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
           content:
             text/plain:
               schema:
                 type: string
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
   /api/v1/health:
     get:
       tags: [Service]
       operationId: getVersionedHealth
       summary: Versioned service health
+      parameters:
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: Health envelope
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Cache-Control: {$ref: '#/components/headers/CacheControl'}
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthEnvelope'
         '304':
-          description: Not modified when If-None-Match matches
+          $ref: '#/components/responses/NotModified'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '405':
@@ -76,34 +103,52 @@ paths:
       tags: [Service]
       operationId: getCapabilities
       summary: List read-only API and WebSocket capabilities
+      parameters:
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: Capabilities envelope
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Cache-Control: {$ref: '#/components/headers/CacheControl'}
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CapabilitiesEnvelope'
         '304':
-          description: Not modified when If-None-Match matches
+          $ref: '#/components/responses/NotModified'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
   /api/v1/rooms:
     get:
       tags: [Rooms]
       operationId: listActiveRooms
       summary: List active or monitored rooms
       description: Does not trigger an upstream request. Cookie-specific internal sessions for the same live_id are aggregated into one logical room entry.
+      parameters:
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: Active room snapshots
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Cache-Control: {$ref: '#/components/headers/CacheControl'}
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoomListEnvelope'
         '304':
-          description: Not modified when If-None-Match matches
+          $ref: '#/components/responses/NotModified'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
   /api/v1/rooms/{live_id}:
     get:
       tags: [Rooms]
@@ -112,16 +157,21 @@ paths:
       description: Performs a one-shot upstream HTTP query without creating a managed room.
       parameters:
         - $ref: '#/components/parameters/LiveID'
+        - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: Room status and metadata
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Cache-Control: {$ref: '#/components/headers/CacheControl'}
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoomEnvelope'
         '304':
-          description: Not modified when If-None-Match matches
+          $ref: '#/components/responses/NotModified'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -139,16 +189,54 @@ paths:
       summary: Query room status only
       parameters:
         - $ref: '#/components/parameters/LiveID'
+        - $ref: '#/components/parameters/RequestID'
         - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: Room status
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Cache-Control: {$ref: '#/components/headers/CacheControl'}
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/StatusEnvelope'
         '304':
-          description: Not modified when If-None-Match matches
+          $ref: '#/components/responses/NotModified'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '503':
+          $ref: '#/components/responses/UpstreamUnavailable'
+  /api/v1/rooms/{live_id}/anchor:
+    get:
+      tags: [Rooms]
+      operationId: getRoomAnchor
+      summary: Query public anchor profile
+      description: Performs the same one-shot room probe without creating a managed Room or WebSocket. Returns 503 when room status is verified but no anchor identity field can be verified.
+      parameters:
+        - $ref: '#/components/parameters/LiveID'
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Public anchor profile with room context
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Cache-Control: {$ref: '#/components/headers/CacheControl'}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnchorProfileEnvelope'
+        '304':
+          $ref: '#/components/responses/NotModified'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -164,7 +252,12 @@ paths:
       tags: [Rooms]
       operationId: batchGetRoomStatus
       summary: Query multiple room statuses
-      description: Queries up to 50 unique room identifiers with a bounded worker pool.
+      description: >-
+        Queries up to 50 unique room identifiers with a bounded worker pool.
+        This POST response is never conditionally cached and always uses
+        Cache-Control: no-store without an ETag.
+      parameters:
+        - $ref: '#/components/parameters/RequestID'
       requestBody:
         required: true
         content:
@@ -174,6 +267,11 @@ paths:
       responses:
         '200':
           description: Per-room results and summary counts
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+            Cache-Control:
+              description: Batch query responses are not stored.
+              schema: {type: string, enum: [no-store]}
           content:
             application/json:
               schema:
@@ -199,23 +297,34 @@ paths:
           schema:
             type: string
             format: uri
+        - $ref: '#/components/parameters/RequestID'
+        - $ref: '#/components/parameters/IfNoneMatch'
       responses:
         '200':
           description: Parsed room URL
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+            ETag: {$ref: '#/components/headers/ETag'}
+            Cache-Control: {$ref: '#/components/headers/CacheControl'}
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ResolvedURLEnvelope'
+        '304':
+          $ref: '#/components/responses/NotModified'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: API key
+      description: Required at runtime when api.key is configured; otherwise anonymous access is allowed.
   parameters:
     LiveID:
       name: live_id
@@ -229,11 +338,35 @@ components:
       name: If-None-Match
       in: header
       required: false
+      description: Weak or strong entity tag. GET endpoints use weak comparison against a weak ETag because request_id changes for every response envelope.
       schema:
         type: string
+    RequestID:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: Optional caller request identifier. Invalid values are replaced with a generated UUID.
+      schema:
+        type: string
+        maxLength: 128
+  headers:
+    XRequestID:
+      description: Request identifier used by this response.
+      schema: {type: string}
+    ETag:
+      description: Weak validator for stable response data.
+      schema:
+        type: string
+        pattern: '^W/"[0-9a-f]+"$'
+    CacheControl:
+      description: Response caching policy.
+      schema: {type: string}
   responses:
     BadRequest:
       description: Invalid request
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+        Cache-Control: {$ref: '#/components/headers/CacheControl'}
       content:
         application/json:
           schema:
@@ -243,12 +376,17 @@ components:
       headers:
         WWW-Authenticate:
           schema: {type: string}
+        X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+        Cache-Control: {$ref: '#/components/headers/CacheControl'}
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
     NotFound:
       description: Room does not exist
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+        Cache-Control: {$ref: '#/components/headers/CacheControl'}
       content:
         application/json:
           schema:
@@ -258,25 +396,44 @@ components:
       headers:
         Allow:
           schema: {type: string}
+        X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+        Cache-Control: {$ref: '#/components/headers/CacheControl'}
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
     UpstreamUnavailable:
-      description: Upstream status could not be verified
+      description: Upstream status or requested anchor metadata could not be verified
       headers:
         Retry-After:
           schema: {type: string}
+        X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+        Cache-Control: {$ref: '#/components/headers/CacheControl'}
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
     RequestTooLarge:
       description: Request body exceeds the 1 MiB limit
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/XRequestID'}
+        Cache-Control: {$ref: '#/components/headers/CacheControl'}
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
+    NotModified:
+      description: Not modified under weak If-None-Match comparison. The response has no body and includes the current X-Request-ID header.
+      headers:
+        ETag:
+          description: Weak validator for the stable response data.
+          schema:
+            type: string
+            pattern: '^W/"[0-9a-f]+"$'
+        Cache-Control:
+          schema: {type: string}
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestID'
   schemas:
     APIError:
       type: object
@@ -327,6 +484,7 @@ components:
         account_only: {type: boolean, nullable: true}
         room_id: {type: string}
         title: {type: string}
+        anchor: {$ref: '#/components/schemas/Anchor'}
         client_count: {type: integer, minimum: 0}
         upstream_ready: {type: boolean}
         status_unknown: {type: boolean}
@@ -374,6 +532,32 @@ components:
         - $ref: '#/components/schemas/Envelope'
       properties:
         data: {$ref: '#/components/schemas/Status'}
+    Anchor:
+      type: object
+      minProperties: 1
+      properties:
+        user_unique_id: {type: string}
+        nickname: {type: string}
+        avatar_thumb:
+          type: string
+          description: Upstream avatar value; usually an absolute URL, but not guaranteed to be URI-normalized.
+    AnchorProfile:
+      type: object
+      required: [live_id, status, anchor, source, checked_at]
+      properties:
+        live_id: {type: string}
+        room_id: {type: string}
+        status: {$ref: '#/components/schemas/RoomStatus'}
+        has_room: {type: boolean, nullable: true}
+        account_only: {type: boolean, nullable: true}
+        anchor: {$ref: '#/components/schemas/Anchor'}
+        source: {type: string, enum: [probe]}
+        checked_at: {type: string, format: date-time}
+    AnchorProfileEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+      properties:
+        data: {$ref: '#/components/schemas/AnchorProfile'}
     BatchStatusRequest:
       type: object
       additionalProperties: false

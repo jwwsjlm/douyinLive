@@ -1,13 +1,20 @@
 package douyinLive
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	tikhub "github.com/jwwsjlm/Tikhub"
 )
 
 type failingWebsocketSigner struct {
@@ -257,6 +264,172 @@ func TestNewDouyinLiveWithTikHubUsesTikHubSigner(t *testing.T) {
 
 	if got := dl.signer.Name(); got != SignProviderTikHub {
 		t.Fatalf("signer = %q, want %q", got, SignProviderTikHub)
+	}
+}
+
+func TestTikHubSignerLogDoesNotExposeKeyDetails(t *testing.T) {
+	const token = "PFX!0123456789!SFX"
+	var output bytes.Buffer
+	dl, err := NewDouyinLiveWithTikHub("live-id", log.New(&output, "", 0), "", token)
+	if err != nil {
+		t.Fatalf("NewDouyinLiveWithTikHub() failed: %v", err)
+	}
+	dl.Dispose()
+
+	logs := output.String()
+	for _, forbidden := range []string{token, "PFX!", "!SFX", "key_mask", "key_sha256", "key_len"} {
+		if strings.Contains(logs, forbidden) {
+			t.Fatalf("TikHub status log exposed %q: %s", forbidden, logs)
+		}
+	}
+}
+
+func TestDisposeClosesTikHubWebsocketSigner(t *testing.T) {
+	dl, err := NewDouyinLiveWithTikHub("live-id", nil, "", "api-key")
+	if err != nil {
+		t.Fatalf("NewDouyinLiveWithTikHub() failed: %v", err)
+	}
+	signer := dl.signer.(*tikhubWebsocketSigner)
+	dl.Dispose()
+	dl.Dispose()
+
+	signer.mu.Lock()
+	closed := signer.closed
+	client := signer.client
+	token := signer.token
+	signer.mu.Unlock()
+	if !closed || client != nil || token != "" {
+		t.Fatalf("TikHub signer was not fully released: closed=%v client_nil=%v token_empty=%v", closed, client == nil, token == "")
+	}
+	if _, err := signer.Sign(context.Background(), "room", "user", "Mozilla/5.0"); !errors.Is(err, ErrDouyinLiveClosed) {
+		t.Fatalf("Sign() after Dispose err = %v, want ErrDouyinLiveClosed", err)
+	}
+	signer.UpdateUserAgent("Mozilla/5.0 changed")
+	signer.mu.Lock()
+	client = signer.client
+	signer.mu.Unlock()
+	if client != nil {
+		t.Fatal("UpdateUserAgent() recreated the TikHub client after Dispose")
+	}
+}
+
+func TestTikHubWebsocketSignerCloseClosesIdleConnections(t *testing.T) {
+	idle := make(chan struct{}, 1)
+	closed := make(chan struct{}, 1)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "ok")
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		switch state {
+		case http.StateIdle:
+			select {
+			case idle <- struct{}{}:
+			default:
+			}
+		case http.StateClosed:
+			select {
+			case closed <- struct{}{}:
+			default:
+			}
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	signer := newTikHubWebsocketSigner("api-key", "Mozilla/5.0").(*tikhubWebsocketSigner)
+	response, err := signer.client.ReqClient().R().Get(server.URL)
+	if err != nil {
+		signer.Close()
+		t.Fatalf("create idle TikHub HTTP connection: %v", err)
+	}
+	if _, err := response.ToBytes(); err != nil {
+		signer.Close()
+		t.Fatalf("read TikHub test response: %v", err)
+	}
+	select {
+	case <-idle:
+	case <-time.After(time.Second):
+		signer.Close()
+		t.Fatal("TikHub HTTP connection did not become idle")
+	}
+
+	signer.Close()
+	signer.Close()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("TikHub signer Close() did not close its idle HTTP connection")
+	}
+}
+
+func TestTikHubWebsocketSignerCloseDoesNotBlockOrCancelActiveSign(t *testing.T) {
+	requestStarted := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/douyin/web/generate_wss_xb_signature" {
+			t.Errorf("request path = %q", r.URL.Path)
+		}
+		close(requestStarted)
+		<-releaseResponse
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"code":0,"data":{"signature":"ACTIVE_SIGNATURE"}}`)
+	}))
+	defer server.Close()
+
+	signer := newTikHubWebsocketSigner("api-key", "Mozilla/5.0").(*tikhubWebsocketSigner)
+	signer.mu.Lock()
+	oldClient := signer.client
+	signer.client = tikhub.NewClient(
+		"api-key",
+		tikhub.WithBaseURL(server.URL),
+		tikhub.WithTimeout(5*time.Second),
+		tikhub.WithUserAgent("Mozilla/5.0"),
+	)
+	signer.mu.Unlock()
+	closeHTTPClientIdleConnections(oldClient.ReqClient())
+
+	type signResult struct {
+		signature string
+		err       error
+	}
+	resultCh := make(chan signResult, 1)
+	go func() {
+		signature, err := signer.Sign(context.Background(), "room-id", "user-id", "Mozilla/5.0")
+		resultCh <- signResult{signature: signature, err: err}
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("TikHub Sign request did not reach the test server")
+	}
+
+	closeDone := make(chan struct{})
+	go func() {
+		signer.Close()
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+	case <-time.After(200 * time.Millisecond):
+		close(releaseResponse)
+		t.Fatal("Close() blocked on an active TikHub Sign request")
+	}
+	select {
+	case result := <-resultCh:
+		t.Fatalf("active Sign completed before the server released it: signature=%q err=%v", result.signature, result.err)
+	default:
+	}
+
+	close(releaseResponse)
+	select {
+	case result := <-resultCh:
+		if result.err != nil || result.signature != "ACTIVE_SIGNATURE" {
+			t.Fatalf("active Sign after concurrent Close = %q, %v", result.signature, result.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("active Sign did not complete after its response was released")
 	}
 }
 

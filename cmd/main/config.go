@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	douyinLive "github.com/jwwsjlm/douyinLive/v2"
 	"github.com/spf13/pflag"
@@ -41,9 +43,26 @@ const (
 // CookieConfig 保存默认 Cookie 和按房间覆盖的 Cookie。
 // CookieConfig stores the default cookie and per-room cookie overrides.
 type CookieConfig struct {
-	UseStored bool              // 是否使用配置文件中的预存 Cookie。 Whether to use preconfigured cookies.
-	Douyin    string            // 抖音默认 Cookie。 Default Douyin Cookie.
-	Rooms     map[string]string // 按直播间 ID 配置的 Cookie。 Per-room Cookie overrides keyed by room ID.
+	UseStored bool // 是否使用配置文件中的预存 Cookie。 Whether to use preconfigured cookies.
+	// useStoredSet distinguishes a programmatic zero-value Config from an
+	// explicit opt-out. YAML/env loading always sets it; code embedding the
+	// service can call SetUseStoredCookie when it needs to disable cookies.
+	// useStoredSet 区分程序化零值 Config 与显式关闭；YAML/env 加载总会设置它，
+	// 嵌入服务的代码可调用 SetUseStoredCookie 明确关闭 Cookie。
+	useStoredSet bool
+	Douyin       string            // 抖音默认 Cookie。 Default Douyin Cookie.
+	Rooms        map[string]string // 按直播间 ID 配置的 Cookie。 Per-room Cookie overrides keyed by room ID.
+}
+
+// SetUseStoredCookie explicitly selects whether this programmatic service
+// configuration may use the configured global and room-level cookies.
+// SetUseStoredCookie 为程序化服务配置显式选择是否使用全局和按房间预存 Cookie。
+func (c *CookieConfig) SetUseStoredCookie(enabled bool) {
+	if c == nil {
+		return
+	}
+	c.UseStored = enabled
+	c.useStoredSet = true
 }
 
 // MonitorConfig 保存未开播轮询和通知间隔配置。
@@ -133,27 +152,79 @@ type configFileCookieSchema struct {
 	Rooms     map[string]string `yaml:"rooms"`
 }
 
-func validateConfigFileSchema(path string) error {
+func loadConfigFileSchema(path string) (configFileSchema, error) {
+	var schema configFileSchema
 	file, err := os.Open(path)
 	if err != nil {
-		return err
+		return schema, err
 	}
 	defer file.Close()
 
 	decoder := yaml.NewDecoder(file)
 	decoder.KnownFields(true)
-	var schema configFileSchema
 	if err := decoder.Decode(&schema); err != nil {
-		return err
+		return schema, err
 	}
 	var extra interface{}
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return errors.New("配置文件只能包含一个 YAML 文档")
+			return schema, errors.New("配置文件只能包含一个 YAML 文档")
 		}
-		return err
+		return schema, err
 	}
-	return nil
+	return schema, nil
+}
+
+// configStringSlice reads a list-valued setting while giving environment
+// variables an explicit, deployment-friendly representation. Viper splits a
+// raw environment string only on whitespace; accepting comma-separated and
+// JSON-array forms avoids silently treating multiple domains as one value.
+// configStringSlice 读取列表配置，并让环境变量明确支持逗号、空白或 JSON 数组格式。
+func configStringSlice(v *viper.Viper, key, envName string) ([]string, error) {
+	if raw, ok := os.LookupEnv(envName); ok {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return nil, nil
+		}
+		if strings.HasPrefix(raw, "[") {
+			var values []string
+			if err := json.Unmarshal([]byte(raw), &values); err != nil {
+				return nil, fmt.Errorf("%s 必须是字符串数组、逗号分隔或空白分隔列表: %w", envName, err)
+			}
+			return values, nil
+		}
+		return strings.FieldsFunc(raw, func(r rune) bool {
+			return r == ',' || unicode.IsSpace(r)
+		}), nil
+	}
+	return v.GetStringSlice(key), nil
+}
+
+// configRoomCookies preserves case-sensitive room IDs from YAML while keeping
+// the documented environment-over-file precedence. APP_COOKIE_ROOMS uses a
+// JSON object so Cookie values containing commas, semicolons, or spaces remain
+// unambiguous.
+// configRoomCookies 在保留 YAML 房间号大小写的同时维持环境变量优先级；
+// APP_COOKIE_ROOMS 使用 JSON 对象，避免 Cookie 中的逗号、分号或空格产生歧义。
+func configRoomCookies(v *viper.Viper, fileSchema configFileSchema, configFileLoaded bool) (map[string]string, error) {
+	if raw, ok := os.LookupEnv("APP_COOKIE_ROOMS"); ok {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return map[string]string{}, nil
+		}
+		var values map[string]string
+		if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			return nil, fmt.Errorf("APP_COOKIE_ROOMS 必须是 JSON 字符串对象: %w", err)
+		}
+		if values == nil {
+			return map[string]string{}, nil
+		}
+		return values, nil
+	}
+	if configFileLoaded && fileSchema.Cookie.Rooms != nil {
+		return fileSchema.Cookie.Rooms, nil
+	}
+	return v.GetStringMapString("cookie.rooms"), nil
 }
 
 // normalizeAllowedOrigins normalizes optional browser Origin allowlist entries.
@@ -226,7 +297,7 @@ func normalizeAllowedDomains(values []string) ([]string, error) {
 		if domain == "" {
 			continue
 		}
-		if strings.ContainsAny(domain, "/?#\\\\@ :\t\r\n") || strings.Contains(domain, "..") {
+		if strings.ContainsAny(domain, "/?#\\\\@ :,\t\r\n") || strings.Contains(domain, "..") {
 			return nil, fmt.Errorf("api.allowed_domains[%d] 配置无效: %q", index, value)
 		}
 		if domain != "douyin.com" && !strings.HasSuffix(domain, ".douyin.com") {
@@ -256,7 +327,15 @@ func normalizeWebSocketPath(value string) (string, error) {
 	if path == "" {
 		return "", errors.New("websocket.path 不能为根路径")
 	}
-	if strings.ContainsAny(path, "?#\\\t\r\n ") || strings.Contains(path, "//") || strings.Contains(path, "..") {
+	// net/http ServeMux treats braces as wildcard syntax and unescapes percent
+	// encoded path segments before checking pattern conflicts. The WebSocket
+	// route is configuration, not a ServeMux pattern, so keep it strictly
+	// literal and reject both forms instead of allowing a startup panic or a
+	// collision hidden behind an encoded path.
+	// net/http ServeMux 会把花括号解释为通配符，并在检查路由冲突前解码
+	// 百分号路径。WebSocket 路由是字面配置，不是 ServeMux pattern，因此
+	// 直接拒绝这两类语法，避免启动 panic 或编码后的保留路由冲突。
+	if strings.ContainsAny(path, "?#\\\t\r\n %{}") || strings.Contains(path, "//") || strings.Contains(path, "..") {
 		return "", fmt.Errorf("websocket.path 配置无效: %q", value)
 	}
 	if path == "/health" || path == "/metrics" || path == "/api" || strings.HasPrefix(path, "/api/") {
@@ -342,6 +421,8 @@ func NewConfig() (*Config, error) {
 	v.SetDefault("websocket.path", "/ws")
 	v.SetDefault("websocket.allowed_origins", []string{})
 
+	var fileSchema configFileSchema
+	configFileLoaded := false
 	if err := v.ReadInConfig(); err != nil {
 		var configFileNotFoundError viper.ConfigFileNotFoundError
 		if !errors.As(err, &configFileNotFoundError) {
@@ -350,9 +431,12 @@ func NewConfig() (*Config, error) {
 		fmt.Println("⚠️  配置文件未找到，使用默认值或命令行参数")
 		fmt.Println("💡 建议在同目录下创建 config.yaml 文件")
 	} else {
-		if err := validateConfigFileSchema(v.ConfigFileUsed()); err != nil {
+		var err error
+		fileSchema, err = loadConfigFileSchema(v.ConfigFileUsed())
+		if err != nil {
 			return nil, fmt.Errorf("配置文件字段校验失败：%w", err)
 		}
+		configFileLoaded = true
 		fmt.Printf("✅ 使用配置文件：%s\n", v.ConfigFileUsed())
 	}
 
@@ -410,11 +494,19 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	allowedOrigins, err := normalizeAllowedOrigins(v.GetStringSlice("websocket.allowed_origins"))
+	allowedOriginValues, err := configStringSlice(v, "websocket.allowed_origins", "APP_WEBSOCKET_ALLOWED_ORIGINS")
 	if err != nil {
 		return nil, err
 	}
-	allowedDomains, err := normalizeAllowedDomains(v.GetStringSlice("api.allowed_domains"))
+	allowedOrigins, err := normalizeAllowedOrigins(allowedOriginValues)
+	if err != nil {
+		return nil, err
+	}
+	allowedDomainValues, err := configStringSlice(v, "api.allowed_domains", "APP_API_ALLOWED_DOMAINS")
+	if err != nil {
+		return nil, err
+	}
+	allowedDomains, err := normalizeAllowedDomains(allowedDomainValues)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +514,10 @@ func NewConfig() (*Config, error) {
 	if err := validateCookieOverride(douyinCookie); err != nil {
 		return nil, fmt.Errorf("cookie.douyin 配置无效: %w", err)
 	}
-	roomCookies := v.GetStringMapString("cookie.rooms")
+	roomCookies, err := configRoomCookies(v, fileSchema, configFileLoaded)
+	if err != nil {
+		return nil, err
+	}
 	normalizedRoomCookies := make(map[string]string, len(roomCookies))
 	for roomID, rawCookie := range roomCookies {
 		roomID = strings.TrimSpace(roomID)
@@ -442,9 +537,10 @@ func NewConfig() (*Config, error) {
 		Port:    port,
 		Unknown: v.GetBool("unknown"),
 		Cookie: CookieConfig{
-			UseStored: v.GetBool("cookie.use_stored"),
-			Douyin:    douyinCookie,
-			Rooms:     normalizedRoomCookies,
+			UseStored:    v.GetBool("cookie.use_stored"),
+			useStoredSet: true,
+			Douyin:       douyinCookie,
+			Rooms:        normalizedRoomCookies,
 		},
 		Monitor: MonitorConfig{
 			PollInterval:   pollInterval,

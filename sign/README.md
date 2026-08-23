@@ -105,6 +105,8 @@ cookie:
 
 `CookieManager.LoadConfig` 只读取上述 `cookie.douyin` 字段。应用主程序的完整配置（包括按房间 Cookie、日志、签名来源和轮询间隔）请参考 [`docs/configuration.md`](../docs/configuration.md)，不要把 `CookieManager` 的简化 YAML 格式和主程序配置混为一谈。
 
+`SaveConfig` 会先在目标目录写入完整临时文件，再替换目标文件，避免写入失败时截断旧配置；最终路径如果是符号链接会被拒绝。Unix/macOS 下文件权限会收紧为 `0600`。Windows 的 `0600` 不等同于 owner-only ACL，文件会继承所在目录的访问控制，因此 Cookie 配置应放在仅当前用户可访问的目录中。
+
 ### 环境变量的区别
 
 直接调用 `CookieManager.LoadFromEnv()` 时读取的是：
@@ -128,7 +130,7 @@ APP_TIKHUB_KEY
 - Cookie、Token、TikHub Key 不要提交到 Git，也不要写入公开 Issue 或完整日志；
 - `CookieManager` 不负责自动刷新 Cookie，Cookie 失效后需要调用方更新；
 - `GetCookies` 对无效 URL 返回 `nil`，`SetCookies` 对无效 URL 返回错误；
-- 不要在多个并发会话之间共享同一个 `CookieManager`，建议每个直播会话独立创建；
+- `CookieManager` 的配置和 Cookie Jar 操作已做并发保护，可以在并发请求中安全复用；如果不同会话需要完全隔离 Cookie 状态，仍建议分别创建实例；
 - `CookieManager` 没有 `Close` 方法，停止使用后释放调用方对它的引用即可；
 - 主程序和 `DouyinLive` 库会在会话关闭时释放 HTTP 空闲连接及签名 Runtime，库模式请按文档调用 `Close`/`Dispose`。
 

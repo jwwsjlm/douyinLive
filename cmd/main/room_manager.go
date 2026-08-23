@@ -191,6 +191,15 @@ func mergeRoomSnapshots(current, next roomSnapshot) roomSnapshot {
 	if selected.Title == "" {
 		selected.Title = fallback.Title
 	}
+	if selected.UserUniqueID == "" {
+		selected.UserUniqueID = fallback.UserUniqueID
+	}
+	if selected.LiveName == "" {
+		selected.LiveName = fallback.LiveName
+	}
+	if selected.AvatarThumb == "" {
+		selected.AvatarThumb = fallback.AvatarThumb
+	}
 	return selected
 }
 

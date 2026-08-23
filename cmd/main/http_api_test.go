@@ -147,6 +147,10 @@ func TestNormalizeWebSocketPath(t *testing.T) {
 		{"/health", "", false},
 		{"/../ws", "", false},
 		{"/live stream", "", false},
+		{"/live/{room}", "", false},
+		{"/live/room}", "", false},
+		{"/%61pi/v1", "", false},
+		{"/live/%72oom", "", false},
 	}
 	for _, tt := range tests {
 		got, err := normalizeWebSocketPath(tt.raw)
@@ -206,6 +210,15 @@ func TestHTTPAPIRejectsMethodsAndInvalidRoomIDs(t *testing.T) {
 	if got := performAPIRequest(t, app, http.MethodGet, "/api/v1/nope", ""); got.Code != http.StatusNotFound {
 		t.Fatalf("unknown path status=%d", got.Code)
 	}
+	if got := performAPIRequest(t, app, http.MethodGet, "/api/v1", ""); got.Code != http.StatusNotFound || !strings.Contains(got.Body.String(), `"code":"not_found"`) {
+		t.Fatalf("API root should use JSON not-found envelope: status=%d body=%s", got.Code, got.Body.String())
+	}
+	if got := performAPIRequest(t, app, http.MethodPost, "/api/v1/nope", ""); got.Code != http.StatusNotFound {
+		t.Fatalf("unknown POST path status=%d body=%s", got.Code, got.Body.String())
+	}
+	if got := performAPIRequest(t, app, http.MethodPost, "/api/v1/rooms/123/unknown", ""); got.Code != http.StatusNotFound {
+		t.Fatalf("unknown nested POST path status=%d body=%s", got.Code, got.Body.String())
+	}
 	if got := performAPIRequest(t, app, http.MethodGet, "/api/v1/anchors/123", ""); got.Code != http.StatusNotFound {
 		t.Fatalf("removed anchor endpoint status=%d body=%s", got.Code, got.Body.String())
 	}
@@ -245,6 +258,17 @@ func TestHTTPAPIBatchRejectsDuplicateLiveIDs(t *testing.T) {
 func TestHTTPAPIBatchRejectsOversizedRequestBody(t *testing.T) {
 	app := testAPIApp(t, "")
 	body := `{"live_ids":["` + strings.Repeat("1", (1<<20)+1) + `"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/rooms/status:batch", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	app.handleAPI(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), `"code":"request_too_large"`) {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHTTPAPIBatchRejectsOversizedTrailingContent(t *testing.T) {
+	app := testAPIApp(t, "")
+	body := `{"live_ids":["123"]}` + strings.Repeat(" ", 1<<20)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/rooms/status:batch", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	app.handleAPI(rec, req)
@@ -313,6 +337,30 @@ func TestHTTPAPIBatchClearsBodyReadDeadlineBeforeProbing(t *testing.T) {
 	}
 }
 
+func TestHTTPAPIBatchResponseIsNotConditionallyCached(t *testing.T) {
+	app := testAPIApp(t, "")
+	defer app.roomManager.Close()
+	app.roomManager.probeFactory = func(string, string) (statusProbe, error) {
+		return callbackStatusProbe{}, nil
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/rooms/status:batch", strings.NewReader(`{"live_ids":["123"]}`))
+	req.Header.Set("If-None-Match", "*")
+	rec := httptest.NewRecorder()
+	app.handleAPI(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control=%q, want no-store", got)
+	}
+	if got := rec.Header().Get("ETag"); got != "" {
+		t.Fatalf("batch response unexpectedly has ETag %q", got)
+	}
+	if rec.Body.Len() == 0 {
+		t.Fatal("batch response body is empty")
+	}
+}
+
 func TestRoomManagerProbeContextHonorsCallerCancellation(t *testing.T) {
 	rm := NewRoomManager(nil, false, "", nil, signProviderLocal, "", time.Second, time.Second)
 	for i := 0; i < cap(rm.probeSem); i++ {
@@ -369,8 +417,10 @@ func TestHTTPAPIRoomListDoesNotProbeUpstream(t *testing.T) {
 	room := app.roomManager.GetOrCreateRoom("123", "")
 	room.mu.Lock()
 	room.knownValid = true
+	room.userUniqueID = "user-123"
 	room.liveName = "主播"
 	room.title = "标题"
+	room.avatarThumb = "https://example.test/avatar.jpeg"
 	room.upstreamReady = false
 	room.mu.Unlock()
 	rec := performAPIRequest(t, app, http.MethodGet, "/api/v1/rooms", "")
@@ -380,6 +430,11 @@ func TestHTTPAPIRoomListDoesNotProbeUpstream(t *testing.T) {
 	for _, field := range []string{`"client_count":0`, `"upstream_ready":false`, `"status_unknown":false`} {
 		if !strings.Contains(rec.Body.String(), field) {
 			t.Fatalf("active room response missing stable field %s: %s", field, rec.Body.String())
+		}
+	}
+	for _, field := range []string{`"anchor"`, `"user_unique_id":"user-123"`, `"nickname":"主播"`, `"avatar_thumb":"https://example.test/avatar.jpeg"`} {
+		if !strings.Contains(rec.Body.String(), field) {
+			t.Fatalf("active room response missing anchor field %s: %s", field, rec.Body.String())
 		}
 	}
 	app.roomManager.CloseAll()
@@ -395,15 +450,52 @@ func TestLiveStatusToAPIIncludesRoomIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"anchor", "user_unique_id", "avatar_thumb", "nickname"} {
-		if strings.Contains(string(body), field) {
-			t.Fatalf("HTTP room response unexpectedly exposed independent profile field %q: %s", field, body)
+	for _, field := range []string{`"anchor"`, `"user_unique_id":"777"`, `"avatar_thumb":"avatar"`, `"nickname":"主播"`} {
+		if !strings.Contains(string(body), field) {
+			t.Fatalf("HTTP room response missing anchor profile field %q: %s", field, body)
 		}
 	}
 	for _, field := range []string{"client_count", "upstream_ready", "status_unknown"} {
 		if strings.Contains(string(body), field) {
 			t.Fatalf("probe response unexpectedly exposed active-room field %q: %s", field, body)
 		}
+	}
+}
+
+func TestHTTPAPIAnchorProfileUsesRoomProbe(t *testing.T) {
+	app := testAPIApp(t, "")
+	defer app.roomManager.Close()
+	app.roomManager.probeFactory = func(string, string) (statusProbe, error) {
+		return staticStatusProbe{status: douyinLive.LiveStatus{
+			Code: douyinLive.LiveStatusOnline, Live: boolPtrForTest(true), HasRoom: boolPtrForTest(true),
+			LiveID: "123", RoomID: "9001", UserUniqueID: "u1", LiveName: "主播", AvatarThumb: "avatar",
+		}}, nil
+	}
+	rec := performAPIRequest(t, app, http.MethodGet, "/api/v1/rooms/123/anchor", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, field := range []string{`"live_id":"123"`, `"room_id":"9001"`, `"user_unique_id":"u1"`, `"nickname":"主播"`, `"avatar_thumb":"avatar"`, `"source":"probe"`} {
+		if !strings.Contains(rec.Body.String(), field) {
+			t.Fatalf("anchor response missing %s: %s", field, rec.Body.String())
+		}
+	}
+	if got := len(app.roomManager.SnapshotRooms()); got != 0 {
+		t.Fatalf("anchor query created %d managed rooms", got)
+	}
+}
+
+func TestHTTPAPIAnchorProfileRejectsUnverifiedProfile(t *testing.T) {
+	app := testAPIApp(t, "")
+	defer app.roomManager.Close()
+	app.roomManager.probeFactory = func(string, string) (statusProbe, error) {
+		return staticStatusProbe{status: douyinLive.LiveStatus{
+			Code: douyinLive.LiveStatusOffline, Live: boolPtrForTest(false), HasRoom: boolPtrForTest(true), LiveID: "123", RoomID: "9001",
+		}}, nil
+	}
+	rec := performAPIRequest(t, app, http.MethodGet, "/api/v1/rooms/123/anchor", "")
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"code":"anchor_unverified"`) {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -425,6 +517,15 @@ func TestResolveDouyinURLAllowsConfiguredDomainAndRejectsOthers(t *testing.T) {
 	}
 	if _, err := resolveDouyinURL("https://live.douyin.com/123456?x=1", []string{"douyin.com"}); err == nil {
 		t.Fatal("expected query URL to be rejected")
+	}
+}
+
+func TestHTTPAPIResolveRequiresURLParameter(t *testing.T) {
+	app := testAPIApp(t, "")
+	defer app.roomManager.Close()
+	rec := performAPIRequest(t, app, http.MethodGet, "/api/v1/rooms/resolve", "")
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"invalid_url"`) {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -491,6 +592,9 @@ func TestHTTPAPIHealthETagAndUnifiedEnvelope(t *testing.T) {
 	if etag == "" || firstRec.Header().Get("Cache-Control") == "" || firstRec.Header().Get("X-Request-ID") == "" {
 		t.Fatalf("missing cache/request headers: %v", firstRec.Header())
 	}
+	if !strings.HasPrefix(etag, `W/"`) {
+		t.Fatalf("ETag=%q, want weak validator because request_id changes per request", etag)
+	}
 
 	secondReq := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 	secondReq.Header.Set("If-None-Match", etag)
@@ -499,8 +603,53 @@ func TestHTTPAPIHealthETagAndUnifiedEnvelope(t *testing.T) {
 	if secondRec.Code != http.StatusNotModified {
 		t.Fatalf("expected 304, got %d body=%s", secondRec.Code, secondRec.Body.String())
 	}
-	if !ifNoneMatchMatches("W/"+etag+", \"other\"", etag) || !ifNoneMatchMatches("*", etag) {
+	strongEquivalent := strings.TrimPrefix(etag, "W/")
+	if !ifNoneMatchMatches(strongEquivalent+", \"other\"", etag) || !ifNoneMatchMatches("*", etag) {
 		t.Fatal("If-None-Match standard validators were not recognized")
+	}
+}
+
+func TestHealthAliasRecordsDurationForRejectedMethod(t *testing.T) {
+	app := testAPIApp(t, "")
+	before := app.metrics.httpDurationCount.Load()
+	rec := performAPIRequest(t, app, http.MethodPost, "/health", "")
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := app.metrics.httpDurationCount.Load(); got != before+1 {
+		t.Fatalf("duration count=%d, want %d", got, before+1)
+	}
+}
+
+func TestMetricsErrorsUseJSONEnvelope(t *testing.T) {
+	app := testAPIApp(t, "secret-token")
+	unauthorized := performAPIRequest(t, app, http.MethodGet, "/metrics", "")
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status=%d body=%s", unauthorized.Code, unauthorized.Body.String())
+	}
+	if got := unauthorized.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Fatalf("unauthorized Content-Type=%q", got)
+	}
+	if envelope := decodeEnvelope(t, unauthorized); envelope.OK || envelope.Error == nil || envelope.Error.Code != "unauthorized" {
+		t.Fatalf("unexpected unauthorized envelope: %+v", envelope)
+	}
+	method := performAPIRequest(t, app, http.MethodPost, "/metrics", "Bearer secret-token")
+	if method.Code != http.StatusMethodNotAllowed || method.Header().Get("Allow") != http.MethodGet {
+		t.Fatalf("method status=%d allow=%q body=%s", method.Code, method.Header().Get("Allow"), method.Body.String())
+	}
+	if envelope := decodeEnvelope(t, method); envelope.OK || envelope.Error == nil || envelope.Error.Code != "method_not_allowed" {
+		t.Fatalf("unexpected method envelope: %+v", envelope)
+	}
+}
+
+func TestMetricsSuccessIsNotCached(t *testing.T) {
+	app := testAPIApp(t, "")
+	rec := performAPIRequest(t, app, http.MethodGet, "/metrics", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control=%q, want no-store", got)
 	}
 }
 

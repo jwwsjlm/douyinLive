@@ -15,9 +15,9 @@ const anonymousProbeRotateFailures = 3
 
 // acquireProbeLive 获取当前房间稳定复用的状态探测会话；首次调用时才创建。
 // acquireProbeLive returns the room's stable reusable status-probe session, creating it lazily.
-func (r *Room) acquireProbeLive() (*douyinLive.DouyinLive, error) {
+func (r *Room) acquireProbeLive(sessionGeneration uint64) (*douyinLive.DouyinLive, error) {
 	r.mu.Lock()
-	if r.closed {
+	if r.closed || r.sessionGeneration != sessionGeneration {
 		r.mu.Unlock()
 		return nil, errRoomInactive
 	}
@@ -43,7 +43,7 @@ func (r *Room) acquireProbeLive() (*douyinLive.DouyinLive, error) {
 	}
 
 	r.mu.Lock()
-	if r.closed {
+	if r.closed || r.sessionGeneration != sessionGeneration {
 		r.mu.Unlock()
 		d.Dispose()
 		return nil, errRoomInactive
@@ -110,10 +110,10 @@ func (r *Room) discardProbeLive(d *douyinLive.DouyinLive) {
 
 // promoteProbeLive 将已确认在线的探测会话提升为正式上游直播会话。
 // promoteProbeLive promotes a confirmed-online probe into the active upstream session.
-func (r *Room) promoteProbeLive(d *douyinLive.DouyinLive) bool {
+func (r *Room) promoteProbeLive(d *douyinLive.DouyinLive, sessionGeneration uint64) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || r.probeLive != d {
+	if r.closed || r.sessionGeneration != sessionGeneration || r.probeLive != d {
 		return false
 	}
 	r.probeLive = nil
@@ -121,21 +121,27 @@ func (r *Room) promoteProbeLive(d *douyinLive.DouyinLive) bool {
 	r.douyinLive = d
 	r.upstreamReady = false
 	r.statusUnknown = false
+	r.starting = false
+	if r.monitor != nil && r.monitor.generation == sessionGeneration {
+		r.monitor.stop()
+		r.monitor = nil
+	}
 	return true
 }
 
 // startLiveSession 启动抖音直播监听和事件处理。
 // startLiveSession creates DouyinLive, verifies live status, and starts upstream listening.
-func (r *Room) startLiveSession() error {
-	d, err := r.acquireProbeLive()
+func (r *Room) startLiveSession(sessionGeneration uint64) error {
+	d, err := r.acquireProbeLive(sessionGeneration)
 	if err != nil {
 		return err
 	}
 
 	if err := d.PrepareWebSocketContext(); err != nil {
 		if d.IsKnownOfflineStatus() {
-			r.updateMetadataFromDouyinLive(d)
-			r.markKnownValid()
+			if !r.commitProbeMetadataForGeneration(d, sessionGeneration, true) {
+				return errRoomInactive
+			}
 			r.resetProbeFailures(d)
 			return douyinLive.ErrLiveNotStarted
 		}
@@ -147,40 +153,41 @@ func (r *Room) startLiveSession() error {
 		return fmt.Errorf("初始化直播间 %s 连接上下文失败: %w", r.id, err)
 	}
 	if err := confirmLiveSessionStatus(d); err != nil {
-		r.updateMetadataFromDouyinLive(d)
-		if errors.Is(err, douyinLive.ErrLiveNotStarted) {
-			r.markKnownValid()
+		knownValid := errors.Is(err, douyinLive.ErrLiveNotStarted)
+		if !r.commitProbeMetadataForGeneration(d, sessionGeneration, knownValid) {
+			return errRoomInactive
+		}
+		if knownValid {
 			r.resetProbeFailures(d)
 		} else {
 			r.recordProbeFailure(d)
 		}
 		return err
 	}
-	r.updateMetadataFromDouyinLive(d)
-	r.markKnownValid()
-	if !r.promoteProbeLive(d) {
+	if !r.commitProbeMetadataForGeneration(d, sessionGeneration, true) {
+		return errRoomInactive
+	}
+	if !r.promoteProbeLive(d, sessionGeneration) {
 		r.discardProbeLive(d)
 		return errRoomInactive
 	}
 
 	d.SubscribeMessage(func(message *douyinLive.LiveMessage) {
-		r.handleDouyinEvent(message)
+		r.handleDouyinEventForSession(d, sessionGeneration, message)
 	})
 
-	if r.clientCount() == 0 {
-		r.disposePendingLive(d)
-		return errRoomInactive
-	}
-
 	r.mu.Lock()
-	if r.closed {
+	r.clientsMu.RLock()
+	clientCount := len(r.clients)
+	r.clientsMu.RUnlock()
+	if r.closed || r.sessionGeneration != sessionGeneration || r.douyinLive != d || clientCount == 0 {
 		r.mu.Unlock()
 		r.disposePendingLive(d)
 		return errRoomInactive
 	}
 	r.mu.Unlock()
 
-	if !r.startTask(func() { r.runLiveSession(d) }) {
+	if !r.startTaskForGeneration(sessionGeneration, func() { r.runLiveSession(d, sessionGeneration) }) {
 		r.disposePendingLive(d)
 		return errRoomInactive
 	}
@@ -234,10 +241,10 @@ func (r *Room) disposePendingLive(d *douyinLive.DouyinLive) {
 // runLiveSession runs upstream live listening and switches back to offline monitoring when needed.
 // 参数/Parameters:
 //   - d: 已接管的上游 DouyinLive 实例。 Adopted upstream DouyinLive instance.
-func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
+func (r *Room) runLiveSession(d *douyinLive.DouyinLive, sessionGeneration uint64) {
 	readyCh := d.Ready()
 	startErrCh := make(chan error, 1)
-	if !r.startTask(func() {
+	if !r.startTaskForGeneration(sessionGeneration, func() {
 		startErrCh <- d.Start()
 	}) {
 		d.Dispose()
@@ -249,7 +256,7 @@ func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 	var startErr error
 	select {
 	case <-readyCh:
-		connected = r.markUpstreamReady(d)
+		connected = r.markUpstreamReady(d, sessionGeneration)
 		if !connected {
 			d.Close()
 		}
@@ -272,55 +279,110 @@ func (r *Room) runLiveSession(d *douyinLive.DouyinLive) {
 		r.logger.Warn("直播监听运行结束", "room_id", r.id, "err", startErr)
 	}
 
-	r.mu.Lock()
-	if r.douyinLive == d {
-		r.douyinLive = nil
-		r.upstreamReady = false
+	monitor, clients, installed, currentGeneration := r.transitionLiveSessionToMonitor(d, sessionGeneration)
+	if !currentGeneration {
+		return
 	}
-	closed := r.closed
-	monitorRunning := r.monitorStopCh != nil
-	r.mu.Unlock()
-
-	if closed || r.clientCount() == 0 {
+	if len(clients) == 0 {
+		r.closeBackgroundWorkersIfIdle()
 		return
 	}
 
 	if connected {
-		r.notifyOfflineEndedStatus()
+		r.broadcastToClients(clients, r.offlineEndedStatusMessage())
 	} else {
-		r.notifyOfflineStatus()
+		r.broadcastToClients(clients, r.offlineStatusMessage())
 	}
-	if !monitorRunning {
+	if installed {
 		r.logger.Info("直播连接已结束，切回未开播监控模式", "room_id", r.id, "connected", connected)
-		r.startMonitorLoop()
+		r.launchMonitorLoop(monitor)
 	}
+}
+
+// transitionLiveSessionToMonitor atomically retires one live session, installs
+// its same-generation monitor, and captures only clients from that generation.
+// transitionLiveSessionToMonitor 原子结束在线会话、安装同代次监控并取得该代次客户端快照。
+func (r *Room) transitionLiveSessionToMonitor(d *douyinLive.DouyinLive, sessionGeneration uint64) (*roomMonitorLoop, []*Client, bool, bool) {
+	r.mu.Lock()
+	if r.closed || r.sessionGeneration != sessionGeneration || r.douyinLive != d {
+		r.mu.Unlock()
+		return nil, nil, false, false
+	}
+	r.douyinLive = nil
+	r.upstreamReady = false
+	r.starting = false
+	r.statusUnknown = false
+	r.clientsMu.RLock()
+	clients := make([]*Client, 0, len(r.clients))
+	for _, client := range r.clients {
+		clients = append(clients, client)
+	}
+	r.clientsMu.RUnlock()
+	if len(clients) == 0 {
+		r.mu.Unlock()
+		return nil, clients, false, true
+	}
+	monitor, installed := r.installMonitorLoopLocked(sessionGeneration)
+	if monitor == nil {
+		r.mu.Unlock()
+		return nil, nil, false, false
+	}
+	r.mu.Unlock()
+	return monitor, clients, installed, true
 }
 
 // markUpstreamReady 在上游 WebSocket 握手成功后更新房间状态并通知客户端。
 // markUpstreamReady updates room state and notifies clients after the upstream handshake succeeds.
-func (r *Room) markUpstreamReady(d *douyinLive.DouyinLive) bool {
+func (r *Room) markUpstreamReady(d *douyinLive.DouyinLive, sessionGeneration uint64) bool {
 	r.mu.Lock()
-	if r.closed || r.douyinLive != d {
+	if r.closed || r.sessionGeneration != sessionGeneration || r.douyinLive != d {
 		r.mu.Unlock()
 		return false
 	}
 	r.upstreamReady = true
 	r.statusUnknown = false
+	r.clientsMu.RLock()
+	clients := make([]*Client, 0, len(r.clients))
+	for _, client := range r.clients {
+		clients = append(clients, client)
+	}
+	r.clientsMu.RUnlock()
 	r.mu.Unlock()
 
 	r.logger.Info("上游 WebSocket 已就绪，开始推送直播消息", "room_id", r.id)
-	if r.clientCount() > 0 {
-		r.notifyOnlineStatus()
-	}
+	r.broadcastToClients(clients, r.onlineStatusMessage())
 	return true
 }
 
-// handleDouyinEvent 将抖音消息解析为 JSON 并广播给房间客户端。
-// handleDouyinEvent converts a Douyin message to JSON and broadcasts it to room clients.
-// 参数/Parameters:
-//   - event: 上游抖音直播消息事件。 Upstream Douyin live message event.
-func (r *Room) handleDouyinEvent(event *douyinLive.LiveMessage) {
-	if r.clientCount() == 0 {
+// snapshotClientsForLiveSession captures clients only while d and generation
+// still identify the active upstream session.
+// snapshotClientsForLiveSession 仅在上游实例及代次仍有效时取得客户端快照。
+func (r *Room) snapshotClientsForLiveSession(d *douyinLive.DouyinLive, sessionGeneration uint64) ([]*Client, bool) {
+	r.mu.Lock()
+	if r.closed || r.sessionGeneration != sessionGeneration || r.douyinLive != d {
+		r.mu.Unlock()
+		return nil, false
+	}
+	r.clientsMu.RLock()
+	clients := make([]*Client, 0, len(r.clients))
+	for _, client := range r.clients {
+		clients = append(clients, client)
+	}
+	r.clientsMu.RUnlock()
+	r.mu.Unlock()
+	return clients, true
+}
+
+func (r *Room) handleDouyinEventForSession(d *douyinLive.DouyinLive, sessionGeneration uint64, event *douyinLive.LiveMessage) {
+	clients, ok := r.snapshotClientsForLiveSession(d, sessionGeneration)
+	if !ok {
+		return
+	}
+	r.handleDouyinEventForClients(clients, event)
+}
+
+func (r *Room) handleDouyinEventForClients(clients []*Client, event *douyinLive.LiveMessage) {
+	if len(clients) == 0 {
 		return
 	}
 	if event == nil || event.Raw == nil {
@@ -358,5 +420,5 @@ func (r *Room) handleDouyinEvent(event *douyinLive.LiveMessage) {
 		return
 	}
 
-	r.Broadcast(finalJSON)
+	r.broadcastToClients(clients, finalJSON)
 }

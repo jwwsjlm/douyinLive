@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -17,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	douyinLive "github.com/jwwsjlm/douyinLive/v2"
 )
 
@@ -96,128 +96,139 @@ func parseLiveIDPath(path, prefix string) (string, error) {
 	return suffix, nil
 }
 
-func (a *App) registerHTTPAPI(mux *http.ServeMux) {
-	mux.HandleFunc("/health", a.handleHealthAlias)
-	mux.HandleFunc("/metrics", a.handleMetrics)
-	mux.HandleFunc("/api/v1", a.handleAPI)
-	mux.HandleFunc("/api/v1/", a.handleAPI)
-}
+type apiRequestHandler func(http.ResponseWriter, *http.Request, string)
 
-func (a *App) handleAPI(w http.ResponseWriter, r *http.Request) {
-	startedAt := time.Now()
-	defer func() {
-		if a.metrics != nil {
-			a.metrics.observeHTTPDuration(time.Since(startedAt))
+func (a *App) registerHTTPAPI(mux *http.ServeMux) {
+	methodsByPath := make(map[string]string)
+	register := func(method, pattern string, liveID bool, handler apiRequestHandler) {
+		route := a.wrapAPIRequest(true, func(w http.ResponseWriter, r *http.Request, requestID string) {
+			if expected := methodsByPath[r.URL.Path]; expected != "" && r.Method != expected {
+				w.Header().Set("Allow", expected)
+				a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "请求方法不受支持", "请使用 "+expected)
+				return
+			}
+			if liveID && !isValidLiveID(r.PathValue("live_id")) {
+				a.writeAPIError(w, requestID, http.StatusBadRequest, "invalid_live_id", "直播间标识无效", "仅支持字母、数字、下划线和短横线")
+				return
+			}
+			if r.Method != method {
+				w.Header().Set("Allow", method)
+				a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "请求方法不受支持", "请使用 "+method)
+				return
+			}
+			handler(w, r, requestID)
+		})
+		mux.Handle(method+" "+pattern, route)
+		if !strings.Contains(pattern, "{") {
+			methodsByPath[pattern] = method
 		}
-	}()
-	if a.metrics != nil {
-		a.metrics.httpRequests.Add(1)
 	}
-	requestID := requestIDForRequest(r)
-	w.Header().Set("X-Request-ID", requestID)
-	if !a.authorizeAPI(r) {
-		a.writeAPIError(w, requestID, http.StatusUnauthorized, "unauthorized", "缺少或无效的 API Key", "请使用 Authorization: Bearer <key>")
-		return
-	}
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
-	switch path {
-	case "/health":
-		if !a.requireAPIMethod(w, r, requestID, http.MethodGet) {
+
+	health := a.wrapAPIRequest(false, func(w http.ResponseWriter, r *http.Request, requestID string) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "健康检查仅支持 GET 请求", "请使用 GET")
 			return
 		}
 		a.handleHealth(w, r, requestID)
-		return
-	case "/capabilities":
-		if !a.requireAPIMethod(w, r, requestID, http.MethodGet) {
+	})
+	mux.Handle("GET /health", health)
+	mux.Handle("/health", health)
+
+	metrics := a.wrapAPIRequest(false, func(w http.ResponseWriter, r *http.Request, requestID string) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "指标接口仅支持 GET 请求", "请使用 GET")
 			return
 		}
-		a.handleCapabilities(w, r, requestID)
-		return
-	case "/rooms":
-		if !a.requireAPIMethod(w, r, requestID, http.MethodGet) {
+		if !a.authorizeAPI(r) {
+			a.writeAPIError(w, requestID, http.StatusUnauthorized, "unauthorized", "缺少或无效的 API Key", "请使用 Authorization: Bearer <key>")
 			return
 		}
-		a.handleRoomList(w, r, requestID)
-		return
-	case "/rooms/resolve":
-		if !a.requireAPIMethod(w, r, requestID, http.MethodGet) {
+		a.handleMetrics(w, r, requestID)
+	})
+	mux.Handle("GET /metrics", metrics)
+	mux.Handle("/metrics", metrics)
+
+	register(http.MethodGet, "/api/v1/health", false, a.handleHealth)
+	register(http.MethodGet, "/api/v1/capabilities", false, a.handleCapabilities)
+	register(http.MethodGet, "/api/v1/rooms", false, a.handleRoomList)
+	register(http.MethodGet, "/api/v1/rooms/resolve", false, a.handleRoomResolve)
+	register(http.MethodPost, "/api/v1/rooms/status:batch", false, a.handleBatchRoomStatus)
+	roomProbe := func(w http.ResponseWriter, r *http.Request, requestID string) {
+		a.handleRoomProbe(w, r, requestID, r.PathValue("live_id"), false)
+	}
+	roomStatus := func(w http.ResponseWriter, r *http.Request, requestID string) {
+		a.handleRoomProbe(w, r, requestID, r.PathValue("live_id"), true)
+	}
+	anchorProfile := func(w http.ResponseWriter, r *http.Request, requestID string) {
+		a.handleAnchorProfile(w, r, requestID, r.PathValue("live_id"))
+	}
+	register(http.MethodGet, "/api/v1/rooms/{live_id}", true, roomProbe)
+	register(http.MethodGet, "/api/v1/rooms/{live_id}/status", true, roomStatus)
+	register(http.MethodGet, "/api/v1/rooms/{live_id}/anchor", true, anchorProfile)
+
+	// The former path parser accepted a trailing slash on live-ID routes.
+	register(http.MethodGet, "/api/v1/rooms/{live_id}/{$}", true, roomProbe)
+	register(http.MethodGet, "/api/v1/rooms/{live_id}/status/{$}", true, roomStatus)
+	register(http.MethodGet, "/api/v1/rooms/{live_id}/anchor/{$}", true, anchorProfile)
+
+	notFound := a.wrapAPIRequest(true, func(w http.ResponseWriter, r *http.Request, requestID string) {
+		allowedMethod, matchedPattern := methodsByPath[r.URL.Path], ""
+		if allowedMethod == "" {
+			for _, method := range []string{http.MethodGet, http.MethodPost} {
+				probe := r.Clone(r.Context())
+				probe.Method = method
+				_, pattern := mux.Handler(probe)
+				if strings.HasPrefix(pattern, method+" ") {
+					allowedMethod, matchedPattern = method, pattern
+					break
+				}
+			}
+		}
+
+		roomPath, isRoomPath := strings.CutPrefix(r.URL.Path, "/api/v1/rooms/")
+		liveID, _, _ := strings.Cut(roomPath, "/")
+		if isRoomPath && liveID != "" && (matchedPattern == "" || strings.Contains(matchedPattern, "{live_id}")) && !isValidLiveID(liveID) {
+			a.writeAPIError(w, requestID, http.StatusBadRequest, "invalid_live_id", "直播间标识无效", "仅支持字母、数字、下划线和短横线")
 			return
 		}
-		a.handleRoomResolve(w, r, requestID)
-		return
-	case "/rooms/status:batch":
-		if !a.requireAPIMethod(w, r, requestID, http.MethodPost) {
+		if allowedMethod != "" {
+			w.Header().Set("Allow", allowedMethod)
+			a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "请求方法不受支持", "请使用 "+allowedMethod)
 			return
 		}
-		a.handleBatchRoomStatus(w, r, requestID)
-		return
-	}
-	if !strings.HasPrefix(path, "/rooms/") {
 		a.writeAPIError(w, requestID, http.StatusNotFound, "not_found", "接口不存在", "请查看 API 文档")
-		return
-	}
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) < 2 || parts[0] != "rooms" {
-		a.writeAPIError(w, requestID, http.StatusNotFound, "not_found", "接口不存在", "请查看 API 文档")
-		return
-	}
-	if !isValidLiveID(parts[1]) {
-		a.writeAPIError(w, requestID, http.StatusBadRequest, "invalid_live_id", "直播间标识无效", "仅支持字母、数字、下划线和短横线")
-		return
-	}
-	if len(parts) > 3 {
-		a.writeAPIError(w, requestID, http.StatusNotFound, "not_found", "接口不存在", "请查看 API 文档")
-		return
-	}
-	statusOnly := len(parts) == 3 && parts[2] == "status"
-	anchorOnly := len(parts) == 3 && parts[2] == "anchor"
-	if len(parts) == 3 && !statusOnly && !anchorOnly {
-		a.writeAPIError(w, requestID, http.StatusNotFound, "not_found", "接口不存在", "请查看 API 文档")
-		return
-	}
-	if !a.requireAPIMethod(w, r, requestID, http.MethodGet) {
-		return
-	}
-	if anchorOnly {
-		a.handleAnchorProfile(w, r, requestID, parts[1])
-		return
-	}
-	a.handleRoomProbe(w, r, requestID, parts[1], statusOnly)
+	})
+	mux.Handle("/api/v1", notFound)
+	mux.Handle("/api/v1/", notFound)
 }
 
-func (a *App) requireAPIMethod(w http.ResponseWriter, r *http.Request, requestID, method string) bool {
-	if r.Method == method {
-		return true
-	}
-	w.Header().Set("Allow", method)
-	a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "请求方法不受支持", "请使用 "+method)
-	return false
-}
-
-func (a *App) handleHealthAlias(w http.ResponseWriter, r *http.Request) {
-	startedAt := time.Now()
-	defer func() {
+func (a *App) wrapAPIRequest(requireAuth bool, next apiRequestHandler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedAt := time.Now()
+		defer func() {
+			if a.metrics != nil {
+				a.metrics.observeHTTPDuration(time.Since(startedAt))
+			}
+		}()
 		if a.metrics != nil {
-			a.metrics.observeHTTPDuration(time.Since(startedAt))
+			a.metrics.httpRequests.Add(1)
 		}
-	}()
-	if a.metrics != nil {
-		a.metrics.httpRequests.Add(1)
-	}
-	requestID := requestIDForRequest(r)
-	w.Header().Set("X-Request-ID", requestID)
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "健康检查仅支持 GET 请求", "请使用 GET")
-		return
-	}
-	a.handleHealth(w, r, requestID)
+		requestID := requestIDForRequest(r)
+		w.Header().Set("X-Request-ID", requestID)
+		if requireAuth && !a.authorizeAPI(r) {
+			a.writeAPIError(w, requestID, http.StatusUnauthorized, "unauthorized", "缺少或无效的 API Key", "请使用 Authorization: Bearer <key>")
+			return
+		}
+		next(w, r, requestID)
+	})
 }
 
 func requestIDForRequest(r *http.Request) string {
 	requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
 	if !validRequestID.MatchString(requestID) {
-		return uuid.NewString()
+		return rand.Text()
 	}
 	return requestID
 }
@@ -472,46 +483,31 @@ func (a *App) handleBatchRoomStatus(w http.ResponseWriter, r *http.Request, requ
 	ctx, cancel := context.WithTimeout(r.Context(), apiBatchProbeTimeout)
 	defer cancel()
 	items := make([]batchStatusItem, len(ids))
-	workerCount := min(8, len(ids))
-	type batchJob struct {
-		index  int
-		liveID string
-	}
-	jobs := make(chan batchJob)
 	var wg sync.WaitGroup
-	for worker := 0; worker < workerCount; worker++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for job := range jobs {
-				index, liveID := job.index, job.liveID
-				if a.metrics != nil {
-					a.metrics.roomProbes.Add(1)
-				}
-				status, err := a.roomManager.LookupRoom(ctx, liveID)
-				item := batchStatusItem{LiveID: liveID}
-				if probeResultIsFailure(status, err) {
-					if a.metrics != nil {
-						a.metrics.roomProbeErrors.Add(1)
-					}
-					item.Error = apiErrorForProbeResult(status, err)
-					item.Status = statusCodeForProbeResult(status, err)
-				} else {
-					item.Status = string(status.Code)
-					item.IsLive = status.Live
-					item.HasRoom = status.HasRoom
-					item.AccountOnly = status.AccountOnly
-					item.RoomID = status.RoomID
-					item.Title = status.Title
-				}
-				items[index] = item
-			}
-		}()
-	}
 	for index, liveID := range ids {
-		jobs <- batchJob{index: index, liveID: liveID}
+		wg.Go(func() {
+			if a.metrics != nil {
+				a.metrics.roomProbes.Add(1)
+			}
+			status, err := a.roomManager.LookupRoom(ctx, liveID)
+			item := batchStatusItem{LiveID: liveID}
+			if probeResultIsFailure(status, err) {
+				if a.metrics != nil {
+					a.metrics.roomProbeErrors.Add(1)
+				}
+				item.Error = apiErrorForProbeResult(status, err)
+				item.Status = statusCodeForProbeResult(status, err)
+			} else {
+				item.Status = string(status.Code)
+				item.IsLive = status.Live
+				item.HasRoom = status.HasRoom
+				item.AccountOnly = status.AccountOnly
+				item.RoomID = status.RoomID
+				item.Title = status.Title
+			}
+			items[index] = item
+		})
 	}
-	close(jobs)
 	wg.Wait()
 	online, offline, accountNoRoom, notFound, unknown := 0, 0, 0, 0, 0
 	for _, item := range items {

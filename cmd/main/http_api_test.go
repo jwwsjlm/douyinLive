@@ -27,15 +27,19 @@ func testAPIApp(t *testing.T, key string) *App {
 
 func performAPIRequest(t *testing.T, app *App, method, path, auth string) *httptest.ResponseRecorder {
 	t.Helper()
-	mux := http.NewServeMux()
-	app.registerHTTPAPI(mux)
 	req := httptest.NewRequest(method, path, nil)
 	if auth != "" {
 		req.Header.Set("Authorization", auth)
 	}
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	serveAPIRequest(app, rec, req)
 	return rec
+}
+
+func serveAPIRequest(app *App, w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	app.registerHTTPAPI(mux)
+	mux.ServeHTTP(w, r)
 }
 
 func decodeEnvelope(t *testing.T, rec *httptest.ResponseRecorder) apiEnvelope {
@@ -47,50 +51,14 @@ func decodeEnvelope(t *testing.T, rec *httptest.ResponseRecorder) apiEnvelope {
 	return envelope
 }
 
-func TestHTTPAPIHealthAndCapabilities(t *testing.T) {
+func TestHTTPAPICapabilities(t *testing.T) {
 	app := testAPIApp(t, "")
-	health := performAPIRequest(t, app, http.MethodGet, "/api/v1/health", "")
-	if health.Code != http.StatusOK || !decodeEnvelope(t, health).OK {
-		t.Fatalf("health status=%d body=%s", health.Code, health.Body.String())
-	}
-	if health.Header().Get("X-Request-ID") == "" {
-		t.Fatal("health response missing request id")
-	}
 	capabilities := performAPIRequest(t, app, http.MethodGet, "/api/v1/capabilities", "")
 	if capabilities.Code != http.StatusOK || !strings.Contains(capabilities.Body.String(), `"read_only":true`) {
 		t.Fatalf("capabilities status=%d body=%s", capabilities.Code, capabilities.Body.String())
 	}
 	if !strings.Contains(capabilities.Body.String(), `"browser_native_supported":true`) {
 		t.Fatalf("capabilities should advertise browser-native WebSocket support without API key: %s", capabilities.Body.String())
-	}
-}
-
-func TestHTTPAPIHealthAliasUsesSameEnvelopeAndETag(t *testing.T) {
-	app := testAPIApp(t, "")
-	apiHealth := performAPIRequest(t, app, http.MethodGet, "/api/v1/health", "")
-	aliasHealth := performAPIRequest(t, app, http.MethodGet, "/health", "")
-	if apiHealth.Code != http.StatusOK || aliasHealth.Code != http.StatusOK {
-		t.Fatalf("health statuses: api=%d alias=%d", apiHealth.Code, aliasHealth.Code)
-	}
-	apiEnvelopeValue := decodeEnvelope(t, apiHealth)
-	aliasEnvelopeValue := decodeEnvelope(t, aliasHealth)
-	if !apiEnvelopeValue.OK || !aliasEnvelopeValue.OK || aliasEnvelopeValue.Error != nil {
-		t.Fatalf("unexpected health envelopes: api=%+v alias=%+v", apiEnvelopeValue, aliasEnvelopeValue)
-	}
-	if apiHealth.Header().Get("ETag") == "" || aliasHealth.Header().Get("ETag") == "" {
-		t.Fatal("health response missing ETag")
-	}
-	if apiHealth.Header().Get("Cache-Control") == "" || aliasHealth.Header().Get("Cache-Control") == "" {
-		t.Fatal("health response missing Cache-Control")
-	}
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
-	req.Header.Set("If-None-Match", apiHealth.Header().Get("ETag"))
-	rec := httptest.NewRecorder()
-	mux := http.NewServeMux()
-	app.registerHTTPAPI(mux)
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotModified || rec.Body.Len() != 0 {
-		t.Fatalf("conditional health status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
 
@@ -204,6 +172,9 @@ func TestHTTPAPIRejectsMethodsAndInvalidRoomIDs(t *testing.T) {
 	if got := performAPIRequest(t, app, http.MethodPost, "/api/v1/health", ""); got.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST status=%d", got.Code)
 	}
+	if got := performAPIRequest(t, app, http.MethodGet, "/api/v1/rooms/status:batch", ""); got.Code != http.StatusMethodNotAllowed || got.Header().Get("Allow") != http.MethodPost {
+		t.Fatalf("batch method status=%d allow=%q body=%s", got.Code, got.Header().Get("Allow"), got.Body.String())
+	}
 	if got := performAPIRequest(t, app, http.MethodGet, "/api/v1/rooms/bad$id", ""); got.Code != http.StatusBadRequest {
 		t.Fatalf("invalid room status=%d body=%s", got.Code, got.Body.String())
 	}
@@ -260,7 +231,7 @@ func TestHTTPAPIBatchRejectsOversizedRequestBody(t *testing.T) {
 	body := `{"live_ids":["` + strings.Repeat("1", (1<<20)+1) + `"]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/rooms/status:batch", strings.NewReader(body))
 	rec := httptest.NewRecorder()
-	app.handleAPI(rec, req)
+	serveAPIRequest(app, rec, req)
 	if rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), `"code":"request_too_large"`) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -271,7 +242,7 @@ func TestHTTPAPIBatchRejectsOversizedTrailingContent(t *testing.T) {
 	body := `{"live_ids":["123"]}` + strings.Repeat(" ", 1<<20)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/rooms/status:batch", strings.NewReader(body))
 	rec := httptest.NewRecorder()
-	app.handleAPI(rec, req)
+	serveAPIRequest(app, rec, req)
 	if rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), `"code":"request_too_large"`) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -327,7 +298,7 @@ func TestHTTPAPIBatchClearsBodyReadDeadlineBeforeProbing(t *testing.T) {
 		}}, nil
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/rooms/status:batch", strings.NewReader(`{"live_ids":["123"]}`))
-	app.handleAPI(recorder, req)
+	serveAPIRequest(app, recorder, req)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -346,7 +317,7 @@ func TestHTTPAPIBatchResponseIsNotConditionallyCached(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/rooms/status:batch", strings.NewReader(`{"live_ids":["123"]}`))
 	req.Header.Set("If-None-Match", "*")
 	rec := httptest.NewRecorder()
-	app.handleAPI(rec, req)
+	serveAPIRequest(app, rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -441,7 +412,7 @@ func TestHTTPAPIRoomListDoesNotProbeUpstream(t *testing.T) {
 }
 
 func TestLiveStatusToAPIIncludesRoomIdentity(t *testing.T) {
-	status := douyinLive.LiveStatus{Code: douyinLive.LiveStatusOnline, Live: boolPtrForTest(true), HasRoom: boolPtrForTest(true), LiveID: "123", RoomID: "999", UserUniqueID: "777", LiveName: "主播", Title: "标题", AvatarThumb: "avatar"}
+	status := douyinLive.LiveStatus{Code: douyinLive.LiveStatusOnline, Live: boolPtr(true), HasRoom: boolPtr(true), LiveID: "123", RoomID: "999", UserUniqueID: "777", LiveName: "主播", Title: "标题", AvatarThumb: "avatar"}
 	room := liveStatusToAPI(status, "probe", time.Now())
 	if room.RoomID != "999" || room.Title != "标题" || room.LiveID != "123" {
 		t.Fatalf("room=%+v", room)
@@ -467,7 +438,7 @@ func TestHTTPAPIAnchorProfileUsesRoomProbe(t *testing.T) {
 	defer app.roomManager.Close()
 	app.roomManager.probeFactory = func(string, string) (statusProbe, error) {
 		return staticStatusProbe{status: douyinLive.LiveStatus{
-			Code: douyinLive.LiveStatusOnline, Live: boolPtrForTest(true), HasRoom: boolPtrForTest(true),
+			Code: douyinLive.LiveStatusOnline, Live: boolPtr(true), HasRoom: boolPtr(true),
 			LiveID: "123", RoomID: "9001", UserUniqueID: "u1", LiveName: "主播", AvatarThumb: "avatar",
 		}}, nil
 	}
@@ -490,7 +461,7 @@ func TestHTTPAPIAnchorProfileRejectsUnverifiedProfile(t *testing.T) {
 	defer app.roomManager.Close()
 	app.roomManager.probeFactory = func(string, string) (statusProbe, error) {
 		return staticStatusProbe{status: douyinLive.LiveStatus{
-			Code: douyinLive.LiveStatusOffline, Live: boolPtrForTest(false), HasRoom: boolPtrForTest(true), LiveID: "123", RoomID: "9001",
+			Code: douyinLive.LiveStatusOffline, Live: boolPtr(false), HasRoom: boolPtr(true), LiveID: "123", RoomID: "9001",
 		}}, nil
 	}
 	rec := performAPIRequest(t, app, http.MethodGet, "/api/v1/rooms/123/anchor", "")
@@ -500,7 +471,7 @@ func TestHTTPAPIAnchorProfileRejectsUnverifiedProfile(t *testing.T) {
 }
 
 func TestLiveStatusToAPIIncludesAccountWithoutRoom(t *testing.T) {
-	status := douyinLive.LiveStatus{Code: douyinLive.LiveStatusNoRoom, Live: boolPtrForTest(false), HasRoom: boolPtrForTest(false), AccountOnly: boolPtrForTest(true), LiveID: "32536162943", UserUniqueID: "777", LiveName: "主播"}
+	status := douyinLive.LiveStatus{Code: douyinLive.LiveStatusNoRoom, Live: boolPtr(false), HasRoom: boolPtr(false), AccountOnly: boolPtr(true), LiveID: "32536162943", UserUniqueID: "777", LiveName: "主播"}
 	room := liveStatusToAPI(status, "probe", time.Now())
 	if room.Status != "account_no_room" || room.HasRoom == nil || *room.HasRoom {
 		t.Fatalf("account-only room=%+v", room)
@@ -552,26 +523,6 @@ func TestNormalizeAllowedDomainsRejectsURLSyntax(t *testing.T) {
 		}
 	}
 }
-
-func TestHTTPAPIAdditionalRoutes(t *testing.T) {
-	app := testAPIApp(t, "")
-	if got := performAPIRequest(t, app, http.MethodGet, "/health", ""); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"status":"ok"`) {
-		t.Fatalf("health alias status=%d body=%s", got.Code, got.Body.String())
-	}
-	if got := performAPIRequest(t, app, http.MethodGet, "/metrics", ""); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), "douyinlive_active_rooms") {
-		t.Fatalf("metrics status=%d body=%s", got.Code, got.Body.String())
-	}
-	resolve := performAPIRequest(t, app, http.MethodGet, "/api/v1/rooms/resolve?url=https%3A%2F%2Flive.douyin.com%2F123456", "")
-	if resolve.Code != http.StatusOK || !strings.Contains(resolve.Body.String(), `"live_id":"123456"`) {
-		t.Fatalf("resolve status=%d body=%s", resolve.Code, resolve.Body.String())
-	}
-	batch := performAPIRequest(t, app, http.MethodPost, "/api/v1/rooms/status:batch", "")
-	if batch.Code != http.StatusBadRequest {
-		t.Fatalf("batch invalid body status=%d body=%s", batch.Code, batch.Body.String())
-	}
-}
-
-func boolPtrForTest(v bool) *bool { return &v }
 
 func TestHTTPAPIHealthETagAndUnifiedEnvelope(t *testing.T) {
 	app := testAPIApp(t, "")
@@ -751,9 +702,9 @@ func TestHTTPAPIRoomProbeStatusMatrix(t *testing.T) {
 		wantStatus string
 		wantBody   string
 	}{
-		{name: "online", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusOnline, Live: boolPtrForTest(true), HasRoom: boolPtrForTest(true), LiveID: "online", RoomID: "9001", UserUniqueID: "u1", LiveName: "主播", Title: "标题", AvatarThumb: "avatar"}, wantCode: http.StatusOK, wantStatus: "online", wantBody: `"room_id":"9001"`},
-		{name: "offline", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusOffline, Live: boolPtrForTest(false), HasRoom: boolPtrForTest(true), LiveID: "offline", RoomID: "9002"}, wantCode: http.StatusOK, wantStatus: "offline"},
-		{name: "account_no_room", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusNoRoom, Live: boolPtrForTest(false), HasRoom: boolPtrForTest(false), AccountOnly: boolPtrForTest(true), LiveID: "account", UserUniqueID: "u3", LiveName: "账号"}, wantCode: http.StatusOK, wantStatus: "account_no_room", wantBody: `"has_room":false`},
+		{name: "online", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusOnline, Live: boolPtr(true), HasRoom: boolPtr(true), LiveID: "online", RoomID: "9001", UserUniqueID: "u1", LiveName: "主播", Title: "标题", AvatarThumb: "avatar"}, wantCode: http.StatusOK, wantStatus: "online", wantBody: `"room_id":"9001"`},
+		{name: "offline", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusOffline, Live: boolPtr(false), HasRoom: boolPtr(true), LiveID: "offline", RoomID: "9002"}, wantCode: http.StatusOK, wantStatus: "offline"},
+		{name: "account_no_room", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusNoRoom, Live: boolPtr(false), HasRoom: boolPtr(false), AccountOnly: boolPtr(true), LiveID: "account", UserUniqueID: "u3", LiveName: "账号"}, wantCode: http.StatusOK, wantStatus: "account_no_room", wantBody: `"has_room":false`},
 		{name: "not_found", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusNotFound, LiveID: "missing"}, err: douyinLive.ErrRoomNotFound, wantCode: http.StatusNotFound, wantStatus: "not_found"},
 		{name: "unknown", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusUnknown, LiveID: "unknown"}, err: douyinLive.ErrLiveStatusUnknown, wantCode: http.StatusServiceUnavailable, wantStatus: "upstream_unverified"},
 	}

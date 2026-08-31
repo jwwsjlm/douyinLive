@@ -28,6 +28,7 @@ douyinLive
 config.yaml
 config*.local.yaml
 /smoke-*.yaml
+/compose.override.yaml
 
 # Logs
 *.log

@@ -9,7 +9,7 @@ import (
 )
 
 func TestWaitForReconnectDelayStopsWhenClosed(t *testing.T) {
-	dl := &DouyinLive{closeCh: make(chan struct{})}
+	dl := &DouyinLive{}
 	dl.signalClose()
 
 	start := time.Now()
@@ -28,12 +28,10 @@ func TestCloseAllowsZeroValueDouyinLive(t *testing.T) {
 	dl.Close()
 }
 
-func TestContextWithCloseSignalCancels(t *testing.T) {
-	closeCh := make(chan struct{})
-	ctx, cancel := contextWithCloseSignal(closeCh)
-	defer cancel()
-
-	close(closeCh)
+func TestCloseContextCancels(t *testing.T) {
+	dl := &DouyinLive{}
+	ctx := dl.closeContext()
+	dl.signalClose()
 
 	select {
 	case <-ctx.Done():

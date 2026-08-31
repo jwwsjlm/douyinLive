@@ -32,27 +32,7 @@ func (m *apiMetrics) observeHTTPDuration(d time.Duration) {
 	m.httpDurationCount.Add(1)
 }
 
-func (a *App) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	if a.metrics != nil {
-		a.metrics.httpRequests.Add(1)
-	}
-	startedAt := time.Now()
-	defer func() {
-		if a.metrics != nil {
-			a.metrics.observeHTTPDuration(time.Since(startedAt))
-		}
-	}()
-	requestID := requestIDForRequest(r)
-	w.Header().Set("X-Request-ID", requestID)
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		a.writeAPIError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "指标接口仅支持 GET 请求", "请使用 GET")
-		return
-	}
-	if !a.authorizeAPI(r) {
-		a.writeAPIError(w, requestID, http.StatusUnauthorized, "unauthorized", "缺少或无效的 API Key", "请使用 Authorization: Bearer <key>")
-		return
-	}
+func (a *App) handleMetrics(w http.ResponseWriter, _ *http.Request, _ string) {
 	snapshots := a.roomManager.SnapshotRooms()
 	online, monitoring, clients := 0, 0, 0
 	for _, snapshot := range snapshots {

@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgraph-io/ristretto/v2"
 	"github.com/jwwsjlm/douyinlive-proto/generated/new_douyin"
 	"google.golang.org/protobuf/proto"
 )
@@ -15,7 +14,7 @@ func publishForTest(bus *messageBus, message *LiveMessage) {
 }
 
 func publishForTestWithLogger(bus *messageBus, logger logSink, message *LiveMessage) {
-	bus.publishWithLoggerUntil(logger, message, nil)
+	bus.publishWithLoggerUntil(logger, message, nil, nil)
 }
 
 func TestMessageBusSubscribeAll(t *testing.T) {
@@ -226,7 +225,7 @@ func TestNewDouyinLiveDefaultsNilLogger(t *testing.T) {
 	}
 }
 
-func TestEmitEventClonesParsedMessageForSubscribers(t *testing.T) {
+func TestEmitEventPreservesLegacyOrderAndClonesParsedMessage(t *testing.T) {
 	dl := &DouyinLive{
 		liveID:   "live-id",
 		roomID:   "room-id",
@@ -235,13 +234,21 @@ func TestEmitEventClonesParsedMessageForSubscribers(t *testing.T) {
 	}
 	parsed := &new_douyin.Webcast_Im_ChatMessage{Content: "hello"}
 	var got *LiveMessage
+	var order []string
 
+	dl.Subscribe(func(*new_douyin.Webcast_Im_Message, proto.Message) {
+		order = append(order, "legacy")
+	})
 	dl.SubscribeMessage(func(message *LiveMessage) {
+		order = append(order, "normalized")
 		got = message
 	})
 	dl.emitEvent(&new_douyin.Webcast_Im_Message{Method: WebcastChatMessage}, parsed)
 	parsed.Content = "mutated"
 
+	if len(order) != 2 || order[0] != "legacy" || order[1] != "normalized" {
+		t.Fatalf("subscriber order = %#v, want legacy then normalized", order)
+	}
 	if got == nil {
 		t.Fatalf("subscriber did not receive message")
 	}
@@ -386,16 +393,6 @@ func TestParseRoomInfoUsesFallbackFields(t *testing.T) {
 }
 
 func TestFetchRoomEnterDataUpdatesRoomInfoFromCache(t *testing.T) {
-	cache, err := ristretto.NewCache(&ristretto.Config[string, string]{
-		NumCounters: 1000,
-		MaxCost:     1000,
-		BufferItems: 64,
-	})
-	if err != nil {
-		t.Fatalf("new cache: %v", err)
-	}
-	defer cache.Close()
-
 	const body = `{
 		"data": {
 			"user": {
@@ -411,19 +408,12 @@ func TestFetchRoomEnterDataUpdatesRoomInfoFromCache(t *testing.T) {
 			}]
 		}
 	}`
-	if ok := cache.SetWithTTL("live-id", body, 1, time.Minute); !ok {
-		t.Fatalf("cache rejected test room info")
-	}
-	cache.Wait()
-	if _, found := cache.Get("live-id"); !found {
-		t.Fatalf("test room info was not committed to cache")
-	}
-
 	dl := &DouyinLive{
-		liveID:    "live-id",
-		liveName:  "old-name",
-		logger:    normalizeLogger(log.Default()),
-		ristretto: cache,
+		liveID:                "live-id",
+		liveName:              "old-name",
+		logger:                normalizeLogger(log.Default()),
+		roomEnterCacheBody:    body,
+		roomEnterCacheExpires: time.Now().Add(time.Minute),
 	}
 
 	got, err := dl.fetchRoomEnterData()

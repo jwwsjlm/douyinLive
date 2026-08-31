@@ -4,23 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/spf13/pflag"
-	"github.com/spf13/viper"
 )
 
 func resetConfigGlobalsForTest(t *testing.T, args ...string) {
 	t.Helper()
 	originalArgs := os.Args
-	originalFlags := pflag.CommandLine
-
-	viper.Reset()
-	pflag.CommandLine = pflag.NewFlagSet("douyinLive-test", pflag.ContinueOnError)
 	os.Args = append([]string{"douyinLive-test"}, args...)
 
 	t.Cleanup(func() {
-		viper.Reset()
-		pflag.CommandLine = originalFlags
 		os.Args = originalArgs
 	})
 }
@@ -33,6 +24,36 @@ func writeConfigFixture(t *testing.T) string {
 		t.Fatalf("write config fixture: %v", err)
 	}
 	return path
+}
+
+func TestConfigAutoDiscoveryPreservesLegacyExtensions(t *testing.T) {
+	directory := t.TempDir()
+	previousDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(directory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previousDirectory) })
+
+	if err := os.WriteFile(filepath.Join(directory, "config.yml"), []byte("api:\n  key: yml-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path, loaded, err := findConfigFile("")
+	if err != nil {
+		t.Fatalf("findConfigFile() failed: %v", err)
+	}
+	if !loaded || filepath.Base(path) != "config.yml" {
+		t.Fatalf("discovered path = %q loaded=%v, want config.yml", path, loaded)
+	}
+	schema, err := loadConfigFileSchema(path)
+	if err != nil {
+		t.Fatalf("loadConfigFileSchema() error = %v", err)
+	}
+	if schema.API.Key != "yml-key" {
+		t.Fatalf("API key = %q, want yml-key", schema.API.Key)
+	}
 }
 
 func TestConfigPriorityFlagOverEnvironmentOverFile(t *testing.T) {

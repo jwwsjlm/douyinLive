@@ -15,4 +15,4 @@ README 只保留项目介绍和最短上手路径，详细使用说明按主题�
 | [WebSocket 客户端与消息格式](websocket-client.md) | 客户端示例、状态码、业务消息和重连建议 |
 | [`sign` 包说明](../sign/README.md) | `a_bogus` 签名和 CookieManager 的直接调用 |
 
-仓库中的调试示例数据位于 [`examples/`](../examples/)，不参与程序运行。
+示例文件的提交规则见 [`examples/README.md`](../examples/README.md)。

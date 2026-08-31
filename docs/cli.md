@@ -156,11 +156,11 @@ log:
   level: "debug"
 ```
 
-日志使用 Go `slog`，并针对终端和 Docker 做了单行可读格式化。时间包含毫秒和时区偏移，级别保持对齐，其他上下文继续使用 `key=value` 结构化字段：
+日志使用 Go 标准 `slog.TextHandler` 的单行 `key=value` 格式。时间包含毫秒和时区偏移，消息和上下文均可按字段检索：
 
 ```text
-2026-08-17 20:37:59.428 +08:00  INFO   DouyinLive 启动  tag=v2.1.0 commit=abcdef12 sign_provider=local
-2026-08-17 20:38:05.672 +08:00  WARN   准备重新连接  room_id=123456 attempt=2
+time="2026-08-17 20:37:59.428 +08:00" level=INFO msg="DouyinLive 启动" tag=v2.2.1 commit=abcdef12 sign_provider=local
+time="2026-08-17 20:38:05.672 +08:00" level=WARN msg="准备重新连接" room_id=123456 attempt=2
 ```
 
 这种格式方便人眼阅读，也可以按 `room_id`、`live_id`、`stage`、`step`、`err` 等字段检索，适合长时间挂机时排查连接和重连状态。

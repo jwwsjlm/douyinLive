@@ -103,14 +103,7 @@ docker run -d \
 
 ## 5. 使用 Docker Compose（推荐）
 
-项目已自带两个 compose 示例文件：
-
-- `compose.yaml`：挂载单个 `config.yaml`
-- `compose.data.yaml`：挂载整个 `data` 目录
-
-### 方案 A：使用 `compose.yaml`
-
-先准备配置文件：
+项目只维护一个 `compose.yaml`。先准备配置文件：
 
 ```bash
 cp config.example.yaml config.yaml
@@ -124,70 +117,26 @@ docker compose logs -f
 docker compose down
 ```
 
-`compose.yaml` 内容如下：
+默认配置会把当前目录的 `config.yaml` 只读挂载到 `/app/config.yaml`。
 
-```yaml
-services:
-  douyinlive:
-    image: ghcr.io/jwwsjlm/douyinlive:latest
-    container_name: douyinlive
-    restart: unless-stopped
-    ports:
-      - "1088:1088"
-    volumes:
-      - ./config.yaml:/app/config.yaml:ro
-    command: ["--config", "/app/config.yaml"]
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:1088/health >/dev/null || exit 1"]
-      interval: 30s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
-```
-
-### 方案 B：使用 `compose.data.yaml`
-
-如果你想把配置统一收纳到目录里，先执行：
+如果要挂载整个 `data` 目录，先准备配置：
 
 ```bash
 mkdir -p data
 cp config.example.yaml data/config.yaml
 ```
 
-然后用下面命令启动：
-
-```bash
-docker compose -f compose.data.yaml up -d
-docker compose -f compose.data.yaml logs -f
-docker compose -f compose.data.yaml down
-```
-
-`compose.data.yaml` 内容如下：
+再创建不提交到仓库的 `compose.override.yaml`：
 
 ```yaml
 services:
   douyinlive:
-    image: ghcr.io/jwwsjlm/douyinlive:latest
-    container_name: douyinlive
-    restart: unless-stopped
-    ports:
-      - "1088:1088"
     volumes:
       - ./data:/app/data
     command: ["--config", "/app/data/config.yaml"]
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:1088/health >/dev/null || exit 1"]
-      interval: 30s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
 ```
 
-此时你只需要保证宿主机存在：
-
-```text
-./data/config.yaml
-```
+Docker Compose 会自动合并这个本地 override，启动命令仍然是 `docker compose up -d`。基础配置文件挂载会保留但不再被程序读取。
 
 ## 6. 常用查看命令
 

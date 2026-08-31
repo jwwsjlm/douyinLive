@@ -345,7 +345,7 @@ components:
       name: X-Request-ID
       in: header
       required: false
-      description: Optional caller request identifier. Invalid values are replaced with a generated UUID.
+      description: Optional caller request identifier. Invalid values are replaced with a generated opaque identifier.
       schema:
         type: string
         maxLength: 128

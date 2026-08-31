@@ -3,7 +3,6 @@ package douyinLive
 import (
 	"time"
 
-	"github.com/jwwsjlm/douyinLive/v2/utils"
 	"github.com/jwwsjlm/douyinlive-proto/generated/new_douyin"
 	"google.golang.org/protobuf/proto"
 )
@@ -18,30 +17,9 @@ func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto
 		return
 	}
 
-	dl.mu.Lock()
-	handlers := append([]eventHandler(nil), dl.eventHandlers...)
-	dl.mu.Unlock()
-
 	parsedSnapshot := parsed
 	if parsedSnapshot != nil {
 		parsedSnapshot = proto.Clone(parsedSnapshot)
-	}
-
-	for _, handler := range handlers {
-		if dl.isManualClose() {
-			return
-		}
-		if !dl.hasEventHandler(handler.id) {
-			continue
-		}
-		func(h eventHandler) {
-			defer func() {
-				if recovered := recover(); recovered != nil && dl.logger != nil {
-					dl.logger.Error("旧事件处理器发生 panic", "live_id", dl.liveID, "panic", recovered)
-				}
-			}()
-			h.handler(msg, parsed)
-		}(handler)
 	}
 
 	roomInfo := dl.roomInfoSnapshot()
@@ -54,29 +32,9 @@ func (dl *DouyinLive) emitEvent(msg *new_douyin.Webcast_Im_Message, parsed proto
 		Raw:         msg,
 		Parsed:      parsedSnapshot,
 		ReceivedAt:  time.Now(),
-	}, func() bool {
+	}, parsed, func() bool {
 		return dl.isManualClose()
 	})
-}
-
-// hasEventHandler 判断旧版订阅 ID 是否仍然有效。
-// hasEventHandler reports whether a legacy subscription ID is still active.
-// 参数/Parameters:
-//   - id: 旧版订阅 ID。 Legacy subscription ID.
-func (dl *DouyinLive) hasEventHandler(id string) bool {
-	if id == "" {
-		return false
-	}
-
-	dl.mu.Lock()
-	defer dl.mu.Unlock()
-
-	for _, h := range dl.eventHandlers {
-		if h.id == id {
-			return true
-		}
-	}
-	return false
 }
 
 // Subscribe 订阅原始抖音消息和可选解析结果。
@@ -84,18 +42,7 @@ func (dl *DouyinLive) hasEventHandler(id string) bool {
 // 参数/Parameters:
 //   - handler: 接收原始消息和可选解析结果的回调。 Callback receiving the raw message and optional parsed payload.
 func (dl *DouyinLive) Subscribe(handler func(*new_douyin.Webcast_Im_Message, proto.Message)) string {
-	if handler == nil {
-		return ""
-	}
-
-	id := utils.GenerateUniqueID()
-	dl.mu.Lock()
-	dl.eventHandlers = append(dl.eventHandlers, eventHandler{
-		id:      id,
-		handler: handler,
-	})
-	dl.mu.Unlock()
-	return id
+	return dl.eventBus().subscribeLegacy(handler)
 }
 
 // Unsubscribe 通过订阅 ID 取消原始消息或标准化消息订阅。
@@ -104,14 +51,4 @@ func (dl *DouyinLive) Subscribe(handler func(*new_douyin.Webcast_Im_Message, pro
 //   - id: Subscribe 或标准化订阅方法返回的订阅 ID。 Subscription ID returned by Subscribe or normalized subscription APIs.
 func (dl *DouyinLive) Unsubscribe(id string) {
 	dl.eventBus().unsubscribe(id)
-
-	dl.mu.Lock()
-	defer dl.mu.Unlock()
-
-	for i, h := range dl.eventHandlers {
-		if h.id == id {
-			dl.eventHandlers = append(dl.eventHandlers[:i], dl.eventHandlers[i+1:]...)
-			break
-		}
-	}
 }

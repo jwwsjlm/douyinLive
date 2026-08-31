@@ -254,17 +254,6 @@ func TestRoomCloseIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestRoomRemembersPreviouslyValidatedIdentity(t *testing.T) {
-	room := NewRoom("1001", nil, false, "", signProviderLocal, "", time.Second, time.Second, nil)
-	if room.hasKnownValidRoom() {
-		t.Fatal("new room unexpectedly starts as validated")
-	}
-	room.markKnownValid()
-	if !room.hasKnownValidRoom() {
-		t.Fatal("room did not retain validated identity")
-	}
-}
-
 func TestRoomCloseAllClientsClosesEveryWaitingClient(t *testing.T) {
 	room := NewRoom("1001", nil, false, "", signProviderLocal, "", time.Second, time.Second, nil)
 	first := NewClient("client-1", nil)
@@ -352,7 +341,7 @@ func TestStatusUnknownMessageKeepsClientInRetryableState(t *testing.T) {
 func TestStatusUnknownMessagePreservesPreviouslyValidatedRoomIdentity(t *testing.T) {
 	room := NewRoom("139819566957", nil, false, "", signProviderLocal, "", time.Second, 30*time.Second, nil)
 	room.liveName = "亮一嗓·郝晓亮"
-	room.markKnownValid()
+	room.knownValid = true
 	message := string(room.statusUnknownMessage())
 	for _, want := range []string{`"has_room":true`, `"account_only":false`, `"live_name":"亮一嗓·郝晓亮"`} {
 		if !strings.Contains(message, want) {

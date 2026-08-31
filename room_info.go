@@ -726,18 +726,35 @@ func (dl *DouyinLive) fetchLivePageStateWithContext(ctx context.Context) error {
 }
 
 func (dl *DouyinLive) fetchRoomEnterData() (string, error) {
-	V, found := dl.ristretto.Get(dl.liveID)
-	if found {
+	if body, found := dl.cachedRoomEnterData(); found {
 		dl.logger.Debug("从缓存获取直播间信息", "live_id", dl.liveID)
-		roomInfo, err := parseRoomInfo(V)
+		roomInfo, err := parseRoomInfo(body)
 		if err != nil {
 			return "", err
 		}
 		dl.updateRoomInfoFromEnter(roomInfo)
-		return V, nil
+		return body, nil
 	}
 
 	return dl.refreshRoomEnterData()
+}
+
+func (dl *DouyinLive) cachedRoomEnterData() (string, bool) {
+	dl.mu.Lock()
+	defer dl.mu.Unlock()
+	if dl.roomEnterCacheBody == "" || !time.Now().Before(dl.roomEnterCacheExpires) {
+		dl.roomEnterCacheBody = ""
+		dl.roomEnterCacheExpires = time.Time{}
+		return "", false
+	}
+	return dl.roomEnterCacheBody, true
+}
+
+func (dl *DouyinLive) storeRoomEnterData(body string) {
+	dl.mu.Lock()
+	dl.roomEnterCacheBody = body
+	dl.roomEnterCacheExpires = time.Now().Add(5 * time.Second)
+	dl.mu.Unlock()
 }
 
 // refreshRoomEnterData 强制请求直播间入口数据并刷新房间信息。
@@ -825,7 +842,7 @@ func (dl *DouyinLive) refreshRoomEnterDataAfterLivePage(ctx context.Context, liv
 	}
 
 	dl.updateRoomInfoFromEnter(roomInfo)
-	dl.ristretto.SetWithTTL(dl.liveID, body, 1, 5*time.Second) // 将结果缓存到 Ristretto，成本为 1
+	dl.storeRoomEnterData(body)
 
 	return body, nil
 }

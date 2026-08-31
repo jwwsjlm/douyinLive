@@ -22,7 +22,7 @@ func (dl *DouyinLive) beginStart() error {
 	defer dl.mu.Unlock()
 	switch dl.lifecycleState {
 	case listenerLifecycleNew:
-		if dl.manualClose || dl.closeSignalClosed {
+		if dl.manualClose || dl.closeCtx != nil && dl.closeCtx.Err() != nil {
 			dl.lifecycleState = listenerLifecycleClosed
 			return fmt.Errorf("%w: %w", ErrDouyinLiveClosed, context.Canceled)
 		}
@@ -91,14 +91,11 @@ func (dl *DouyinLive) Dispose() {
 	dl.releaseResources()
 }
 
-// releaseResources 幂等释放缓存、HTTP 空闲连接和会话级签名 Runtime。
-// releaseResources idempotently releases cache, idle HTTP connections, and the session signer runtime.
+// releaseResources 幂等释放 HTTP 空闲连接和会话级签名 Runtime。
+// releaseResources idempotently releases idle HTTP connections and the session signer runtime.
 func (dl *DouyinLive) releaseResources() {
 	dl.releaseOnce.Do(func() {
 		dl.sessionProfile.close()
-		if dl.ristretto != nil {
-			dl.ristretto.Close()
-		}
 	})
 }
 
@@ -138,7 +135,6 @@ func (dl *DouyinLive) Start() error {
 	if err := dl.beginStart(); err != nil {
 		return err
 	}
-	dl.resetCloseSignal()
 	defer dl.cleanup()
 	dl.logger.Info("开始连接抖音直播间", logFlowArgs("startup", "start_room", "live_id", dl.liveID)...)
 	if dl.isKnownOfflineStatus() {

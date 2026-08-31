@@ -44,23 +44,17 @@ func (m *LiveMessage) GetPayload() []byte {
 // LiveMessageHandler consumes normalized live messages.
 type LiveMessageHandler func(*LiveMessage)
 
-// eventHandler 保存旧版原始消息订阅回调。
-// eventHandler stores a legacy raw-message subscription callback.
-type eventHandler struct {
-	id      string
-	handler func(*new_douyin.Webcast_Im_Message, proto.Message)
-}
-
-// messageSubscriber 保存标准化消息订阅者及其方法过滤条件。
-// messageSubscriber stores a normalized-message subscriber and its method filters.
+// messageSubscriber 保存原始或标准化消息订阅者。
+// messageSubscriber stores either a raw or normalized message subscriber.
 type messageSubscriber struct {
 	id      string
 	handler LiveMessageHandler
+	legacy  func(*new_douyin.Webcast_Im_Message, proto.Message)
 	methods map[string]struct{}
 }
 
-// messageBus 管理标准化直播消息的订阅与分发。
-// messageBus manages subscription and dispatch for normalized live messages.
+// messageBus 管理原始和标准化直播消息的订阅与分发。
+// messageBus manages subscription and dispatch for raw and normalized live messages.
 type messageBus struct {
 	mu          sync.RWMutex
 	subscribers []messageSubscriber
@@ -136,21 +130,29 @@ func (b *messageBus) subscribe(handler LiveMessageHandler, methods ...string) st
 		methodSet = nil
 	}
 
-	subscriber := messageSubscriber{
-		id:      utils.GenerateUniqueID(),
+	return b.add(messageSubscriber{
 		handler: handler,
 		methods: methodSet,
-	}
+	})
+}
 
+func (b *messageBus) subscribeLegacy(handler func(*new_douyin.Webcast_Im_Message, proto.Message)) string {
+	if handler == nil {
+		return ""
+	}
+	return b.add(messageSubscriber{legacy: handler})
+}
+
+func (b *messageBus) add(subscriber messageSubscriber) string {
+	subscriber.id = utils.GenerateUniqueID()
 	b.mu.Lock()
 	b.subscribers = append(b.subscribers, subscriber)
 	b.mu.Unlock()
-
 	return subscriber.id
 }
 
-// unsubscribe 按订阅 ID 移除标准化消息订阅者。
-// unsubscribe removes a normalized-message subscriber by subscription ID.
+// unsubscribe 按订阅 ID 移除消息订阅者。
+// unsubscribe removes a message subscriber by subscription ID.
 // 参数/Parameters:
 //   - id: 要取消的订阅 ID。 Subscription ID to remove.
 func (b *messageBus) unsubscribe(id string) {
@@ -189,13 +191,14 @@ func (b *messageBus) hasSubscriber(id string) bool {
 	return false
 }
 
-// publishWithLoggerUntil 分发消息，并在停止条件触发时中止。
-// publishWithLoggerUntil dispatches a message and stops when the stop condition fires.
+// publishWithLoggerUntil 先分发旧版原始消息，再分发标准化消息，并在停止条件触发时中止。
+// publishWithLoggerUntil dispatches legacy raw handlers before normalized handlers and stops when requested.
 // 参数/Parameters:
 //   - logger: 用于记录订阅回调 panic 的日志器。 Logger used to record subscriber callback panics.
 //   - message: 要分发的标准化直播消息。 Normalized live message to dispatch.
+//   - legacyParsed: 传给旧版回调的原始解析结果。 Original parsed payload passed to legacy callbacks.
 //   - stop: 可选停止条件；返回 true 时中止分发。 Optional stop condition; true aborts dispatch.
-func (b *messageBus) publishWithLoggerUntil(logger logSink, message *LiveMessage, stop func() bool) {
+func (b *messageBus) publishWithLoggerUntil(logger logSink, message *LiveMessage, legacyParsed proto.Message, stop func() bool) {
 	if message == nil {
 		return
 	}
@@ -204,25 +207,33 @@ func (b *messageBus) publishWithLoggerUntil(logger logSink, message *LiveMessage
 	subscribers := append([]messageSubscriber(nil), b.subscribers...)
 	b.mu.RUnlock()
 
-	for _, subscriber := range subscribers {
-		if stop != nil && stop() {
-			return
+	for _, legacy := range []bool{true, false} {
+		for _, subscriber := range subscribers {
+			if stop != nil && stop() {
+				return
+			}
+			if !b.hasSubscriber(subscriber.id) || (subscriber.legacy != nil) != legacy {
+				continue
+			}
+			if !legacy && !subscriber.accepts(message.GetMethod()) {
+				continue
+			}
+			subscriber.publish(logger, message, legacyParsed)
 		}
-		if !b.hasSubscriber(subscriber.id) {
-			continue
-		}
-		if !subscriber.accepts(message.GetMethod()) {
-			continue
-		}
-		func(s messageSubscriber) {
-			defer func() {
-				if recovered := recover(); recovered != nil && logger != nil {
-					logger.Error("消息订阅处理器发生 panic", "method", message.GetMethod(), "panic", recovered)
-				}
-			}()
-			s.handler(message)
-		}(subscriber)
 	}
+}
+
+func (s messageSubscriber) publish(logger logSink, message *LiveMessage, legacyParsed proto.Message) {
+	defer func() {
+		if recovered := recover(); recovered != nil && logger != nil {
+			logger.Error("消息订阅处理器发生 panic", "method", message.GetMethod(), "legacy", s.legacy != nil, "panic", recovered)
+		}
+	}()
+	if s.legacy != nil {
+		s.legacy(message.Raw, legacyParsed)
+		return
+	}
+	s.handler(message)
 }
 
 // accepts 判断订阅者是否接收指定方法名的消息。

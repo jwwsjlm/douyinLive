@@ -106,7 +106,7 @@ jobs:
 
           tar -tzf "$linux_archive" > linux-archive.txt
           unzip -Z1 "$windows_archive" > windows-archive.txt
-          for required in README.md LICENSE config.example.yaml compose.yaml compose.data.yaml; do
+          for required in README.md LICENSE config.example.yaml compose.yaml; do
             grep -Fxq "$required" linux-archive.txt
             grep -Fxq "$required" windows-archive.txt
           done

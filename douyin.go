@@ -3,11 +3,9 @@ package douyinLive
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
-	"github.com/dgraph-io/ristretto/v2"
 	"github.com/gorilla/websocket"
 )
 
@@ -23,7 +21,6 @@ type DouyinLive struct {
 	bufferPool             *sync.Pool
 	logger                 logSink
 	events                 *messageBus
-	eventHandlers          []eventHandler
 	mu                     sync.Mutex
 	contextMu              sync.Mutex
 	contextPrepared        bool
@@ -43,10 +40,9 @@ type DouyinLive struct {
 	title                  string
 	avatarThumb            string
 	anchorOnlyPageIdentity bool
-	ristretto              *ristretto.Cache[string, string]
+	roomEnterCacheBody     string
+	roomEnterCacheExpires  time.Time
 	releaseOnce            sync.Once
-	closeCh                chan struct{}
-	closeSignalClosed      bool
 	closeCtx               context.Context
 	closeCancel            context.CancelFunc
 	readyMu                sync.Mutex
@@ -92,16 +88,6 @@ func newDouyinLive(liveID string, baseLogger Logger, cookie string, signer webso
 	}
 	userAgent := newHTTPUserAgent()
 	profile := newSessionProfile(userAgent, signer, cookie)
-	cache, err := ristretto.NewCache(&ristretto.Config[string, string]{
-		NumCounters: 500,
-		MaxCost:     500,
-		Metrics:     false,
-		BufferItems: 64,
-	})
-	if err != nil {
-		profile.close()
-		return nil, fmt.Errorf("初始化缓存失败: %w", err)
-	}
 	closeCtx, closeCancel := context.WithCancel(context.Background())
 	dl := &DouyinLive{
 		liveID:         liveID,
@@ -113,9 +99,7 @@ func newDouyinLive(liveID string, baseLogger Logger, cookie string, signer webso
 			},
 		},
 		events:      newMessageBus(),
-		ristretto:   cache,
 		logger:      normalizeLogger(baseLogger),
-		closeCh:     make(chan struct{}),
 		closeCtx:    closeCtx,
 		closeCancel: closeCancel,
 		readyCh:     make(chan struct{}),

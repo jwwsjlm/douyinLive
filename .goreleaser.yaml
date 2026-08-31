@@ -39,7 +39,6 @@ archives:
       - LICENSE
       - config.example.yaml
       - compose.yaml
-      - compose.data.yaml
       - docs/http-api.md
       - docs/openapi.yaml
 

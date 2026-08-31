@@ -46,7 +46,7 @@ func (dl *DouyinLive) ensureCloseContextLocked() {
 		return
 	}
 	dl.closeCtx, dl.closeCancel = context.WithCancel(context.Background())
-	if dl.closeSignalClosed {
+	if dl.manualClose || dl.lifecycleState == listenerLifecycleClosing || dl.lifecycleState == listenerLifecycleClosed {
 		dl.closeCancel()
 	}
 }
@@ -55,41 +55,22 @@ func (dl *DouyinLive) ensureCloseContextLocked() {
 // signalClose broadcasts the close signal and cancels the close context.
 func (dl *DouyinLive) signalClose() {
 	dl.mu.Lock()
-	if dl.closeCh == nil {
-		dl.closeCh = make(chan struct{})
-	}
 	dl.ensureCloseContextLocked()
-	if !dl.closeSignalClosed {
-		close(dl.closeCh)
-		dl.closeSignalClosed = true
-		dl.closeCancel()
-	}
-	dl.mu.Unlock()
-}
-
-// resetCloseSignal 为新一轮 Start 流程重置关闭信号。
-// resetCloseSignal resets the close signal for a new Start cycle.
-func (dl *DouyinLive) resetCloseSignal() {
-	dl.mu.Lock()
-	if dl.closeCh == nil || dl.closeSignalClosed {
-		dl.closeCh = make(chan struct{})
-		dl.closeSignalClosed = false
-	}
-	if dl.closeCtx == nil || dl.closeCtx.Err() != nil {
-		dl.closeCtx, dl.closeCancel = context.WithCancel(context.Background())
-	}
+	dl.closeCancel()
 	dl.mu.Unlock()
 }
 
 // closeSignal 返回当前关闭信号通道。
 // closeSignal returns the current close-signal channel.
 func (dl *DouyinLive) closeSignal() <-chan struct{} {
+	return dl.closeContext().Done()
+}
+
+func (dl *DouyinLive) closeContext() context.Context {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
-	if dl.closeCh == nil {
-		dl.closeCh = make(chan struct{})
-	}
-	return dl.closeCh
+	dl.ensureCloseContextLocked()
+	return dl.closeCtx
 }
 
 // waitForReconnectDelay 等待重连延迟，并在关闭信号到来时提前退出。
@@ -129,35 +110,14 @@ func (dl *DouyinLive) requestContextWithParent(parent context.Context) (context.
 	if parent == nil {
 		parent = context.Background()
 	}
-	dl.mu.Lock()
-	dl.ensureCloseContextLocked()
-	closeCtx := dl.closeCtx
-	dl.mu.Unlock()
-
 	merged, mergeCancel := context.WithCancel(parent)
-	stopClosePropagation := context.AfterFunc(closeCtx, mergeCancel)
+	stopClosePropagation := context.AfterFunc(dl.closeContext(), mergeCancel)
 	timed, timeoutCancel := context.WithTimeout(merged, httpRequestTimeout)
 	return timed, func() {
 		stopClosePropagation()
 		timeoutCancel()
 		mergeCancel()
 	}
-}
-
-// contextWithCloseSignal 将关闭通道转换为可取消上下文。
-// contextWithCloseSignal converts a close channel into a cancellable context.
-// 参数/Parameters:
-//   - closeCh: 关闭信号通道。 Close-signal channel.
-func contextWithCloseSignal(closeCh <-chan struct{}) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		select {
-		case <-closeCh:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-	return ctx, cancel
 }
 
 // prepareRequestContextLocked 在持上下文锁时准备 HTTP 请求头和 Cookie。

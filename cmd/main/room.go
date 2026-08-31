@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jwwsjlm/douyinLive/v2"
 	"github.com/lxzan/gws"
 )
@@ -169,24 +169,6 @@ func (r *Room) snapshot() roomSnapshot {
 	return roomSnapshot{LiveID: r.id, RoomID: roomID, Status: status, IsLive: isLive, HasRoom: hasRoom, AccountOnly: accountOnly, Title: title, UserUniqueID: userUniqueID, LiveName: liveName, AvatarThumb: avatarThumb, ClientCount: r.clientCount(), UpstreamReady: upstreamReady, StatusUnknown: statusUnknown}
 }
 
-// setStatusUnknown 记录监控阶段当前是否只能得到“状态未知”。
-// setStatusUnknown records whether the monitor can currently report only an indeterminate status.
-func (r *Room) setStatusUnknown(unknown bool) bool {
-	r.mu.Lock()
-	changed := r.statusUnknown != unknown
-	r.statusUnknown = unknown
-	r.mu.Unlock()
-	return changed
-}
-
-// isStatusUnknown 返回监控阶段当前是否处于“状态未知”。
-// isStatusUnknown reports whether the monitor is currently in an indeterminate state.
-func (r *Room) isStatusUnknown() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.statusUnknown
-}
-
 // reserveClient 为已通过 HTTP 校验但尚未完成 WebSocket 升级的客户端预留房间。
 // reserveClient reserves the room for a client whose WebSocket upgrade hasn't completed yet.
 func (r *Room) reserveClient() bool {
@@ -296,7 +278,7 @@ func (r *Room) startTaskInternal(task func(), sessionGeneration *uint64) bool {
 }
 
 func newClientID() string {
-	return uuid.NewString()
+	return rand.Text()
 }
 
 // isClosed 判断房间是否已关闭。
@@ -305,22 +287,6 @@ func (r *Room) isClosed() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.closed
-}
-
-// markKnownValid 记录该房间曾经被抖音页面或接口明确识别为有效房间。
-// markKnownValid records that Douyin previously confirmed this room identity.
-func (r *Room) markKnownValid() {
-	r.mu.Lock()
-	r.knownValid = true
-	r.mu.Unlock()
-}
-
-// hasKnownValidRoom 返回该连接周期内是否曾确认过有效房间身份。
-// hasKnownValidRoom reports whether this room identity was confirmed during the current lifecycle.
-func (r *Room) hasKnownValidRoom() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.knownValid
 }
 
 // detachBackgroundWorkersIfIdle atomically retires the current session generation

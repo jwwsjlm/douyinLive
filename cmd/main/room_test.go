@@ -48,24 +48,6 @@ func TestMarkUpstreamReadyOnlyMarksTheCurrentRoomSession(t *testing.T) {
 	requireQueuedMessageContaining(t, client, `"code":"ROOM_ONLINE"`)
 }
 
-func TestMonitorStatusKeepsUnknownSemantics(t *testing.T) {
-	room := NewRoom("live-id", nil, false, "", douyinLive.SignProviderLocal, "", time.Second, time.Second, nil)
-	client := NewClient("client", nil)
-	addTestClient(room, client)
-	room.setStatusUnknown(true)
-
-	room.notifyMonitorStatus()
-
-	select {
-	case message := <-client.sendQueue:
-		if payload := string(message.payload); !strings.Contains(payload, `"code":"ROOM_STATUS_UNKNOWN"`) || strings.Contains(payload, `"code":"ROOM_OFFLINE"`) {
-			t.Fatalf("monitor payload = %s", payload)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("monitor did not enqueue status message")
-	}
-}
-
 func addTestClient(room *Room, client *Client) {
 	room.clientsMu.Lock()
 	room.clients[client.id] = client

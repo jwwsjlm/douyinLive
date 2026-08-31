@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/elliotchance/orderedmap"
-	"github.com/google/uuid"
 	"github.com/jwwsjlm/douyinlive-proto/generated/new_douyin"
 )
 
@@ -169,5 +168,5 @@ func RandomUserAgent() string {
 // GenerateUniqueID 生成唯一标识符。
 // GenerateUniqueID generates a unique identifier.
 func GenerateUniqueID() string {
-	return uuid.New().String()
+	return cryptorand.Text()
 }

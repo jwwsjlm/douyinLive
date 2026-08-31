@@ -207,25 +207,3 @@ func (r *Room) onlineStatusMessage() []byte {
 	trueValue := true
 	return marshalSystemStatusMessage(systemStatusMessage{Type: "system", Event: "live_status", Code: "ROOM_ONLINE", Valid: boolPtr(true), Live: &trueValue, Status: "online", StatusText: "直播间已开播", RoomID: r.id, LiveName: liveName, Title: title, AvatarThumb: avatarThumb, Message: "直播间已开播，后续将开始推送弹幕、礼物、点赞等直播消息", Suggestion: "客户端可以开始正常处理直播消息", RetryIntervalSeconds: nil})
 }
-
-// notifyOfflineStatus 广播未开播状态通知。
-// notifyOfflineStatus broadcasts the offline status notification.
-func (r *Room) notifyOfflineStatus() {
-	r.Broadcast(r.offlineStatusMessage())
-}
-
-// notifyStatusUnknown 广播暂时无法确认状态的通知。
-// notifyStatusUnknown broadcasts an indeterminate live-status notification.
-func (r *Room) notifyStatusUnknown() {
-	r.Broadcast(r.statusUnknownMessage())
-}
-
-// notifyMonitorStatus 按当前监控状态广播未知或未开播通知，避免把风控页误报为未开播。
-// notifyMonitorStatus broadcasts the current indeterminate/offline monitor state without misclassifying challenge pages.
-func (r *Room) notifyMonitorStatus() {
-	if r.isStatusUnknown() {
-		r.notifyStatusUnknown()
-		return
-	}
-	r.notifyOfflineStatus()
-}

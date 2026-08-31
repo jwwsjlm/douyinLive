@@ -249,19 +249,14 @@ func (rm *RoomManager) LookupRoom(ctx context.Context, liveID string) (douyinLiv
 		rm.probeMu.Unlock()
 		return rm.waitForRoomProbe(ctx, existing)
 	}
-	queryCtx, queryCancel := rm.probeContext(context.Background())
-	call := &roomProbeCall{done: make(chan struct{}), cancel: queryCancel, waiters: 1}
-	rm.probeCalls[liveID] = call
-	rm.probeWG.Add(1)
-	rm.probeMu.Unlock()
-
 	// The actual upstream probe must not inherit the first caller's context.
 	// Otherwise one disconnected client would cancel the shared probe for every
 	// other waiter. Each caller below only cancels its own wait.
-	go func() {
-		defer rm.probeWG.Done()
-		rm.executeRoomProbe(queryCtx, liveID, call)
-	}()
+	queryCtx, queryCancel := rm.probeContext()
+	call := &roomProbeCall{done: make(chan struct{}), cancel: queryCancel, waiters: 1}
+	rm.probeCalls[liveID] = call
+	rm.probeWG.Go(func() { rm.executeRoomProbe(queryCtx, liveID, call) })
+	rm.probeMu.Unlock()
 	return rm.waitForRoomProbe(ctx, call)
 }
 
@@ -332,24 +327,14 @@ func (rm *RoomManager) executeRoomProbe(queryCtx context.Context, liveID string,
 	}
 }
 
-// probeContext combines the caller cancellation, manager shutdown, and probe timeout.
-// probeContext 合并调用方取消、管理器关闭信号和探测超时。
-func (rm *RoomManager) probeContext(parent context.Context) (context.Context, context.CancelFunc) {
-	if parent == nil {
-		parent = context.Background()
-	}
+// probeContext combines manager shutdown and the per-probe timeout.
+// probeContext 合并管理器关闭信号和单次探测超时。
+func (rm *RoomManager) probeContext() (context.Context, context.CancelFunc) {
 	base := rm.probeCtx
 	if base == nil {
 		base = context.Background()
 	}
-	merged, mergeCancel := context.WithCancel(parent)
-	stopPropagation := context.AfterFunc(base, mergeCancel)
-	timed, timeoutCancel := context.WithTimeout(merged, roomProbeTimeout)
-	return timed, func() {
-		stopPropagation()
-		timeoutCancel()
-		mergeCancel()
-	}
+	return context.WithTimeout(base, roomProbeTimeout)
 }
 
 // Close stops pending probes and closes all active rooms.

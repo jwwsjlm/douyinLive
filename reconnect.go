@@ -69,18 +69,6 @@ func (dl *DouyinLive) reconnectPlan(reason string, failureCount int, baseDelay t
 	return delay, changeUA, rebuildHTTP
 }
 
-// max 返回两个 duration 中较大的一个。
-// max returns the larger of two durations.
-// 参数/Parameters:
-//   - a: 第一个 duration。 First duration.
-//   - b: 第二个 duration。 Second duration.
-func max(a, b time.Duration) time.Duration {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // reconnectDecision 将读错误转换为重连决策。
 // reconnectDecision converts a read error into a reconnect decision.
 // 参数/Parameters:
@@ -94,8 +82,7 @@ func (dl *DouyinLive) reconnectDecision(err error) (reason string, shouldRetry b
 		return "close_sent", false, 0, false
 	}
 
-	var closeErr *websocket.CloseError
-	if errors.As(err, &closeErr) {
+	if closeErr, ok := errors.AsType[*websocket.CloseError](err); ok {
 		switch closeErr.Code {
 		case websocket.CloseNormalClosure:
 			return "normal_close", false, 0, false
@@ -229,13 +216,10 @@ func (dl *DouyinLive) reconnect(attempts int, changeUA bool, rebuildHTTP bool) b
 		return nil
 	}
 
-	retryCtx, cancelRetry := contextWithCloseSignal(dl.closeSignal())
-	defer cancelRetry()
-
 	err := retry.Do(
 		retryable,
 		retry.Attempts(uint(attempts)),
-		retry.Context(retryCtx),
+		retry.Context(dl.closeContext()),
 		retry.DelayType(retry.BackOffDelay),
 		retry.MaxJitter(maxReconnectJitter),
 		retry.RetryIf(func(err error) bool {

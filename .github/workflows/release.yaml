@@ -27,6 +27,7 @@ concurrency:
 env:
   APP_NAME: douyinLive
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  GOTOOLCHAIN: local
 
 jobs:
   release-meta:

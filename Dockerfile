@@ -1,4 +1,4 @@
-﻿FROM golang:1.27.1-alpine3.24 AS builder
+﻿FROM golang:1.26.8-alpine3.24 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -7,6 +7,8 @@ ARG BUILD_COMMIT=unknown
 ARG BUILD_DATE=unknown
 ARG BUILD_SOURCE=local
 ARG DEFAULT_SIGN_PROVIDER=local
+
+ENV GOTOOLCHAIN=local
 
 WORKDIR /src
 RUN apk add --no-cache git ca-certificates tzdata

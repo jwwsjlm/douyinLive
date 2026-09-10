@@ -1,9 +1,6 @@
 name: release
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -98,7 +95,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    if: github.event_name != 'workflow_dispatch' || inputs.push_docker
+    if: inputs.push_docker
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1

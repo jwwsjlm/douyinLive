@@ -158,6 +158,12 @@ cp config.example.yaml config.yaml
 | [WebSocket 客户端与消息格式](docs/websocket-client.md) | 客户端接入、系统状态和业务消息 |
 | [`sign` 包说明](sign/README.md) | `a_bogus` 签名和 CookieManager 的直接调用 |
 
+## 发布
+
+普通提交、Pull Request 和推送标签均不自动运行 Actions。只有维护者明确需要发布正式版或测试版时，才在 Actions 的 `release` 工作流中选择 **Run workflow** 并填写已创建的版本标签；发布流程会完成一次验证、打包和可选 Docker 镜像发布。
+
+Dependabot 自动更新已关闭，依赖由维护者手动更新。构建使用 Go 1.26 系列，当前为 1.26.8。
+
 ## 项目结构
 
 ```text

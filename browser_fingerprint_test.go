@@ -36,9 +36,9 @@ func TestHTTPUserAgentsMatchTransportImpersonationVersion(t *testing.T) {
 }
 
 func TestSessionProfilesRotateFingerprint(t *testing.T) {
-	first := newSessionProfile("ua-a", staticWebsocketSigner{signature: "sig"}, "")
+	first := newSessionProfile("ua-a", staticWebsocketSigner{signature: "sig"}, "", proxyPolicy{})
 	defer first.close()
-	second := newSessionProfile("ua-b", staticWebsocketSigner{signature: "sig"}, "")
+	second := newSessionProfile("ua-b", staticWebsocketSigner{signature: "sig"}, "", proxyPolicy{})
 	defer second.close()
 	if first.fingerprint.ID == "" || second.fingerprint.ID == "" {
 		t.Fatal("session fingerprint id is empty")

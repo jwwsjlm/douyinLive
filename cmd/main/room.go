@@ -50,6 +50,7 @@ type Room struct {
 	onClose           func()
 	unknown           bool
 	cookie            string
+	proxyURL          string
 	signProvider      string
 	tikHubKey         string
 	pollInterval      time.Duration

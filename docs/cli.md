@@ -4,6 +4,14 @@
 
 本文介绍可执行程序启动、直播间参数、命令行选项、签名来源、日志和问题排查。
 
+## 使用采集代理
+
+```bash
+./douyinLive --proxy-url http://127.0.0.1:7890
+```
+
+也可设置 `APP_PROXY_URL`，或在配置文件中设置 `proxy.url` / `proxy.rooms`。支持 HTTP CONNECT 和 SOCKS5；包含认证信息时建议使用受权限保护的配置文件，避免密码进入命令行历史。按房间代理优先于默认代理；具体规则见[代理配置](configuration.md#proxyurl--proxyrooms)。
+
 ## 直播间参数怎么传
 
 很多人第一次用会卡在这里。

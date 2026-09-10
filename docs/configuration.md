@@ -2,7 +2,7 @@
 
 [返回项目首页](../README.md)
 
-本文说明 `config.yaml`、环境变量、Cookie、签名方式和配置优先级。
+本文说明 `config.yaml`、环境变量、代理、Cookie、签名方式和配置优先级。
 
 你可以创建一个 `config.yaml` 放在程序同目录下。
 
@@ -27,6 +27,9 @@ api:
 monitor:
   poll_interval: "15s"
   notify_interval: "30s"
+proxy:
+  url: ""
+  rooms: {}
 cookie:
   use_stored: true
   douyin: ""
@@ -179,6 +182,26 @@ monitor:
 {"type":"system","event":"live_status","live":false,"room_id":"516466932480","message":"直播间未开播","retry_interval_seconds":30}
 ```
 
+### `proxy.url` / `proxy.rooms`
+
+为抖音采集设置全局默认代理，或按直播间固定代理：
+
+```yaml
+proxy:
+  url: "http://127.0.0.1:7890"
+  rooms:
+    "516466932480": "socks5://user:password@127.0.0.1:1080"
+    "123456789": "http://another-proxy.example:8080"
+```
+
+支持 HTTP CONNECT 和 SOCKS5，可在 URL 中填写用户名和密码；特殊字符需要 URL 编码。HTTP 代理默认端口为 80，SOCKS5 必须填写端口。`http://` 代理可以承载 HTTPS/WSS，暂不支持到代理服务器本身使用 TLS 的 `https://` 代理，也不接受 `socks5h://` 别名。
+
+路由优先级：非空 `proxy.rooms[房间ID]` > 非空 `proxy.url` > `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`（兼容小写形式）> 直连。显式配置代理时，`NO_PROXY` 不会绕过它。房间值为空时继承默认值；房间 ID 与 `cookie.rooms` 使用相同格式。
+
+代理覆盖获取 Cookie、直播页、房间接口、IM 初始化、状态查询、未开播监控和上游 WebSocket 首连/重连。代理配置存在时关闭采集 HTTP/3，保留 HTTP/1.1、HTTP/2 和 TLS 验证；代理失败不自动改为直连。环境变量在采集实例创建时读取，更换配置后重启服务；实际出口是否固定还取决于代理服务。
+
+TikHub 签名客户端仍使用其原有网络策略，不继承房间代理。此配置不改变本地 HTTP/WebSocket 服务，也不提供代理池、自动换 IP 或请求级代理参数。
+
 ### `cookie.douyin`
 抖音默认 Cookie，可选。
 
@@ -254,7 +277,7 @@ ws://127.0.0.1:1088/ws/直播间ID?cookie=URL_ENCODED_COOKIE
 
 ## 环境变量映射
 
-独立服务使用 Viper 的 `APP_` 前缀和下划线映射配置项。常用配置如下：
+独立服务使用 `APP_` 前缀的环境变量覆盖配置项。常用配置如下：
 
 | 配置项 | 环境变量 |
 | --- | --- |
@@ -270,12 +293,16 @@ ws://127.0.0.1:1088/ws/直播间ID?cookie=URL_ENCODED_COOKIE
 | `cookie.use_stored` | `APP_COOKIE_USE_STORED` |
 | `cookie.douyin` | `APP_COOKIE_DOUYIN` |
 | `cookie.rooms` | `APP_COOKIE_ROOMS` |
+| `proxy.url` | `APP_PROXY_URL` |
+| `proxy.rooms` | `APP_PROXY_ROOMS` |
 | `monitor.poll_interval` | `APP_MONITOR_POLL_INTERVAL` |
 | `monitor.notify_interval` | `APP_MONITOR_NOTIFY_INTERVAL` |
 
 列表环境变量 `APP_API_ALLOWED_DOMAINS` 和 `APP_WEBSOCKET_ALLOWED_ORIGINS` 支持逗号分隔、空白分隔或 JSON 字符串数组。例如：`APP_API_ALLOWED_DOMAINS=live.douyin.com,www.douyin.com`。
 
 `APP_COOKIE_ROOMS` 使用 JSON 字符串对象，并完整覆盖配置文件中的 `cookie.rooms`，例如：`APP_COOKIE_ROOMS={"AbC123":"room-cookie"}`。房间号大小写会原样保留。
+
+`APP_PROXY_ROOMS` 同样使用 JSON 字符串对象，例如 `APP_PROXY_ROOMS={"AbC123":"http://127.0.0.1:7890"}`，整体替换房间代理映射，空值清空映射。`APP_PROXY_URL` 覆盖全局默认代理，`--proxy-url` 的优先级更高；它们不覆盖已配置的房间代理。
 
 命令行参数优先级高于环境变量，环境变量高于配置文件，配置文件高于程序默认值。Cookie 也可以通过 WebSocket URL 的 `cookie_b64` 或 `cookie` 参数临时覆盖，但不建议把 Cookie 长期放在 URL、Shell 历史或进程列表中。
 

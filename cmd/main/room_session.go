@@ -28,16 +28,10 @@ func (r *Room) acquireProbeLive(sessionGeneration uint64) (*douyinLive.DouyinLiv
 	}
 	r.mu.Unlock()
 
-	var (
-		d   *douyinLive.DouyinLive
-		err error
-	)
-	switch r.signProvider {
-	case signProviderTikHub:
-		d, err = douyinLive.NewDouyinLiveWithSlogAndTikHub(r.id, r.logger.base, r.cookie, r.tikHubKey)
-	default:
-		d, err = douyinLive.NewDouyinLiveWithSlog(r.id, r.logger.base, r.cookie)
-	}
+	d, err := douyinLive.NewDouyinLiveWithOptions(r.id, douyinLive.NewSlogLogger(r.logger.base), douyinLive.Options{
+		Cookie: r.cookie, ProxyURL: r.proxyURL,
+		SignProvider: r.signProvider, TikHubToken: r.tikHubKey,
+	})
 	if err != nil {
 		return nil, err
 	}

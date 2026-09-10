@@ -1,9 +1,11 @@
 package douyinLive
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -66,7 +68,47 @@ func (dl *DouyinLive) dialUpstreamWebSocket(dialer *websocket.Dialer, url string
 			"sign_implementation", websocketSignerImplementationName(dl.signer),
 		)...,
 	)
-	return dialer.DialContext(ctx, url, headers)
+	configured := *dialer
+	configured.Proxy = dl.proxy.resolve
+	// Gorilla sets a deadline but does not cancel an in-flight CONNECT/SOCKS
+	// handshake when the listener closes. Watch the underlying socket until
+	// DialContext returns, then leave established connections to the lifecycle.
+	var stopClose func() bool
+	defer func() {
+		if stopClose != nil {
+			stopClose()
+		}
+	}()
+	dial := configured.NetDialContext
+	if dial == nil {
+		dial = (&net.Dialer{}).DialContext
+		if configured.NetDial != nil {
+			dial = func(_ context.Context, network, address string) (net.Conn, error) {
+				return configured.NetDial(network, address)
+			}
+		}
+	}
+	watchDial := func(dial func(context.Context, string, string) (net.Conn, error)) func(context.Context, string, string) (net.Conn, error) {
+		return func(dialCtx context.Context, network, address string) (net.Conn, error) {
+			c, err := dial(dialCtx, network, address)
+			if err == nil {
+				stopClose = context.AfterFunc(ctx, func() { _ = c.Close() })
+			}
+			return c, err
+		}
+	}
+	configured.NetDialContext = watchDial(dial)
+	if configured.NetDialTLSContext != nil {
+		configured.NetDialTLSContext = watchDial(configured.NetDialTLSContext)
+	}
+	conn, response, err := configured.DialContext(ctx, url, headers)
+	if ctx.Err() != nil {
+		if conn != nil {
+			_ = conn.Close()
+		}
+		return nil, response, ctx.Err()
+	}
+	return conn, response, err
 }
 
 // dialWebSocketWithSignerFallback 在收到上游 HTTP 握手响应时允许原生签名切换到 Goja 重试一次。

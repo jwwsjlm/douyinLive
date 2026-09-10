@@ -188,6 +188,30 @@ dl, err := douyinlive.NewDouyinLiveWithTikHub(roomID, log.Default(), cookie, tik
 dl, err := douyinlive.NewDouyinLiveWithSlogAndTikHub(roomID, slog.Default(), cookie, tikHubKey)
 ```
 
+## 为采集实例配置代理
+
+```go
+live, err := douyinLive.NewDouyinLiveWithOptions(
+    "516466932480",
+    douyinLive.NewSlogLogger(slog.Default()),
+    douyinLive.Options{
+        Cookie:   "",
+        ProxyURL: "http://127.0.0.1:7890",
+    },
+)
+if err != nil {
+    return err
+}
+defer live.Dispose()
+return live.Start()
+```
+
+`ProxyURL` 支持 HTTP CONNECT、SOCKS5 和 URL 用户名密码认证，覆盖状态检查及上游 HTTP/WebSocket 连接，重连时保持相同配置。代理失败不会自动直连。空值按实例创建时的 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` 环境变量选择出口。
+
+`Options.SignProvider` 默认为 `local`；使用 `tikhub` 时必须提供 `Options.TikHubToken`，TikHub 客户端不继承房间代理。现有四个构造函数仍可使用。
+
+一个实例的代理在生命周期内不可变；切换代理时先 `Dispose()`，再创建新实例。协议和配置细节见[配置文件](configuration.md#proxyurl--proxyrooms)。
+
 ## 生命周期和关闭方式
 
 `Start()` 会阻塞当前 goroutine，直到直播连接结束、主动 `Close()` 或发生不可恢复错误。如果你的程序需要自己控制停止时机，建议把 `Start()` 放到 goroutine 里运行，然后在退出时调用 `Close()`。

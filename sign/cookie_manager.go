@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // cookieConfig 定义 CookieManager 内部使用的 YAML 配置结构。

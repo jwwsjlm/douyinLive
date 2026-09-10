@@ -10,7 +10,7 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/jwwsjlm/douyinLive)](https://github.com/jwwsjlm/douyinLive/releases)
 [![License](https://img.shields.io/github/license/jwwsjlm/douyinLive)](LICENSE)
-[![Go Version](https://img.shields.io/badge/go-1.26.6-blue)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/go-1.27.1-blue)](https://golang.org)
 
 ## 功能
 

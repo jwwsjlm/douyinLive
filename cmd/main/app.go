@@ -69,6 +69,11 @@ func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error
 	// Keep the caller-owned configuration immutable after application creation.
 	// 应用创建后不再修改调用方持有的配置对象，避免共享配置产生数据竞争。
 	configCopy := *config
+	proxyConfig, err := normalizeProxyConfig(config.Proxy)
+	if err != nil {
+		return nil, err
+	}
+	configCopy.Proxy = proxyConfig
 	if config.Cookie.Rooms != nil {
 		configCopy.Cookie.Rooms = make(map[string]string, len(config.Cookie.Rooms))
 		for roomID, cookie := range config.Cookie.Rooms {
@@ -114,6 +119,7 @@ func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error
 		RoomCookies: config.Cookie.Rooms, SignProvider: config.Sign.Provider,
 		TikHubKey: config.TikHub.Key, PollInterval: config.Monitor.PollInterval,
 		NotifyInterval: config.Monitor.NotifyInterval, UseStoredCookie: useStoredCookie,
+		ProxyURL: config.Proxy.URL, RoomProxies: config.Proxy.Rooms,
 	})
 	metrics := newAPIMetrics()
 	roomManager.metrics = metrics

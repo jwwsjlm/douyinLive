@@ -21,6 +21,7 @@ type sessionProfile struct {
 	userAgent           string
 	signer              websocketSigner
 	client              *req.Client
+	proxy               proxyPolicy
 	headers             http.Header
 	lastUserAgentChange time.Time
 	additionalCookies   map[string]string
@@ -30,7 +31,7 @@ type sessionProfile struct {
 
 // newSessionProfile 创建 UA、Cookie、HTTP 客户端和签名器保持一致的会话画像。
 // newSessionProfile creates a session profile with consistent UA, cookies, HTTP client, and signer.
-func newSessionProfile(userAgent string, signer websocketSigner, cookie string) sessionProfile {
+func newSessionProfile(userAgent string, signer websocketSigner, cookie string, proxy proxyPolicy) sessionProfile {
 	if signer == nil {
 		signer = newLocalWebsocketSigner()
 	}
@@ -46,7 +47,8 @@ func newSessionProfile(userAgent string, signer websocketSigner, cookie string) 
 	return sessionProfile{
 		userAgent:           userAgent,
 		signer:              signer,
-		client:              newHTTPClient(userAgent),
+		client:              newHTTPClient(userAgent, proxy),
+		proxy:               proxy,
 		headers:             make(http.Header),
 		lastUserAgentChange: time.Now(),
 		additionalCookies:   make(map[string]string),
@@ -136,20 +138,25 @@ func shuffledUserAgentIndexes(count int) []int {
 // newHTTPClient creates an HTTP client with browser impersonation and timeout settings.
 // 参数/Parameters:
 //   - userAgent: 请求使用的浏览器 User-Agent。 Browser User-Agent used for requests.
-func newHTTPClient(userAgent string) *req.Client {
-	return req.C().
+func newHTTPClient(userAgent string, proxy proxyPolicy) *req.Client {
+	client := req.C().
 		ImpersonateChromeWithOS(req.BrowserOSWindows).
-		EnableHTTP3().
-		EnableHTTP3FallbackOnError().
+		SetProxy(proxy.resolve).
 		SetUserAgent(userAgent).
 		SetTimeout(httpRequestTimeout)
+	if proxy.disableHTTP3 {
+		client.DisableHTTP3()
+	} else {
+		client.EnableHTTP3().EnableHTTP3FallbackOnError()
+	}
+	return client
 }
 
 // rebuildHTTPClientAndHeaders 重建 HTTP 客户端并刷新基础请求头。
 // rebuildHTTPClientAndHeaders rebuilds the HTTP client and refreshes base headers.
 func (dl *DouyinLive) rebuildHTTPClientAndHeaders() {
 	oldClient := dl.client
-	dl.client = newHTTPClient(dl.userAgent)
+	dl.client = newHTTPClient(dl.userAgent, dl.proxy)
 	dl.headers = make(http.Header)
 	dl.headers.Set("User-Agent", dl.userAgent)
 	dl.refreshSignerUserAgent()

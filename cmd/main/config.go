@@ -15,7 +15,7 @@ import (
 	"unicode"
 
 	douyinLive "github.com/jwwsjlm/douyinLive/v2"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // ErrVersionRequested tells the CLI layer that only version output was requested.
@@ -41,6 +41,12 @@ type CookieConfig struct {
 	useStoredSet bool
 	Douyin       string
 	Rooms        map[string]string
+}
+
+// ProxyConfig stores the default upstream proxy and fixed per-room overrides.
+type ProxyConfig struct {
+	URL   string            `yaml:"url"`
+	Rooms map[string]string `yaml:"rooms"`
 }
 
 // SetUseStoredCookie explicitly selects whether this configuration may use stored cookies.
@@ -84,6 +90,7 @@ type Config struct {
 	Port      string
 	Unknown   bool
 	Cookie    CookieConfig
+	Proxy     ProxyConfig
 	Monitor   MonitorConfig
 	Log       LogConfig
 	Sign      SignConfig
@@ -103,6 +110,7 @@ type configFileSchema struct {
 	WebSocket configFileWebSocketSchema `yaml:"websocket"`
 	Monitor   configFileMonitorSchema   `yaml:"monitor"`
 	Cookie    configFileCookieSchema    `yaml:"cookie"`
+	Proxy     ProxyConfig               `yaml:"proxy"`
 }
 
 type configFileLogSchema struct {
@@ -255,9 +263,9 @@ func envStringSlice(name string, fallback []string) ([]string, error) {
 	}), nil
 }
 
-// envRoomCookies uses JSON so cookie punctuation remains unambiguous.
-func envRoomCookies(fallback map[string]string) (map[string]string, error) {
-	raw, ok := os.LookupEnv("APP_COOKIE_ROOMS")
+// envStringMap uses JSON so cookie/proxy punctuation remains unambiguous.
+func envStringMap(name string, fallback map[string]string) (map[string]string, error) {
+	raw, ok := os.LookupEnv(name)
 	if !ok {
 		return fallback, nil
 	}
@@ -267,12 +275,33 @@ func envRoomCookies(fallback map[string]string) (map[string]string, error) {
 	}
 	var values map[string]string
 	if err := json.Unmarshal([]byte(raw), &values); err != nil {
-		return nil, fmt.Errorf("APP_COOKIE_ROOMS 必须是 JSON 字符串对象: %w", err)
+		return nil, fmt.Errorf("%s 必须是 JSON 字符串对象", name)
 	}
 	if values == nil {
 		return map[string]string{}, nil
 	}
 	return values, nil
+}
+
+func normalizeProxyConfig(config ProxyConfig) (ProxyConfig, error) {
+	result := ProxyConfig{URL: strings.TrimSpace(config.URL), Rooms: make(map[string]string, len(config.Rooms))}
+	if err := douyinLive.ValidateProxyURL(result.URL); err != nil {
+		return ProxyConfig{}, fmt.Errorf("proxy.url 配置无效: %w", err)
+	}
+	for key, value := range config.Rooms {
+		liveID, err := douyinLive.ValidateLiveID(strings.TrimSpace(key))
+		if err != nil {
+			return ProxyConfig{}, errors.New("proxy.rooms 包含无效直播间标识")
+		}
+		if _, exists := result.Rooms[liveID]; exists {
+			return ProxyConfig{}, fmt.Errorf("proxy.rooms 包含重复直播间标识: %s", liveID)
+		}
+		if err := douyinLive.ValidateProxyURL(value); err != nil {
+			return ProxyConfig{}, fmt.Errorf("proxy.rooms[%s] 配置无效: %w", liveID, err)
+		}
+		result.Rooms[liveID] = strings.TrimSpace(value)
+	}
+	return result, nil
 }
 
 func normalizeAllowedOrigins(values []string) ([]string, error) {
@@ -377,6 +406,7 @@ func NewConfig() (*Config, error) {
 	logLevelFlag := flags.String("log-level", "info", "日志级别: debug, info, warn, error")
 	signProviderFlag := flags.String("sign-provider", defaultSignProvider, "WebSocket 签名来源: local, tikhub")
 	tikHubKeyFlag := flags.String("tikhub-key", "", "TikHub API Key，用于在线生成 WebSocket 签名")
+	proxyURLFlag := flags.String("proxy-url", "", "抖音采集默认代理 URL，支持 http 或 socks5")
 	configFileFlag := flags.String("config", "", "指定配置文件路径")
 	versionFlag := flags.Bool("version", false, "输出版本信息")
 	if err := flags.Parse(os.Args[1:]); err != nil {
@@ -411,6 +441,7 @@ func NewConfig() (*Config, error) {
 	schema.API.Key = envString("APP_API_KEY", schema.API.Key)
 	schema.WebSocket.Path = envString("APP_WEBSOCKET_PATH", schema.WebSocket.Path)
 	schema.Cookie.Douyin = envString("APP_COOKIE_DOUYIN", schema.Cookie.Douyin)
+	schema.Proxy.URL = envString("APP_PROXY_URL", schema.Proxy.URL)
 	schema.Monitor.PollInterval = envString("APP_MONITOR_POLL_INTERVAL", schema.Monitor.PollInterval)
 	schema.Monitor.NotifyInterval = envString("APP_MONITOR_NOTIFY_INTERVAL", schema.Monitor.NotifyInterval)
 	schema.Unknown = envBool("APP_UNKNOWN", schema.Unknown)
@@ -421,7 +452,10 @@ func NewConfig() (*Config, error) {
 	if schema.WebSocket.AllowedOrigins, err = envStringSlice("APP_WEBSOCKET_ALLOWED_ORIGINS", schema.WebSocket.AllowedOrigins); err != nil {
 		return nil, err
 	}
-	if schema.Cookie.Rooms, err = envRoomCookies(schema.Cookie.Rooms); err != nil {
+	if schema.Cookie.Rooms, err = envStringMap("APP_COOKIE_ROOMS", schema.Cookie.Rooms); err != nil {
+		return nil, err
+	}
+	if schema.Proxy.Rooms, err = envStringMap("APP_PROXY_ROOMS", schema.Proxy.Rooms); err != nil {
 		return nil, err
 	}
 
@@ -439,6 +473,13 @@ func NewConfig() (*Config, error) {
 	}
 	if changed["tikhub-key"] {
 		schema.TikHub.Key = *tikHubKeyFlag
+	}
+	if changed["proxy-url"] {
+		schema.Proxy.URL = *proxyURLFlag
+	}
+	proxyConfig, err := normalizeProxyConfig(schema.Proxy)
+	if err != nil {
+		return nil, err
 	}
 
 	if _, err := parseConfiguredPort(schema.Port); err != nil {
@@ -507,6 +548,7 @@ func NewConfig() (*Config, error) {
 	}
 
 	return &Config{
+		Proxy:   proxyConfig,
 		Port:    schema.Port,
 		Unknown: schema.Unknown,
 		Cookie: CookieConfig{

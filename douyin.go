@@ -3,6 +3,9 @@ package douyinLive
 import (
 	"bytes"
 	"context"
+	"errors"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +53,33 @@ type DouyinLive struct {
 	readyClosed            bool
 }
 
+// Options configures one listener. ProxyURL is fixed until the listener is disposed.
+// Empty ProxyURL follows HTTP_PROXY/HTTPS_PROXY/NO_PROXY; empty SignProvider uses local signing.
+type Options struct {
+	Cookie       string
+	ProxyURL     string
+	SignProvider string
+	TikHubToken  string
+}
+
+// NewDouyinLiveWithOptions creates a listener with optional per-instance proxy settings.
+// Use NewSlogLogger to adapt a slog.Logger.
+func NewDouyinLiveWithOptions(liveID string, logger Logger, options Options) (*DouyinLive, error) {
+	var signer websocketSigner
+	switch strings.ToLower(strings.TrimSpace(options.SignProvider)) {
+	case "", SignProviderLocal:
+		signer = newLocalWebsocketSigner()
+	case SignProviderTikHub:
+		if strings.TrimSpace(options.TikHubToken) == "" {
+			return nil, ErrTikHubTokenEmpty
+		}
+		signer = newTikHubWebsocketSigner(options.TikHubToken, "")
+	default:
+		return nil, errors.New("sign provider must be local or tikhub")
+	}
+	return newDouyinLiveWithProxy(liveID, logger, options.Cookie, signer, options.ProxyURL)
+}
+
 // NewDouyinLive 创建使用本地签名的抖音直播监听实例。
 // NewDouyinLive creates a Douyin live listener that uses local signing.
 // 参数/Parameters:
@@ -79,7 +109,15 @@ func NewDouyinLiveWithTikHub(liveID string, logger Logger, cookie string, tikHub
 //   - cookie: 可选抖音 Cookie，用于登录态请求。 Optional Douyin Cookie for authenticated requests.
 //   - signer: WebSocket 签名实现。 WebSocket signature provider.
 func newDouyinLive(liveID string, baseLogger Logger, cookie string, signer websocketSigner) (*DouyinLive, error) {
+	return newDouyinLiveWithProxy(liveID, baseLogger, cookie, signer, "")
+}
+
+func newDouyinLiveWithProxy(liveID string, baseLogger Logger, cookie string, signer websocketSigner, proxyURL string) (*DouyinLive, error) {
 	liveID, err := ValidateLiveID(liveID)
+	var proxy proxyPolicy
+	if err == nil {
+		proxy, err = newProxyPolicy(proxyURL)
+	}
 	if err != nil {
 		if closer, ok := signer.(websocketSignerCloser); ok {
 			closer.Close()
@@ -87,7 +125,7 @@ func newDouyinLive(liveID string, baseLogger Logger, cookie string, signer webso
 		return nil, err
 	}
 	userAgent := newHTTPUserAgent()
-	profile := newSessionProfile(userAgent, signer, cookie)
+	profile := newSessionProfile(userAgent, signer, cookie, proxy)
 	closeCtx, closeCancel := context.WithCancel(context.Background())
 	dl := &DouyinLive{
 		liveID:         liveID,
@@ -121,6 +159,17 @@ func newDouyinLive(liveID string, baseLogger Logger, cookie string, signer webso
 		LogStatus(logSink, string)
 	}); ok {
 		statusLogger.LogStatus(dl.logger, dl.liveID)
+	}
+	source := "environment"
+	if strings.TrimSpace(proxyURL) != "" {
+		source = "explicit"
+	} else if !proxy.disableHTTP3 {
+		source = "direct"
+	}
+	request, _ := http.NewRequest(http.MethodGet, "https://live.douyin.com/", nil)
+	if u, err := proxy.resolve(request); err == nil && u != nil {
+		dl.logger.Info("采集代理已配置", "live_id", liveID, "proxy_source", source,
+			"proxy_scheme", u.Scheme, "proxy_host", u.Host, "has_auth", u.User != nil)
 	}
 
 	return dl, nil

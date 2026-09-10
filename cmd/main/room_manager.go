@@ -23,6 +23,8 @@ type RoomManager struct {
 	useStoredCookie bool
 	cookie          string            // 抖音默认 Cookie。 Default Douyin Cookie.
 	roomCookies     map[string]string // 按直播间 ID 配置的 Cookie。 Per-room Cookie overrides keyed by room ID.
+	proxyURL        string
+	roomProxies     map[string]string
 	signProvider    string
 	tikHubKey       string
 	pollInterval    time.Duration
@@ -64,6 +66,8 @@ type RoomManagerOptions struct {
 	Unknown         bool
 	Cookie          string
 	RoomCookies     map[string]string
+	ProxyURL        string
+	RoomProxies     map[string]string
 	SignProvider    string
 	TikHubKey       string
 	PollInterval    time.Duration
@@ -113,6 +117,10 @@ func NewRoomManagerWithOptions(options RoomManagerOptions) *RoomManager {
 	for roomID, value := range options.RoomCookies {
 		roomCookiesCopy[roomID] = value
 	}
+	roomProxies := make(map[string]string, len(options.RoomProxies))
+	for roomID, value := range options.RoomProxies {
+		roomProxies[roomID] = strings.TrimSpace(value)
+	}
 	useStored := true
 	if options.UseStoredCookie != nil {
 		useStored = *options.UseStoredCookie
@@ -125,6 +133,8 @@ func NewRoomManagerWithOptions(options RoomManagerOptions) *RoomManager {
 		useStoredCookie: useStored,
 		cookie:          options.Cookie,
 		roomCookies:     roomCookiesCopy,
+		proxyURL:        strings.TrimSpace(options.ProxyURL),
+		roomProxies:     roomProxies,
 		signProvider:    normalizedProvider,
 		tikHubKey:       strings.TrimSpace(options.TikHubKey),
 		pollInterval:    options.PollInterval,
@@ -135,10 +145,10 @@ func NewRoomManagerWithOptions(options RoomManagerOptions) *RoomManager {
 		probeCancel:     probeCancel,
 	}
 	rm.probeFactory = func(liveID, cookie string) (statusProbe, error) {
-		if rm.signProvider == signProviderTikHub {
-			return douyinLive.NewDouyinLiveWithSlogAndTikHub(liveID, rm.logger.base, cookie, rm.tikHubKey)
-		}
-		return douyinLive.NewDouyinLiveWithSlog(liveID, rm.logger.base, cookie)
+		return douyinLive.NewDouyinLiveWithOptions(liveID, douyinLive.NewSlogLogger(rm.logger.base), douyinLive.Options{
+			Cookie: cookie, ProxyURL: rm.proxyForRoom(liveID),
+			SignProvider: rm.signProvider, TikHubToken: rm.tikHubKey,
+		})
 	}
 	return rm
 }
@@ -401,6 +411,13 @@ func (rm *RoomManager) cookieForRoom(roomID string, override string) string {
 	return strings.TrimSpace(rm.cookie)
 }
 
+func (rm *RoomManager) proxyForRoom(roomID string) string {
+	if value := rm.roomProxies[roomID]; value != "" {
+		return value
+	}
+	return rm.proxyURL
+}
+
 // roomManagerKey 生成房间复用键，避免不同 Cookie 的连接误共享会话。
 // roomManagerKey builds a reuse key that prevents sessions with different cookies from mixing.
 // 参数/Parameters:
@@ -447,6 +464,7 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string, cookieOverride string) *Ro
 		rm.roomsMu.Unlock()
 		rm.logger.Info("房间已从管理器中移除", "room_id", roomID)
 	})
+	room.proxyURL = rm.proxyForRoom(roomID)
 	rm.rooms[key] = room
 	return room
 }

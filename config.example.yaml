@@ -43,6 +43,15 @@ monitor:
   # 未开播期间，向本地 WebSocket 客户端重复推送状态通知的时间间隔
   notify_interval: "30s"
 
+# 采集代理配置（可选）
+proxy:
+  # 抖音采集默认代理，支持 HTTP CONNECT 和 SOCKS5；空值沿用系统代理环境变量
+  url: ""
+  # 按房间固定代理，优先于默认值；更改后重启服务
+  rooms:
+    # "516466932480": "http://127.0.0.1:7890"
+    # "123456789": "socks5://user:password@127.0.0.1:1080"
+
 # Cookie 配置（可选，不配置则自动获取）
 cookie:
   # 是否使用下面配置的预存 Cookie；默认 true。设为 false 时忽略 cookie.douyin 和 cookie.rooms，使用匿名会话

@@ -14,6 +14,8 @@ websocket:
   path: "/ws"
   allowed_origins: []
 unknown: false
+protocol:
+  mode: web
 log:
   level: "info"
 sign:
@@ -60,6 +62,20 @@ port: "1088"
 ```yaml
 unknown: false
 ```
+
+### `protocol.mode`
+
+选择连接上游时使用的协议画像：
+
+- `web`：浏览器 Web 端画像，默认值，兼容性优先。
+- `pc`：抖音桌面客户端画像，当前为测试功能，暂不保证稳定性。
+
+```yaml
+protocol:
+  mode: web
+```
+
+也可以使用环境变量 `APP_PROTOCOL` 或命令行参数 `--protocol pc|web` 覆盖。
 
 ### `websocket.path`
 

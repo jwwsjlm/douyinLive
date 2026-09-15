@@ -31,6 +31,7 @@ func (r *Room) acquireProbeLive(sessionGeneration uint64) (*douyinLive.DouyinLiv
 	d, err := douyinLive.NewDouyinLiveWithOptions(r.id, douyinLive.NewSlogLogger(r.logger.base), douyinLive.Options{
 		Cookie: r.cookie, ProxyURL: r.proxyURL,
 		SignProvider: r.signProvider, TikHubToken: r.tikHubKey,
+		ProtocolMode: r.protocolMode,
 	})
 	if err != nil {
 		return nil, err

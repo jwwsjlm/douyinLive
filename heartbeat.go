@@ -1,6 +1,8 @@
 package douyinLive
 
 import (
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -58,6 +60,47 @@ func (dl *DouyinLive) currentHeartbeatInterval() time.Duration {
 		return heartbeatInterval
 	}
 	return heartbeatEvery
+}
+
+// parseHandshakePingInterval 解析上游握手响应头 Handshake-Options 中的 ping-interval 秒数。
+// 抓包实测 PC 客户端握手返回 "Handshake-Options: ping-interval=15;"，与随后下发的
+// Response.heartbeat_duration=15 一致，两者互为印证。
+// parseHandshakePingInterval parses the ping-interval seconds advertised in the upstream
+// Handshake-Options response header. Captures show "ping-interval=15;", matching the later
+// Response.heartbeat_duration=15.
+// 参数/Parameters:
+//   - header: Handshake-Options 响应头原值。 Raw Handshake-Options response header value.
+func parseHandshakePingInterval(header string) time.Duration {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return 0
+	}
+	for _, option := range strings.Split(header, ";") {
+		key, value, found := strings.Cut(strings.TrimSpace(option), "=")
+		if !found || !strings.EqualFold(strings.TrimSpace(key), "ping-interval") {
+			continue
+		}
+		seconds, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	return 0
+}
+
+// applyHandshakePingInterval 采用握手响应声明的 ping-interval 作为心跳周期。
+// applyHandshakePingInterval adopts the ping-interval declared during the handshake.
+// 参数/Parameters:
+//   - header: Handshake-Options 响应头原值。 Raw Handshake-Options response header value.
+func (dl *DouyinLive) applyHandshakePingInterval(header string) {
+	interval := parseHandshakePingInterval(header)
+	if interval <= 0 {
+		return
+	}
+	dl.mu.Lock()
+	dl.heartbeatEvery = interval
+	dl.mu.Unlock()
 }
 
 // sendHeartbeat 发送抖音网页端使用的应用层 PushFrame 心跳。

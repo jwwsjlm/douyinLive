@@ -44,6 +44,13 @@ func (dl *DouyinLive) startWebSocket() error {
 	dl.conn = conn
 	dl.mu.Unlock()
 	dl.configureWebSocket(conn)
+	// 服务端在握手响应中就声明了期望的心跳节奏，先采用它，随后 Response 中的
+	// heartbeat_duration 会在 applyWebsocketResponseState 中带来同一数值。
+	// The upstream declares its expected heartbeat cadence during the handshake; adopt it now,
+	// the later heartbeat_duration from Response carries the same value.
+	if resp != nil {
+		dl.applyHandshakePingInterval(resp.Header.Get("Handshake-Options"))
+	}
 	dl.setLiveStatus(true)
 	dl.markReady()
 	dl.startHeartbeatLoop()
@@ -272,6 +279,7 @@ func (dl *DouyinLive) buildWebsocketURL() (string, error) {
 	cursor, internalExt, pushURL := dl.websocketURLState(fetchTime, roomInfo)
 	screenWidth, screenHeight := dl.fingerprint.screenSize()
 	params := newWebsocketURLParamsWithScreen(roomInfo, dl.userAgent, cursor, internalExt, signature, screenWidth, screenHeight)
+	params.PersistMsgCount = dl.protocol.persistMsgCount()
 	wsURL := pushURL + "?" + params.QueryString()
 	dl.logger.Debug("WebSocket URL 参数已生成",
 		logFlowArgs("ws", "build_url",
@@ -348,9 +356,7 @@ func (dl *DouyinLive) fetchInitialIMState() error {
 		"Referer":         "https://live.douyin.com/" + dl.liveID,
 		"User-Agent":      dl.userAgent,
 	}
-	for key, value := range browserClientHintHeaders(dl.userAgent) {
-		headers[key] = value
-	}
+	dl.applyProtocolHeaders(headers)
 
 	resp, err := dl.client.R().
 		SetContext(ctx).

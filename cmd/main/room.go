@@ -52,6 +52,7 @@ type Room struct {
 	cookie            string
 	proxyURL          string
 	signProvider      string
+	protocolMode      string
 	tikHubKey         string
 	pollInterval      time.Duration
 	notifyInterval    time.Duration
@@ -205,13 +206,20 @@ func (r *Room) releaseClientReservation() {
 //   - pollInterval: 未开播轮询间隔。 Offline-room polling interval.
 //   - notifyInterval: 未开播状态通知间隔。 Offline status notification interval.
 //   - onClose: 房间关闭后的回调。 Callback invoked after the room closes.
-func NewRoom(id string, logger *appLogger, unknown bool, cookie string, signProvider string, tikHubKey string, pollInterval time.Duration, notifyInterval time.Duration, onClose func()) *Room {
+//   - protocolMode: 可选上游协议画像；省略时使用 defaultProtocolMode。 Optional upstream protocol profile.
+func NewRoom(id string, logger *appLogger, unknown bool, cookie string, signProvider string, tikHubKey string, pollInterval time.Duration, notifyInterval time.Duration, onClose func(), protocolMode ...string) *Room {
 	if logger == nil {
 		logger = newAppLogger(nil)
 	}
 	normalizedProvider, err := normalizeSignProvider(signProvider)
 	if err != nil {
 		normalizedProvider = signProviderLocal
+	}
+	resolvedProtocolMode := defaultProtocolMode
+	if len(protocolMode) > 0 {
+		if trimmed := strings.TrimSpace(protocolMode[0]); trimmed != "" {
+			resolvedProtocolMode = trimmed
+		}
 	}
 	if pollInterval <= 0 {
 		pollInterval = defaultRoomPollInterval
@@ -229,6 +237,7 @@ func NewRoom(id string, logger *appLogger, unknown bool, cookie string, signProv
 		unknown:         unknown,
 		cookie:          cookie,
 		signProvider:    normalizedProvider,
+		protocolMode:    resolvedProtocolMode,
 		tikHubKey:       strings.TrimSpace(tikHubKey),
 		pollInterval:    pollInterval,
 		notifyInterval:  notifyInterval,

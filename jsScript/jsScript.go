@@ -198,6 +198,20 @@ func browserEnvironmentScriptWithProfile(ua, cookie string, profile BrowserProfi
 			var ua = ` + string(uaJSON) + `;
 			var cookie = ` + string(cookieJSON) + `;
 			var profile = ` + string(profileJSON) + `;
+			// webmssdk.js 在识别到抖音客户端 UA（douyin/*、awemePcClient/*）时会走客户端分支
+			// 并调用 console 输出调试信息；Goja 不提供宿主 console，这里在全局补齐空实现，
+			// 否则会抛 "ReferenceError: console is not defined" 并中断签名。
+			if (!root.console) {
+				root.console = {
+					log: function () {}, info: function () {}, warn: function () {}, error: function () {},
+					debug: function () {}, trace: function () {}, dir: function () {}, table: function () {},
+					group: function () {}, groupCollapsed: function () {}, groupEnd: function () {},
+					time: function () {}, timeEnd: function () {}, timeLog: function () {},
+					count: function () {}, countReset: function () {}, assert: function () {},
+					clear: function () {}, profile: function () {}, profileEnd: function () {},
+					memory: {}
+				};
+			}
 			var webglDebugInfo = {
 				UNMASKED_VENDOR_WEBGL: 37445,
 				UNMASKED_RENDERER_WEBGL: 37446
@@ -511,6 +525,32 @@ func browserEnvironmentScriptWithProfile(ua, cookie string, profile BrowserProfi
 			});
 
 			root.Image = function () { return makeElement("img"); };
+			// webmssdk 在识别到抖音客户端 UA 时会走更深的浏览器环境探测分支，
+			// 直接引用这些 DOM 接口全局；Goja 不提供宿主实现，这里补齐最小可用版本，
+			// 否则会抛 "ReferenceError: <接口名> is not defined" 并中断签名。
+			root.PluginArray = function PluginArray() {};
+			root.MimeTypeArray = function MimeTypeArray() {};
+			root.Plugin = function Plugin() {};
+			root.MimeType = function MimeType() {};
+			root.performance = root.performance || {
+				now: function () { return Date.now(); },
+				timeOrigin: Date.now(),
+				timing: {},
+				navigation: { type: 0, redirectCount: 0 },
+				getEntries: function () { return []; },
+				getEntriesByType: function () { return []; },
+				getEntriesByName: function () { return []; }
+			};
+			root.history = root.history || {
+				length: 1,
+				state: null,
+				scrollRestoration: "auto",
+				pushState: function () {},
+				replaceState: function () {},
+				back: function () {},
+				forward: function () {},
+				go: function () {}
+			};
 			root.TouchEvent = function () {};
 			root.RTCPeerConnection = function () {
 				return {

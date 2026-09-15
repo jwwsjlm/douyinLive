@@ -13,6 +13,10 @@ websocket:
 # 是否输出未知消息类型（调试用）
 unknown: false
 
+# 上游协议画像：web 为默认稳定画像；pc 为测试画像，暂不保证稳定性
+protocol:
+  mode: web # pc（测试）| web（默认）
+
 # 日志配置
 log:
   # 可选: debug, info, warn, error

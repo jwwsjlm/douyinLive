@@ -60,6 +60,11 @@ type Options struct {
 	ProxyURL     string
 	SignProvider string
 	TikHubToken  string
+	// ProtocolMode 选择协议画像："web" 为默认稳定画像，"pc" 复现抖音桌面客户端且仍处于测试阶段。
+	// 空值使用 DefaultProtocolMode。取值非法时构造失败并返回 ErrProtocolModeInvalid。
+	// ProtocolMode selects the protocol profile: "web" is the stable default, while "pc"
+	// reproduces the Douyin desktop client and remains experimental. Empty uses DefaultProtocolMode.
+	ProtocolMode string
 }
 
 // NewDouyinLiveWithOptions creates a listener with optional per-instance proxy settings.
@@ -77,7 +82,7 @@ func NewDouyinLiveWithOptions(liveID string, logger Logger, options Options) (*D
 	default:
 		return nil, errors.New("sign provider must be local or tikhub")
 	}
-	return newDouyinLiveWithProxy(liveID, logger, options.Cookie, signer, options.ProxyURL)
+	return newDouyinLiveWithProxy(liveID, logger, options.Cookie, signer, options.ProxyURL, options.ProtocolMode)
 }
 
 // NewDouyinLive 创建使用本地签名的抖音直播监听实例。
@@ -109,11 +114,22 @@ func NewDouyinLiveWithTikHub(liveID string, logger Logger, cookie string, tikHub
 //   - cookie: 可选抖音 Cookie，用于登录态请求。 Optional Douyin Cookie for authenticated requests.
 //   - signer: WebSocket 签名实现。 WebSocket signature provider.
 func newDouyinLive(liveID string, baseLogger Logger, cookie string, signer websocketSigner) (*DouyinLive, error) {
-	return newDouyinLiveWithProxy(liveID, baseLogger, cookie, signer, "")
+	return newDouyinLiveWithProxy(liveID, baseLogger, cookie, signer, "", "")
 }
 
-func newDouyinLiveWithProxy(liveID string, baseLogger Logger, cookie string, signer websocketSigner, proxyURL string) (*DouyinLive, error) {
-	liveID, err := ValidateLiveID(liveID)
+// newDouyinLiveWithProxy 构造监听实例并解析协议画像。
+// newDouyinLiveWithProxy builds a listener and resolves its protocol profile.
+// 参数/Parameters:
+//   - protocolMode: 协议画像名称；空值取 DefaultProtocolMode。 Protocol mode name; empty uses DefaultProtocolMode.
+func newDouyinLiveWithProxy(liveID string, baseLogger Logger, cookie string, signer websocketSigner, proxyURL string, protocolMode string) (*DouyinLive, error) {
+	protocolModeResolved, err := resolveProtocolMode(protocolMode)
+	if err != nil {
+		if closer, ok := signer.(websocketSignerCloser); ok {
+			closer.Close()
+		}
+		return nil, err
+	}
+	liveID, err = ValidateLiveID(liveID)
 	var proxy proxyPolicy
 	if err == nil {
 		proxy, err = newProxyPolicy(proxyURL)
@@ -124,8 +140,8 @@ func newDouyinLiveWithProxy(liveID string, baseLogger Logger, cookie string, sig
 		}
 		return nil, err
 	}
-	userAgent := newHTTPUserAgent()
-	profile := newSessionProfile(userAgent, signer, cookie, proxy)
+	userAgent := selectUserAgent(protocolModeResolved.userAgents(), "")
+	profile := newSessionProfile(protocolModeResolved, userAgent, signer, cookie, proxy)
 	closeCtx, closeCancel := context.WithCancel(context.Background())
 	dl := &DouyinLive{
 		liveID:         liveID,
@@ -146,6 +162,7 @@ func newDouyinLiveWithProxy(liveID string, baseLogger Logger, cookie string, sig
 	dl.logger.Debug(
 		"浏览器会话画像已创建",
 		"live_id", dl.liveID,
+		"protocol_mode", string(dl.protocol),
 		"user_agent", dl.userAgent,
 		"fingerprint_preset", dl.fingerprint.Preset,
 		"fingerprint_id", dl.fingerprint.ID,
@@ -173,4 +190,22 @@ func newDouyinLiveWithProxy(liveID string, baseLogger Logger, cookie string, sig
 	}
 
 	return dl, nil
+}
+
+// ProtocolMode 返回本实例使用的协议画像名称（"pc" 或 "web"）。
+// ProtocolMode returns this listener's protocol profile name ("pc" or "web").
+func (dl *DouyinLive) ProtocolMode() string {
+	if dl == nil {
+		return ""
+	}
+	return string(dl.protocol)
+}
+
+// UserAgent 返回本实例当前使用的 User-Agent。
+// UserAgent returns the User-Agent currently used by this listener.
+func (dl *DouyinLive) UserAgent() string {
+	if dl == nil {
+		return ""
+	}
+	return dl.userAgent
 }

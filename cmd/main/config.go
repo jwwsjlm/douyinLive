@@ -24,6 +24,8 @@ var ErrVersionRequested = errors.New("version requested")
 const (
 	signProviderLocal  = "local"
 	signProviderTikHub = "tikhub"
+	// defaultProtocolMode 与库默认协议画像保持一致：web 为稳定默认值，pc 仍为测试画像。
+	defaultProtocolMode = "web"
 )
 
 // Keep Viper's former automatic search order so upgrades never silently skip
@@ -47,6 +49,12 @@ type CookieConfig struct {
 type ProxyConfig struct {
 	URL   string            `yaml:"url"`
 	Rooms map[string]string `yaml:"rooms"`
+}
+
+// ProtocolConfig selects the upstream protocol profile.
+// ProtocolConfig 选择上游协议画像："pc" 复现抖音桌面客户端，"web" 复现浏览器 Web 端。
+type ProtocolConfig struct {
+	Mode string `yaml:"mode"`
 }
 
 // SetUseStoredCookie explicitly selects whether this configuration may use stored cookies.
@@ -91,6 +99,7 @@ type Config struct {
 	Unknown   bool
 	Cookie    CookieConfig
 	Proxy     ProxyConfig
+	Protocol  ProtocolConfig
 	Monitor   MonitorConfig
 	Log       LogConfig
 	Sign      SignConfig
@@ -111,6 +120,7 @@ type configFileSchema struct {
 	Monitor   configFileMonitorSchema   `yaml:"monitor"`
 	Cookie    configFileCookieSchema    `yaml:"cookie"`
 	Proxy     ProxyConfig               `yaml:"proxy"`
+	Protocol  ProtocolConfig            `yaml:"protocol"`
 }
 
 type configFileLogSchema struct {
@@ -163,6 +173,7 @@ func defaultConfigFileSchema() configFileSchema {
 			UseStored: true,
 			Rooms:     map[string]string{},
 		},
+		Protocol: ProtocolConfig{Mode: defaultProtocolMode},
 	}
 }
 
@@ -382,6 +393,21 @@ func normalizeWebSocketPath(value string) (string, error) {
 	return path, nil
 }
 
+// normalizeProtocolMode 校验并归一化上游协议画像配置。
+// normalizeProtocolMode validates and normalizes the upstream protocol profile setting.
+func normalizeProtocolMode(mode string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(mode))
+	if normalized == "" {
+		return defaultProtocolMode, nil
+	}
+	switch normalized {
+	case string(douyinLive.ProtocolModePC), string(douyinLive.ProtocolModeWeb):
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("protocol.mode 配置无效: %s（可选 pc 或 web）", mode)
+	}
+}
+
 func normalizeSignProvider(provider string) (string, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
@@ -407,6 +433,7 @@ func NewConfig() (*Config, error) {
 	signProviderFlag := flags.String("sign-provider", defaultSignProvider, "WebSocket 签名来源: local, tikhub")
 	tikHubKeyFlag := flags.String("tikhub-key", "", "TikHub API Key，用于在线生成 WebSocket 签名")
 	proxyURLFlag := flags.String("proxy-url", "", "抖音采集默认代理 URL，支持 http 或 socks5")
+	protocolFlag := flags.String("protocol", defaultProtocolMode, "上游协议画像: web（默认，浏览器 Web 端）, pc（测试，抖音桌面客户端）")
 	configFileFlag := flags.String("config", "", "指定配置文件路径")
 	versionFlag := flags.Bool("version", false, "输出版本信息")
 	if err := flags.Parse(os.Args[1:]); err != nil {
@@ -442,6 +469,7 @@ func NewConfig() (*Config, error) {
 	schema.WebSocket.Path = envString("APP_WEBSOCKET_PATH", schema.WebSocket.Path)
 	schema.Cookie.Douyin = envString("APP_COOKIE_DOUYIN", schema.Cookie.Douyin)
 	schema.Proxy.URL = envString("APP_PROXY_URL", schema.Proxy.URL)
+	schema.Protocol.Mode = envString("APP_PROTOCOL", schema.Protocol.Mode)
 	schema.Monitor.PollInterval = envString("APP_MONITOR_POLL_INTERVAL", schema.Monitor.PollInterval)
 	schema.Monitor.NotifyInterval = envString("APP_MONITOR_NOTIFY_INTERVAL", schema.Monitor.NotifyInterval)
 	schema.Unknown = envBool("APP_UNKNOWN", schema.Unknown)
@@ -477,7 +505,14 @@ func NewConfig() (*Config, error) {
 	if changed["proxy-url"] {
 		schema.Proxy.URL = *proxyURLFlag
 	}
+	if changed["protocol"] {
+		schema.Protocol.Mode = *protocolFlag
+	}
 	proxyConfig, err := normalizeProxyConfig(schema.Proxy)
+	if err != nil {
+		return nil, err
+	}
+	protocolMode, err := normalizeProtocolMode(schema.Protocol.Mode)
 	if err != nil {
 		return nil, err
 	}
@@ -548,9 +583,10 @@ func NewConfig() (*Config, error) {
 	}
 
 	return &Config{
-		Proxy:   proxyConfig,
-		Port:    schema.Port,
-		Unknown: schema.Unknown,
+		Proxy:    proxyConfig,
+		Protocol: ProtocolConfig{Mode: protocolMode},
+		Port:     schema.Port,
+		Unknown:  schema.Unknown,
 		Cookie: CookieConfig{
 			UseStored:    schema.Cookie.UseStored,
 			useStoredSet: true,

@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
-
-	"github.com/elliotchance/orderedmap"
 )
 
 const (
@@ -25,7 +23,10 @@ const (
 	defaultScreenHeight = 1080
 	defaultCursor       = "d-1_u-1_fh-7383731312643626035_t-1719159695790_r-1"
 	defaultWRDSVersion  = "7382620942951772256"
-	protobufContentType = "protobuf"
+	// webcastPersistMsgCount 对齐 PC 客户端实测值：桌面客户端建连时上报 0。
+	// webcastPersistMsgCount matches the observed PC client value: the desktop client sends 0 on connect.
+	webcastPersistMsgCount = pcProtocolPersistMsgCount
+	protobufContentType    = "protobuf"
 )
 
 type websocketSignatureParams struct {
@@ -62,37 +63,32 @@ func newWebsocketSignatureParams(roomID, userUniqueID string) websocketSignature
 	}
 }
 
-// OrderedMap returns the ordered signing fields used by the upstream handshake.
-// OrderedMap 返回上游握手签名所需的有序字段。
-func (p websocketSignatureParams) OrderedMap() *orderedmap.OrderedMap {
-	m := orderedmap.NewOrderedMap()
-	m.Set("live_id", p.LiveID)
-	m.Set("aid", p.AID)
-	m.Set("version_code", p.VersionCode)
-	m.Set("webcast_sdk_version", p.WebcastSDKVersion)
-	m.Set("room_id", p.RoomID)
-	m.Set("sub_room_id", p.SubRoomID)
-	m.Set("sub_channel_id", p.SubChannelID)
-	m.Set("did_rule", p.DidRule)
-	m.Set("user_unique_id", p.UserUniqueID)
-	m.Set("device_platform", p.DevicePlatform)
-	m.Set("device_type", p.DeviceType)
-	m.Set("ac", p.AC)
-	m.Set("identity", p.Identity)
-	return m
-}
-
 // Joined returns the canonical comma-separated signing input.
 // Joined 返回规范化的逗号分隔签名输入。
 func (p websocketSignatureParams) Joined() string {
+	fields := [...]struct{ key, value string }{
+		{"live_id", p.LiveID},
+		{"aid", p.AID},
+		{"version_code", p.VersionCode},
+		{"webcast_sdk_version", p.WebcastSDKVersion},
+		{"room_id", p.RoomID},
+		{"sub_room_id", p.SubRoomID},
+		{"sub_channel_id", p.SubChannelID},
+		{"did_rule", p.DidRule},
+		{"user_unique_id", p.UserUniqueID},
+		{"device_platform", p.DevicePlatform},
+		{"device_type", p.DeviceType},
+		{"ac", p.AC},
+		{"identity", p.Identity},
+	}
 	var b strings.Builder
-	m := p.OrderedMap()
-	for i, key := range m.Keys() {
+	for i, field := range fields {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		value, _ := m.Get(key)
-		b.WriteString(fmt.Sprintf("%s=%s", key, value))
+		b.WriteString(field.key)
+		b.WriteByte('=')
+		b.WriteString(field.value)
 	}
 	return b.String()
 }
@@ -113,6 +109,9 @@ type websocketURLParams struct {
 	Signature      string
 	ScreenWidth    int
 	ScreenHeight   int
+	// PersistMsgCount 对应查询串中的 need_persist_msg_count，由协议画像决定。
+	// 抓包实测 PC 客户端上报 0，Web 端沿用历史值 15。
+	PersistMsgCount string
 }
 
 func newWebsocketURLParams(roomInfo roomInfoSnapshot, userAgent, cursor, internalExt, signature string) websocketURLParams {
@@ -121,14 +120,15 @@ func newWebsocketURLParams(roomInfo roomInfoSnapshot, userAgent, cursor, interna
 
 func newWebsocketURLParamsWithScreen(roomInfo roomInfoSnapshot, userAgent, cursor, internalExt, signature string, screenWidth, screenHeight int) websocketURLParams {
 	return websocketURLParams{
-		BrowserVersion: browserVersionFromUserAgent(userAgent),
-		Cursor:         cursor,
-		InternalExt:    internalExt,
-		UserUniqueID:   roomInfo.pushID,
-		RoomID:         roomInfo.roomID,
-		Signature:      signature,
-		ScreenWidth:    screenWidth,
-		ScreenHeight:   screenHeight,
+		BrowserVersion:  browserVersionFromUserAgent(userAgent),
+		Cursor:          cursor,
+		InternalExt:     internalExt,
+		UserUniqueID:    roomInfo.pushID,
+		RoomID:          roomInfo.roomID,
+		Signature:       signature,
+		ScreenWidth:     screenWidth,
+		ScreenHeight:    screenHeight,
+		PersistMsgCount: webcastPersistMsgCount,
 	}
 }
 
@@ -169,7 +169,7 @@ func (p websocketURLParams) QueryString() string {
 		"user_unique_id=" + p.UserUniqueID,
 		"im_path=" + webcastIMPath,
 		"identity=" + webcastIdentity,
-		"need_persist_msg_count=15",
+		"need_persist_msg_count=" + p.PersistMsgCount,
 		"insert_task_id=",
 		"live_reason=",
 		"room_id=" + p.RoomID,

@@ -120,6 +120,7 @@ func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error
 		TikHubKey: config.TikHub.Key, PollInterval: config.Monitor.PollInterval,
 		NotifyInterval: config.Monitor.NotifyInterval, UseStoredCookie: useStoredCookie,
 		ProxyURL: config.Proxy.URL, RoomProxies: config.Proxy.Rooms,
+		ProtocolMode: config.Protocol.Mode,
 	})
 	metrics := newAPIMetrics()
 	roomManager.metrics = metrics

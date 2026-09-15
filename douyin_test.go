@@ -614,7 +614,7 @@ func TestShouldFetchTTWIDSkipsWhenUserCookieProvided(t *testing.T) {
 }
 
 func TestGetCookieStringSortsFetchedCookies(t *testing.T) {
-	dl, err := newDouyinLive("live-id", nil, "", staticWebsocketSigner{signature: "sig"})
+	dl, err := newDouyinLiveWithProxy("live-id", nil, "", staticWebsocketSigner{signature: "sig"}, "", string(ProtocolModePC))
 	if err != nil {
 		t.Fatalf("newDouyinLive() failed: %v", err)
 	}
@@ -623,8 +623,16 @@ func TestGetCookieStringSortsFetchedCookies(t *testing.T) {
 	dl.ttwid = "ttwid-value"
 	dl.additionalCookies["z_cookie"] = "z"
 	dl.additionalCookies["a_cookie"] = "a"
-	if got, want := dl.getCookieString(), "ttwid=ttwid-value; a_cookie=a; z_cookie=z"; got != want {
-		t.Fatalf("getCookieString() = %q, want %q", got, want)
+	got := dl.getCookieString()
+	// 抓取到的 Cookie 仍按键名排序，其后补齐 PC 客户端固定 Cookie。
+	// Fetched cookies stay sorted by name, followed by the fixed PC-client cookies.
+	if want := "ttwid=ttwid-value; a_cookie=a; z_cookie=z"; !strings.HasPrefix(got, want) {
+		t.Fatalf("getCookieString() = %q, want prefix %q", got, want)
+	}
+	for _, seed := range pcClientCookieSeeds {
+		if !strings.Contains(got, seed.Name+"="+seed.Value) {
+			t.Fatalf("缺少 PC 客户端 Cookie %s=%s，实际 %q", seed.Name, seed.Value, got)
+		}
 	}
 }
 
@@ -806,18 +814,24 @@ func TestLogMissingLiveNameWarnsWithRoomContext(t *testing.T) {
 	}
 }
 
-func TestBrowserClientHintHeadersUseChromeMajorVersion(t *testing.T) {
-	ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-	headers := browserClientHintHeaders(ua)
+// TestProtocolClientHintHeadersMatchProfile 校验两套协议画像的 Client Hints 各自自洽。
+func TestProtocolClientHintHeadersMatchProfile(t *testing.T) {
+	pc := ProtocolModePC.clientHints()
+	// 抓包实测 PC 客户端只声明 "Not.A/Brand" 与 "Chromium"，不含 "Google Chrome"。
+	// The captured PC client advertises only "Not.A/Brand" and "Chromium".
+	if got := pc["sec-ch-ua"]; !strings.Contains(got, `"Chromium";v="136"`) || strings.Contains(got, `"Google Chrome"`) {
+		t.Fatalf("PC sec-ch-ua = %q", got)
+	}
+	if got := pc["sec-ch-ua-mobile"]; got != "?0" {
+		t.Fatalf("PC sec-ch-ua-mobile = %q", got)
+	}
+	if got := pc["sec-ch-ua-platform"]; got != `"Windows"` {
+		t.Fatalf("PC sec-ch-ua-platform = %q", got)
+	}
 
-	if got := headers["sec-ch-ua"]; !strings.Contains(got, `"Chromium";v="150"`) || !strings.Contains(got, `"Google Chrome";v="150"`) {
-		t.Fatalf("sec-ch-ua = %q", got)
-	}
-	if got := headers["sec-ch-ua-mobile"]; got != "?0" {
-		t.Fatalf("sec-ch-ua-mobile = %q", got)
-	}
-	if got := headers["sec-ch-ua-platform"]; got != `"Windows"` {
-		t.Fatalf("sec-ch-ua-platform = %q", got)
+	web := ProtocolModeWeb.clientHints()
+	if got := web["sec-ch-ua"]; !strings.Contains(got, `"Chromium";v="133"`) || !strings.Contains(got, `"Google Chrome";v="133"`) {
+		t.Fatalf("Web sec-ch-ua = %q", got)
 	}
 }
 

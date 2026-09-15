@@ -10,18 +10,25 @@ import (
 
 // getCookieParts 组装当前有效 Cookie 的键值片段。
 // getCookieParts builds key-value parts for the currently effective cookies.
+// 无论走用户配置还是自动 ttwid 分支，都会补齐 PC 客户端固定携带的 Cookie，
+// 使请求与桌面客户端保持同一指纹；已存在的同名 Cookie 以现有值为准。
+// Either branch is completed with the fixed PC-client cookies so requests carry the same
+// fingerprint as the desktop client; existing names keep their current value.
 func (dl *DouyinLive) getCookieParts() []string {
+	present := make(map[string]struct{})
 	configCookie := dl.cookieManager.GetDouyinCookie()
 	if configCookie != "" {
 		cookies := dl.cookieManager.ParseCookies(configCookie)
-		parts := make([]string, 0, len(cookies))
+		parts := make([]string, 0, len(cookies)+len(pcClientCookieSeeds))
 		for _, c := range cookies {
 			parts = append(parts, fmt.Sprintf("%s=%s", c.Name, c.Value))
+			present[c.Name] = struct{}{}
 		}
-		return parts
+		return append(parts, dl.protocol.cookieParts(present)...)
 	}
 
 	parts := []string{fmt.Sprintf("ttwid=%s", dl.ttwid)}
+	present["ttwid"] = struct{}{}
 	names := make([]string, 0, len(dl.additionalCookies))
 	for name := range dl.additionalCookies {
 		names = append(names, name)
@@ -29,8 +36,9 @@ func (dl *DouyinLive) getCookieParts() []string {
 	sort.Strings(names)
 	for _, name := range names {
 		parts = append(parts, fmt.Sprintf("%s=%s", name, dl.additionalCookies[name]))
+		present[name] = struct{}{}
 	}
-	return parts
+	return append(parts, dl.protocol.cookieParts(present)...)
 }
 
 // getCookieString 返回用于请求头的 Cookie 字符串。

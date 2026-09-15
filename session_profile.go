@@ -1,16 +1,13 @@
 package douyinLive
 
 import (
-	"fmt"
+	"math/rand/v2"
+	"net/http"
 	"strings"
-	"sync"
 	"time"
 
-	"crypto/rand"
 	"github.com/jwwsjlm/douyinLive/v2/sign"
 	"github.com/jwwsjlm/req/v3"
-	"math/big"
-	"net/http"
 )
 
 // sessionProfile 统一持有一次直播会话使用的浏览器画像和相关资源。
@@ -27,11 +24,16 @@ type sessionProfile struct {
 	additionalCookies   map[string]string
 	cookieManager       *sign.CookieManager
 	fingerprint         browserFingerprint
+	protocol            ProtocolMode
+	deviceIdentity      pcClientDeviceIdentity
 }
 
 // newSessionProfile 创建 UA、Cookie、HTTP 客户端和签名器保持一致的会话画像。
 // newSessionProfile creates a session profile with consistent UA, cookies, HTTP client, and signer.
-func newSessionProfile(userAgent string, signer websocketSigner, cookie string, proxy proxyPolicy) sessionProfile {
+// 参数/Parameters:
+//   - protocol: 该会话使用的协议画像。 Protocol profile used by this session.
+//   - userAgent: 已按画像选定的 User-Agent。 User agent already selected for the profile.
+func newSessionProfile(protocol ProtocolMode, userAgent string, signer websocketSigner, cookie string, proxy proxyPolicy) sessionProfile {
 	if signer == nil {
 		signer = newLocalWebsocketSigner()
 	}
@@ -54,6 +56,8 @@ func newSessionProfile(userAgent string, signer websocketSigner, cookie string, 
 		additionalCookies:   make(map[string]string),
 		cookieManager:       cookieManager,
 		fingerprint:         fingerprint,
+		protocol:            protocol,
+		deviceIdentity:      newPCClientDeviceIdentity(fingerprint.ID),
 	}
 }
 
@@ -71,67 +75,27 @@ func (p *sessionProfile) close() {
 
 const httpImpersonationChromeMajor = "133"
 
-// impersonatedUserAgents 必须与 req 当前 Chrome 133 TLS/HTTP2/HTTP3 画像保持同一主版本。
-// impersonatedUserAgents must stay on the same major version as req's Chrome 133 TLS/HTTP2/HTTP3 profile.
-// UA 仍按会话随机轮换架构，但不再伪造与底层网络指纹不一致的 Chrome 版本。
-// The architecture still rotates per session without claiming a Chrome version inconsistent with the transport fingerprint.
-var impersonatedUserAgents = []string{
-	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + httpImpersonationChromeMajor + ".0.0.0 Safari/537.36",
-	"Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + httpImpersonationChromeMajor + ".0.0.0 Safari/537.36",
-}
-
-var userAgentSelector struct {
-	sync.Mutex
-	order  []int
-	cursor int
-}
-
-// newHTTPUserAgent 随机选择一个用于 HTTP 伪装的浏览器 UA。
-// newHTTPUserAgent randomly selects a browser user agent for HTTP impersonation.
-func newHTTPUserAgent() string {
-	return newHTTPUserAgentExcept("")
-}
-
-// newHTTPUserAgentExcept 随机选择 UA，并在存在其他候选项时避免继续使用旧值。
-// newHTTPUserAgentExcept selects a random UA and avoids the previous value when alternatives exist.
-func newHTTPUserAgentExcept(excluded string) string {
-	userAgentSelector.Lock()
-	defer userAgentSelector.Unlock()
-
-	if len(impersonatedUserAgents) == 0 {
+// selectUserAgent 从候选池中选择 UA，并在存在其他候选项时避免继续使用旧值。
+// selectUserAgent picks a UA and avoids the previous value when alternatives exist.
+// 参数/Parameters:
+//   - candidates: UA 候选池。 User agent candidate pool.
+//   - excluded: 希望避免的旧值；无其他候选时仍会返回它。 Previously used value to avoid when possible.
+func selectUserAgent(candidates []string, excluded string) string {
+	if len(candidates) == 0 {
 		return ""
 	}
+	if len(candidates) == 1 {
+		return candidates[0]
+	}
 
-	for {
-		if userAgentSelector.cursor >= len(userAgentSelector.order) {
-			userAgentSelector.order = shuffledUserAgentIndexes(len(impersonatedUserAgents))
-			userAgentSelector.cursor = 0
-		}
-		index := userAgentSelector.order[userAgentSelector.cursor]
-		userAgentSelector.cursor++
-		candidate := impersonatedUserAgents[index]
-		if candidate != excluded || len(impersonatedUserAgents) == 1 {
+	start := rand.IntN(len(candidates))
+	for offset := range len(candidates) {
+		candidate := candidates[(start+offset)%len(candidates)]
+		if candidate != excluded {
 			return candidate
 		}
 	}
-}
-
-// shuffledUserAgentIndexes 为一个选择周期生成随机且不重复的 UA 顺序。
-// shuffledUserAgentIndexes creates a randomized, non-repeating UA order for one selection cycle.
-func shuffledUserAgentIndexes(count int) []int {
-	order := make([]int, count)
-	for index := range order {
-		order[index] = index
-	}
-	for index := count - 1; index > 0; index-- {
-		randomIndex, err := rand.Int(rand.Reader, big.NewInt(int64(index+1)))
-		if err != nil {
-			continue
-		}
-		swapIndex := int(randomIndex.Int64())
-		order[index], order[swapIndex] = order[swapIndex], order[index]
-	}
-	return order
+	return candidates[start]
 }
 
 // newHTTPClient 创建带浏览器伪装和超时设置的 HTTP 客户端。
@@ -159,6 +123,9 @@ func (dl *DouyinLive) rebuildHTTPClientAndHeaders() {
 	dl.client = newHTTPClient(dl.userAgent, dl.proxy)
 	dl.headers = make(http.Header)
 	dl.headers.Set("User-Agent", dl.userAgent)
+	// 头集合被重建后必须重新注入协议画像头，否则 PC 专有指纹会丢失。
+	// Profile headers must be re-injected after the header set is rebuilt.
+	dl.applyProtocolHeadersToHTTPHeader(dl.headers)
 	dl.refreshSignerUserAgent()
 	closeHTTPClientIdleConnections(oldClient)
 }
@@ -219,11 +186,36 @@ func chromeMajorVersionFromUserAgent(userAgent string) string {
 	return "133"
 }
 
-func browserClientHintHeaders(userAgent string) map[string]string {
-	major := chromeMajorVersionFromUserAgent(userAgent)
-	return map[string]string{
-		"sec-ch-ua":          fmt.Sprintf(`"Not;A=Brand";v="8", "Chromium";v="%s", "Google Chrome";v="%s"`, major, major),
-		"sec-ch-ua-mobile":   "?0",
-		"sec-ch-ua-platform": `"Windows"`,
+// eachProtocolHeader 遍历当前协议画像的专有请求头。
+// eachProtocolHeader visits the profile-specific request headers.
+func (dl *DouyinLive) eachProtocolHeader(visit func(string, string)) {
+	if visit == nil {
+		return
 	}
+	for key, value := range dl.protocol.clientHints() {
+		visit(key, value)
+	}
+	for key, value := range dl.protocol.requestHeaders(dl.deviceIdentity) {
+		visit(key, value)
+	}
+}
+
+// applyProtocolHeaders 把协议画像相关的请求头写入 map 形式的请求头集合。
+// applyProtocolHeaders writes protocol-profile headers into a map-based header set.
+func (dl *DouyinLive) applyProtocolHeaders(headers map[string]string) {
+	if headers == nil {
+		return
+	}
+	dl.eachProtocolHeader(func(key, value string) { headers[key] = value })
+}
+
+// applyProtocolHeadersToHTTPHeader 把协议画像相关的请求头写入 http.Header。
+// applyProtocolHeadersToHTTPHeader writes protocol-profile request headers into an http.Header.
+// 参数/Parameters:
+//   - headers: 目标请求头集合。 Target header set.
+func (dl *DouyinLive) applyProtocolHeadersToHTTPHeader(headers http.Header) {
+	if headers == nil {
+		return
+	}
+	dl.eachProtocolHeader(headers.Set)
 }

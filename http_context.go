@@ -135,6 +135,9 @@ func (dl *DouyinLive) prepareRequestContextLocked(ctx context.Context) error {
 	dl.headers.Set("User-Agent", dl.userAgent)
 	dl.headers.Set("Origin", "https://live.douyin.com")
 	dl.headers.Set("Referer", "https://live.douyin.com/"+dl.liveID)
+	// 注入协议画像请求头（PC 专有的 X-AWEME-* 与 sec-ch-ua*），Web 画像不发送 X-AWEME-*。
+	// Inject protocol-profile headers; the Web profile sends no X-AWEME-* headers.
+	dl.applyProtocolHeadersToHTTPHeader(dl.headers)
 	dl.setupCookies()
 	return nil
 }
@@ -279,7 +282,7 @@ func (dl *DouyinLive) refreshReconnectContextLocked(changeUA bool, rebuildHTTP b
 	if changeUA {
 		now := time.Now()
 		if now.Sub(dl.lastUserAgentChange) >= minUAChangeInterval {
-			newUserAgent := newHTTPUserAgentExcept(oldUserAgent)
+			newUserAgent := selectUserAgent(dl.protocol.userAgents(), oldUserAgent)
 			dl.userAgent = newUserAgent
 			dl.lastUserAgentChange = now
 			dl.fingerprint = newBrowserFingerprint()

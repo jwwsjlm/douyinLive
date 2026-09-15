@@ -358,7 +358,7 @@ func TestProxyPreparationAndReconnect(t *testing.T) {
 	defer ws.Close()
 	proxyURL, _ := testForwardProxy(t, "http", upstream.Listener.Addr().String(), "")
 	wsProxyURL, _ := testForwardProxy(t, "http", ws.Listener.Addr().String(), "")
-	dl, err := newDouyinLiveWithProxy("1001", log.New(io.Discard, "", 0), "", staticWebsocketSigner{signature: "sig"}, proxyURL)
+	dl, err := newDouyinLiveWithProxy("1001", log.New(io.Discard, "", 0), "", staticWebsocketSigner{signature: "sig"}, proxyURL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,8 +435,11 @@ func TestProxyConcurrentListenersStayIsolated(t *testing.T) {
 	var workers sync.WaitGroup
 	for _, id := range []string{"1001", "1002"} {
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get("Cookie") != "ttwid="+id {
-				t.Errorf("room %s received another room's cookie", id)
+			// 每个房间的 ttwid 必须是自己那份；其后允许跟上全局一致的 PC 客户端固定 Cookie。
+			// Each room must carry its own ttwid; the fixed PC-client cookies may follow.
+			cookie := r.Header.Get("Cookie")
+			if !strings.HasPrefix(cookie, "ttwid="+id) {
+				t.Errorf("room %s received another room's cookie: %q", id, cookie)
 			}
 			_, _ = io.WriteString(w, id)
 		}))

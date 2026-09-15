@@ -690,9 +690,7 @@ func (dl *DouyinLive) fetchLivePageStateWithContext(ctx context.Context) error {
 		"Referer":         "https://live.douyin.com/",
 		"User-Agent":      dl.userAgent,
 	}
-	for key, value := range browserClientHintHeaders(dl.userAgent) {
-		headers[key] = value
-	}
+	dl.applyProtocolHeaders(headers)
 
 	resp, err := dl.client.R().
 		SetContext(ctx).
@@ -890,9 +888,7 @@ func (dl *DouyinLive) doRequest(ctx context.Context) (string, error) {
 		"Referer":         "https://live.douyin.com/" + dl.liveID,
 		"User-Agent":      dl.userAgent,
 	}
-	for key, value := range browserClientHintHeaders(dl.userAgent) {
-		headers[key] = value
-	}
+	dl.applyProtocolHeaders(headers)
 	signed := signWebcastHTTPURL("https://live.douyin.com/webcast/room/web/enter/", params, dl.userAgent)
 	url := signed.URL
 	roomInfo := dl.roomInfoSnapshot()

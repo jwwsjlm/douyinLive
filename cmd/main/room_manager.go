@@ -26,6 +26,7 @@ type RoomManager struct {
 	proxyURL        string
 	roomProxies     map[string]string
 	signProvider    string
+	protocolMode    string
 	tikHubKey       string
 	pollInterval    time.Duration
 	notifyInterval  time.Duration
@@ -70,6 +71,7 @@ type RoomManagerOptions struct {
 	RoomProxies     map[string]string
 	SignProvider    string
 	TikHubKey       string
+	ProtocolMode    string
 	PollInterval    time.Duration
 	NotifyInterval  time.Duration
 	UseStoredCookie *bool
@@ -121,6 +123,18 @@ func NewRoomManagerWithOptions(options RoomManagerOptions) *RoomManager {
 	for roomID, value := range options.RoomProxies {
 		roomProxies[roomID] = strings.TrimSpace(value)
 	}
+	// 在入口归一化协议画像：无效值回退到默认，空值不再依赖下游兜底。
+	// Normalize the protocol profile here so an empty or invalid value resolves to the default
+	// instead of relying on downstream fallbacks.
+	protocolMode := strings.TrimSpace(options.ProtocolMode)
+	if protocolMode == "" {
+		protocolMode = defaultProtocolMode
+	} else if normalized, err := normalizeProtocolMode(protocolMode); err != nil {
+		logger.Warn("无效的协议画像，回退到默认", "configured_protocol", protocolMode, "err", err)
+		protocolMode = defaultProtocolMode
+	} else {
+		protocolMode = normalized
+	}
 	useStored := true
 	if options.UseStoredCookie != nil {
 		useStored = *options.UseStoredCookie
@@ -136,6 +150,7 @@ func NewRoomManagerWithOptions(options RoomManagerOptions) *RoomManager {
 		proxyURL:        strings.TrimSpace(options.ProxyURL),
 		roomProxies:     roomProxies,
 		signProvider:    normalizedProvider,
+		protocolMode:    protocolMode,
 		tikHubKey:       strings.TrimSpace(options.TikHubKey),
 		pollInterval:    options.PollInterval,
 		notifyInterval:  options.NotifyInterval,
@@ -148,6 +163,7 @@ func NewRoomManagerWithOptions(options RoomManagerOptions) *RoomManager {
 		return douyinLive.NewDouyinLiveWithOptions(liveID, douyinLive.NewSlogLogger(rm.logger.base), douyinLive.Options{
 			Cookie: cookie, ProxyURL: rm.proxyForRoom(liveID),
 			SignProvider: rm.signProvider, TikHubToken: rm.tikHubKey,
+			ProtocolMode: rm.protocolMode,
 		})
 	}
 	return rm
@@ -463,7 +479,7 @@ func (rm *RoomManager) GetOrCreateRoom(roomID string, cookieOverride string) *Ro
 		}
 		rm.roomsMu.Unlock()
 		rm.logger.Info("房间已从管理器中移除", "room_id", roomID)
-	})
+	}, rm.protocolMode)
 	room.proxyURL = rm.proxyForRoom(roomID)
 	rm.rooms[key] = room
 	return room

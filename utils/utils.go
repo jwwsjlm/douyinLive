@@ -31,8 +31,6 @@ func HasGzipEncoding(headers []*new_douyin.Webcast_Im_PushHeader) bool {
 
 // GetxMSStub 拼接有序参数并返回 MD5 十六进制摘要。
 // GetxMSStub joins ordered parameters and returns their MD5 hex digest.
-// 参数/Parameters:
-//   - params: 需要按插入顺序拼接的参数表。 Parameter map that must be joined in insertion order.
 func GetxMSStub(params *orderedmap.OrderedMap) string {
 	var sigParams strings.Builder
 	for i, key := range params.Keys() {
@@ -122,9 +120,6 @@ func GzipCompressAndBase64Encode(data []byte) (string, error) {
 
 // NewOrderedMap 创建 WebSocket 签名所需的有序参数表。
 // NewOrderedMap creates the ordered parameter map required for WebSocket signing.
-// 参数/Parameters:
-//   - roomID: 抖音长房间 ID。 Douyin long room ID.
-//   - pushID: WebSocket 签名所需的用户唯一 ID。 User unique ID required for WebSocket signing.
 func NewOrderedMap(roomID, pushID string) *orderedmap.OrderedMap {
 	smap := orderedmap.NewOrderedMap()
 	smap.Set("live_id", "1")

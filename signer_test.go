@@ -224,34 +224,43 @@ func TestDisposeClosesLocalWebsocketSigner(t *testing.T) {
 	}
 }
 
-func TestNewHTTPUserAgentExceptAvoidsPreviousValue(t *testing.T) {
-	if len(impersonatedUserAgents) < 2 {
+func TestSelectUserAgentAvoidsPreviousValue(t *testing.T) {
+	candidates := webImpersonatedUserAgents
+	if len(candidates) < 2 {
 		t.Skip("requires at least two UA candidates")
 	}
-	excluded := impersonatedUserAgents[0]
+	excluded := candidates[0]
 	for range 100 {
-		if got := newHTTPUserAgentExcept(excluded); got == excluded {
-			t.Fatalf("newHTTPUserAgentExcept() returned excluded UA %q", got)
+		if got := selectUserAgent(candidates, excluded); got == excluded {
+			t.Fatalf("selectUserAgent() returned excluded UA %q", got)
 		}
 	}
 }
 
-func TestNewHTTPUserAgentUsesNonRepeatingRandomCycle(t *testing.T) {
-	userAgentSelector.Lock()
-	userAgentSelector.order = nil
-	userAgentSelector.cursor = 0
-	userAgentSelector.Unlock()
-
-	seen := make(map[string]struct{}, len(impersonatedUserAgents))
-	for range len(impersonatedUserAgents) {
-		userAgent := newHTTPUserAgent()
-		if _, exists := seen[userAgent]; exists {
-			t.Fatalf("UA repeated before selection cycle completed: %q", userAgent)
-		}
-		seen[userAgent] = struct{}{}
+func TestSelectUserAgentReturnsCandidate(t *testing.T) {
+	candidates := webImpersonatedUserAgents
+	allowed := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		allowed[candidate] = struct{}{}
 	}
-	if len(seen) != len(impersonatedUserAgents) {
-		t.Fatalf("selected %d unique UAs, want %d", len(seen), len(impersonatedUserAgents))
+	for range 100 {
+		if _, ok := allowed[selectUserAgent(candidates, "")]; !ok {
+			t.Fatalf("selectUserAgent() returned a value outside the candidate pool")
+		}
+	}
+}
+
+// TestSelectUserAgentPinsPCProfile 确认 PC 画像始终返回同一个客户端 UA。
+// 抓包实测桌面客户端全程只发送一个固定 UA，因此即使传入旧值也不应轮换。
+func TestSelectUserAgentPinsPCProfile(t *testing.T) {
+	candidates := ProtocolModePC.userAgents()
+	if len(candidates) != 1 {
+		t.Fatalf("PC 画像应有 1 个 UA 候选，实际 %d 个", len(candidates))
+	}
+	for range 10 {
+		if got := selectUserAgent(candidates, candidates[0]); got != pcClientUserAgent() {
+			t.Fatalf("selectUserAgent() = %q, want PC 客户端 UA", got)
+		}
 	}
 }
 

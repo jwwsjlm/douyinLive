@@ -18,6 +18,7 @@
 - 单进程监听多个直播间
 - 将消息转发到本地 WebSocket 客户端
 - 支持本地签名以及可选 TikHub 在线签名
+- 支持默认 Web 协议画像以及实验性的 PC 客户端协议画像
 - 支持断线重连、未开播轮询和基础保活
 - 可作为独立服务或 Go 库使用
 - 提供只读 HTTP 查询、批量状态、URL 解析和 Prometheus 指标
@@ -141,6 +142,15 @@ cp config.example.yaml config.yaml
 ```bash
 ./douyinLive --sign-provider tikhub --tikhub-key YOUR_TIKHUB_KEY
 ```
+
+上游协议画像默认使用稳定的 Web 模式。PC 客户端画像为测试功能，暂不保证稳定性：
+
+```yaml
+protocol:
+  mode: web # pc（测试）| web（默认）
+```
+
+也可以通过 `APP_PROTOCOL` 或 `--protocol pc|web` 覆盖。
 
 不要把 Cookie、TikHub Key、完整签名 URL 或日志中的敏感字段提交到仓库。详细配置见 [配置文件文档](docs/configuration.md)。
 

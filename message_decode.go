@@ -10,6 +10,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const pushInternalExtHeader = "im-internal_ext"
+
+func pushHeaderValue(headers []*new_douyin.Webcast_Im_PushHeader, key string) string {
+	for _, header := range headers {
+		if header.Key == key {
+			return header.Value
+		}
+	}
+	return ""
+}
+
 // handleGzipMessage 解压并解析 gzip 编码的 PushFrame 载荷。
 // handleGzipMessage decompresses and decodes a gzip-encoded PushFrame payload.
 // 参数/Parameters:
@@ -49,8 +60,16 @@ func (dl *DouyinLive) decodeResponse(data []byte, pushFrame *new_douyin.Webcast_
 
 	dl.applyWebsocketResponseState(response)
 
-	if response.NeedAck {
-		dl.sendAck(pushFrame.LogID, response.InternalExt)
+	// 客户端 ACK 回显的是下行 PushFrame 头部 im-internal_ext 的原值，而不是
+	// Response 内部的 internal_ext 字段；抓包实测两者 first_req_ms/seq 存在系统性差异。
+	// The client ACK echoes the raw im-internal_ext PushFrame header, not the
+	// Response.internal_ext field; captures show they systematically differ.
+	ackExt := pushHeaderValue(pushFrame.Headers, pushInternalExtHeader)
+	if ackExt == "" && response.NeedAck {
+		ackExt = response.InternalExt
+	}
+	if ackExt != "" {
+		dl.sendAck(pushFrame.LogID, ackExt)
 	}
 
 	for _, msg := range response.Messages {

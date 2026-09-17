@@ -706,6 +706,7 @@ func TestHTTPAPIRoomProbeStatusMatrix(t *testing.T) {
 		{name: "offline", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusOffline, Live: boolPtr(false), HasRoom: boolPtr(true), LiveID: "offline", RoomID: "9002"}, wantCode: http.StatusOK, wantStatus: "offline"},
 		{name: "account_no_room", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusNoRoom, Live: boolPtr(false), HasRoom: boolPtr(false), AccountOnly: boolPtr(true), LiveID: "account", UserUniqueID: "u3", LiveName: "账号"}, wantCode: http.StatusOK, wantStatus: "account_no_room", wantBody: `"has_room":false`},
 		{name: "not_found", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusNotFound, LiveID: "missing"}, err: douyinLive.ErrRoomNotFound, wantCode: http.StatusNotFound, wantStatus: "not_found"},
+		{name: "access_restricted", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusUnknown, LiveID: "restricted"}, err: errors.Join(douyinLive.ErrLiveStatusUnknown, douyinLive.ErrUpstreamAccessRestricted), wantCode: http.StatusServiceUnavailable, wantStatus: "upstream_access_restricted", wantBody: "有效登录 Cookie"},
 		{name: "unknown", status: douyinLive.LiveStatus{Code: douyinLive.LiveStatusUnknown, LiveID: "unknown"}, err: douyinLive.ErrLiveStatusUnknown, wantCode: http.StatusServiceUnavailable, wantStatus: "upstream_unverified"},
 	}
 	for _, tc := range tests {

@@ -542,6 +542,9 @@ func apiProbeFailure(status douyinLive.LiveStatus, err error) (code string, http
 	if status.Code == douyinLive.LiveStatusNotFound || errors.Is(err, douyinLive.ErrRoomNotFound) {
 		return "not_found", http.StatusNotFound, "直播间不存在", "请检查直播间标识"
 	}
+	if errors.Is(err, douyinLive.ErrUpstreamAccessRestricted) {
+		return "upstream_access_restricted", http.StatusServiceUnavailable, "上游可能限制匿名访问", "请配置有效登录 Cookie，或更换出口 IP/代理后重试"
+	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return "upstream_timeout", http.StatusServiceUnavailable, "上游查询超时或请求已取消", "稍后重试"
 	}

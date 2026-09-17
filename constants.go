@@ -32,6 +32,10 @@ var (
 	// ErrRoomNotFound indicates that the requested room identity was definitively not found.
 	// ErrRoomNotFound 表示请求的直播间标识已被明确确认不存在。
 	ErrRoomNotFound = errors.New("直播间不存在")
+	// ErrUpstreamAccessRestricted indicates that the upstream returned a verification page
+	// or an empty room response, which commonly means the current request is restricted.
+	// ErrUpstreamAccessRestricted 表示上游返回验证页或空直播间响应，通常说明当前请求受到访问限制。
+	ErrUpstreamAccessRestricted = errors.New("上游访问可能受限")
 	// ErrLiveStatusUnknown indicates that the upstream response could not verify a live status.
 	// ErrLiveStatusUnknown 表示上游响应暂时无法验证直播状态。
 	ErrLiveStatusUnknown = errors.New("直播状态暂时无法确认")

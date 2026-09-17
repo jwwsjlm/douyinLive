@@ -187,7 +187,7 @@ func (r *Room) statusUnknownMessage() []byte {
 		trueValue, falseValue := true, false
 		hasRoom, accountOnlyValue = &trueValue, &falseValue
 	}
-	return marshalSystemStatusMessage(systemStatusMessage{Type: "system", Event: "live_status", Code: "ROOM_STATUS_UNKNOWN", Valid: boolPtr(false), Live: nil, Status: "unknown", StatusText: "暂时无法确认直播状态", RoomID: r.id, LiveName: liveName, Title: title, AvatarThumb: avatarThumb, HasRoom: hasRoom, AccountOnly: accountOnlyValue, Message: "上游页面或接口暂时未返回可验证的房间状态，服务端会继续轮询", Suggestion: "客户端保持当前 WebSocket 连接，不要立即重连", RetryIntervalSeconds: nil})
+	return marshalSystemStatusMessage(systemStatusMessage{Type: "system", Event: "live_status", Code: "ROOM_STATUS_UNKNOWN", Valid: boolPtr(false), Live: nil, Status: "unknown", StatusText: "暂时无法确认直播状态", RoomID: r.id, LiveName: liveName, Title: title, AvatarThumb: avatarThumb, HasRoom: hasRoom, AccountOnly: accountOnlyValue, Message: "上游页面或接口暂时未返回可验证的房间状态，服务端会继续轮询", Suggestion: "客户端保持当前 WebSocket 连接，不要立即重连；若持续出现验证页或接口空响应，请配置有效登录 Cookie，或更换出口 IP/代理后重试", RetryIntervalSeconds: nil})
 }
 
 // offlineEndedStatusMessage 构造已下播状态通知。

@@ -330,7 +330,7 @@ func TestStatusUnknownMessageKeepsClientInRetryableState(t *testing.T) {
 		`"has_room":null`,
 		`"account_only":null`,
 		`"live_name":"亮一嗓·郝晓亮"`,
-		`"suggestion":"客户端保持当前 WebSocket 连接，不要立即重连"`,
+		`"suggestion":"客户端保持当前 WebSocket 连接，不要立即重连；若持续出现验证页或接口空响应，请配置有效登录 Cookie，或更换出口 IP/代理后重试"`,
 	} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("statusUnknownMessage() = %s, missing %s", message, want)

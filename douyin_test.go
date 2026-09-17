@@ -476,6 +476,24 @@ func TestRoomEnterEmptyAfterHTTP200ChallengeIsNotRoomNotFound(t *testing.T) {
 	}
 }
 
+func TestUpstreamAccessRestrictedErrorRetainsClassificationAndGuidance(t *testing.T) {
+	livePageErr := &livePageStateNotFoundError{liveID: "139819566957", statusCode: 200, bodyLength: 6297}
+	webEnterErr := fmt.Errorf("%w status=200 content_type=%q content_length=0 raw_len=0", errRoomInfoEmpty, "application/json")
+	err := upstreamAccessRestrictedError("139819566957", livePageErr, webEnterErr)
+
+	if !errors.Is(err, ErrLiveStatusUnknown) {
+		t.Fatalf("error = %v, want ErrLiveStatusUnknown", err)
+	}
+	if !errors.Is(err, ErrUpstreamAccessRestricted) {
+		t.Fatalf("error = %v, want ErrUpstreamAccessRestricted", err)
+	}
+	for _, want := range []string{"有效登录 Cookie", "出口 IP/代理", "live_id=139819566957"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, missing %q", err, want)
+		}
+	}
+}
+
 func TestRoomEnterEmptyAfterKnownOfflineIsNotRoomNotFound(t *testing.T) {
 	dl := &DouyinLive{}
 	dl.setLivePageIDs("7659772543859215154", "")

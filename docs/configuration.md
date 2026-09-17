@@ -230,7 +230,7 @@ cookie:
 
 ### `cookie.use_stored`
 
-是否使用 `cookie.douyin` 和 `cookie.rooms` 中的预存 Cookie，默认是 `true`。设置为 `false` 后，HTTP 查询和 WebSocket 房间都会忽略预存 Cookie，临时传入的连接 Cookie 仍然优先。
+是否使用 `cookie.douyin` 和 `cookie.rooms` 中的预存 Cookie，默认是 `true`。设置为 `false` 后，HTTP 查询和 WebSocket 房间都会忽略预存 Cookie，临时传入的连接 Cookie 仍然优先。程序仍会自动获取 `ttwid` 等匿名访问 Cookie；日志中的 `has_cookie=true` 不代表已有登录态。
 
 ```yaml
 cookie:
@@ -334,6 +334,8 @@ ws://127.0.0.1:1088/ws/直播间ID?cookie=URL_ENCODED_COOKIE
 - 请求被限制
 - 页面返回结果异常
 - 需要更稳定的登录态
+
+如果持续出现“直播页状态不存在”且 `web/enter` 返回空响应，通常是匿名请求遇到了验证页或访问限制；请配置有效登录 Cookie，或更换出口 IP/代理后重试。
 
 ## Cookie 怎么拿
 

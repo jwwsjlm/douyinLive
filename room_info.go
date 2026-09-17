@@ -542,6 +542,20 @@ type livePageStateNotFoundError struct {
 	hasUserUniqueID bool
 }
 
+// upstreamAccessRestrictedError keeps an ambiguous upstream response distinguishable
+// from a confirmed missing room while preserving actionable remediation guidance.
+// upstreamAccessRestrictedError 将不明确的上游响应与已确认不存在的房间区分开，并保留可执行的处理建议。
+func upstreamAccessRestrictedError(liveID string, livePageErr, webEnterErr error) error {
+	return fmt.Errorf(
+		"%w: %w: live_id=%s；直播页未返回有效房间状态且 web/enter 返回空响应，可能遇到匿名访问限制或验证页。请配置有效登录 Cookie，或更换出口 IP/代理后重试；live_page=%v web_enter=%v",
+		ErrLiveStatusUnknown,
+		ErrUpstreamAccessRestricted,
+		liveID,
+		livePageErr,
+		webEnterErr,
+	)
+}
+
 // Error returns a structured diagnostic without exposing response content.
 // Error 返回不包含响应正文的结构化诊断文本。
 func (e *livePageStateNotFoundError) Error() string {
@@ -820,7 +834,7 @@ func (dl *DouyinLive) refreshRoomEnterDataAfterLivePage(ctx context.Context, liv
 		} else if isRoomInfoEmptyError(err) && errors.Is(livePageErr, errLivePageStateNotFound) && !isDefinitiveRoomNotFoundPageError(livePageErr) {
 			// 页面返回 HTTP 200 但没有 SSR 状态时，通常是无 Cookie 风控验证页。
 			// 不能把它误报为普通启动失败或 ROOM_NOT_FOUND，应保留客户端等待后续轮询。
-			return "", fmt.Errorf("%w: live_id=%s live_page=%v web_enter=%v", ErrLiveStatusUnknown, dl.liveID, livePageErr, err)
+			return "", upstreamAccessRestrictedError(dl.liveID, livePageErr, err)
 		} else {
 			dl.logger.Warn("请求直播间信息失败，重试结束", "live_id", dl.liveID, "err", err)
 			return "", err

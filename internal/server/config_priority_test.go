@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"os"
@@ -47,7 +47,7 @@ func TestConfigAutoDiscoveryPreservesLegacyExtensions(t *testing.T) {
 	if !loaded || filepath.Base(path) != "config.yml" {
 		t.Fatalf("discovered path = %q loaded=%v, want config.yml", path, loaded)
 	}
-	schema, err := loadConfigFileSchema(path)
+	schema, err := loadConfigFileSchemaWithProvider(path, signProviderLocal)
 	if err != nil {
 		t.Fatalf("loadConfigFileSchema() error = %v", err)
 	}

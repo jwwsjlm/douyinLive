@@ -1,6 +1,10 @@
-package main
+package server
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestNormalizeSignProvider(t *testing.T) {
 	tests := []struct {
@@ -8,7 +12,7 @@ func TestNormalizeSignProvider(t *testing.T) {
 		in   string
 		want string
 	}{
-		{name: "empty uses default", in: "", want: defaultSignProvider},
+		{name: "empty uses default", in: "", want: signProviderLocal},
 		{name: "local", in: "local", want: "local"},
 		{name: "js alias", in: "js", want: "local"},
 		{name: "tikhub", in: "tikhub", want: "tikhub"},
@@ -34,18 +38,29 @@ func TestNormalizeSignProviderRejectsUnknown(t *testing.T) {
 	}
 }
 
-func TestNormalizeSignProviderEmptyFollowsBuildDefault(t *testing.T) {
-	original := defaultSignProvider
-	defaultSignProvider = signProviderTikHub
-	t.Cleanup(func() {
-		defaultSignProvider = original
-	})
-
-	got, err := normalizeSignProvider("")
+func TestNormalizeSignProviderEmptyFollowsConfiguredDefault(t *testing.T) {
+	got, err := normalizeSignProviderWithDefault("", signProviderTikHub)
 	if err != nil {
 		t.Fatalf("normalizeSignProvider() returned error: %v", err)
 	}
 	if got != signProviderTikHub {
 		t.Fatalf("normalizeSignProvider(\"\") = %q, want %q", got, signProviderTikHub)
+	}
+}
+
+func TestNewConfigUsesProvidedDefaultSignProvider(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("port: '1088'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("APP_TIKHUB_KEY", "test-key")
+	resetConfigGlobalsForTest(t, "--config", path)
+
+	config, err := newConfig(signProviderTikHub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Sign.Provider != signProviderTikHub {
+		t.Fatalf("Sign.Provider = %q, want %q", config.Sign.Provider, signProviderTikHub)
 	}
 }

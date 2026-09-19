@@ -159,6 +159,7 @@ protocol:
 | 文档 | 内容 |
 | --- | --- |
 | [文档导航](docs/README.md) | 全部详细文档入口 |
+| [架构与维护入口](docs/architecture.md) | 服务、根库和签名组件的职责、调用流与代码入口 |
 | [Docker 部署](docs/docker.md) | Docker、Compose、配置挂载和长期运行 |
 | [CLI 使用指南](docs/cli.md) | 参数、日志、签名方式和故障排查 |
 | [配置文件](docs/configuration.md) | YAML、环境变量、Cookie 和配置优先级 |
@@ -178,15 +179,19 @@ Dependabot 自动更新已关闭，依赖由维护者手动更新。构建使用
 
 ```text
 douyinLive/
-├── cmd/main/                 # 独立服务入口
+├── cmd/main/                 # 进程入口与 main.* 构建信息注入
 ├── docs/                     # 详细使用文档
 ├── examples/                 # 脱敏示例与提交规则
+├── internal/server/          # 独立服务实现：配置、HTTP、WebSocket、房间管理
 ├── internal/webcastsign/     # 内部签名实现
 ├── jsScript/                 # Goja 兼容回退脚本
 ├── sign/                     # HTTP 签名与 Cookie 逻辑
 ├── utils/                    # 工具函数
 ├── douyin.go                 # 核心库接口
+├── protocol_profile.go       # 上游协议画像
+├── reconnect.go              # 上游 WebSocket 重连
 ├── live_status_api.go        # 库级直播状态检查
+├── message_types.go          # 公共消息类型常量
 ├── config.example.yaml       # 配置示例
 └── README.md
 ```

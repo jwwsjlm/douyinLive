@@ -6,6 +6,7 @@ README 只保留项目介绍和最短上手路径，详细使用说明按主题�
 
 | 文档 | 内容 |
 | --- | --- |
+| [架构与维护入口](architecture.md) | 服务、根库和签名组件的职责、调用流与代码入口 |
 | [Docker 部署](docker.md) | Docker、Compose、配置挂载、长期运行和 HTTP 健康检查 |
 | [CLI 使用指南](cli.md) | 启动参数、直播间标识、日志、签名方式和故障排查 |
 | [配置文件](configuration.md) | YAML、环境变量、Cookie、TikHub 和配置优先级 |

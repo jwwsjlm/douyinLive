@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bytes"
@@ -86,6 +86,29 @@ func TestHealthAliasRemainsUnauthenticatedWhenAPIKeyConfigured(t *testing.T) {
 	app := testAPIApp(t, "secret-token")
 	if got := performAPIRequest(t, app, http.MethodGet, "/health", ""); got.Code != http.StatusOK {
 		t.Fatalf("health alias should remain public for probes, status=%d body=%s", got.Code, got.Body.String())
+	}
+}
+
+func TestHealthUsesAppBuildInfo(t *testing.T) {
+	buildInfo := BuildInfo{Tag: "v2.2.1", Commit: "abc123", Date: "2026-09-19", Source: "ci", DefaultSignProvider: signProviderLocal}
+	app, err := newApp(t.Context(), &Config{
+		Port: "1088", Sign: SignConfig{Provider: signProviderLocal},
+		Monitor: MonitorConfig{PollInterval: time.Second, NotifyInterval: time.Second},
+	}, nil, buildInfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.roomManager.Close()
+	app.runningPort = "1088"
+
+	rec := performAPIRequest(t, app, http.MethodGet, "/health", "")
+	for _, want := range []string{
+		`"version":"tag=v2.2.1 commit=abc123 buildDate=2026-09-19 source=ci signProvider=local"`,
+		`"tag":"v2.2.1"`, `"commit":"abc123"`, `"build_date":"2026-09-19"`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("health body missing %s: %s", want, rec.Body.String())
+		}
 	}
 }
 

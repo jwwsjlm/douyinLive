@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"encoding/json"
@@ -156,7 +156,7 @@ type configFileCookieSchema struct {
 	Rooms     map[string]string `yaml:"rooms"`
 }
 
-func defaultConfigFileSchema() configFileSchema {
+func defaultConfigFileSchemaWithProvider(defaultSignProvider string) configFileSchema {
 	return configFileSchema{
 		Port: "1088",
 		Log:  configFileLogSchema{Level: "info"},
@@ -177,8 +177,8 @@ func defaultConfigFileSchema() configFileSchema {
 	}
 }
 
-func loadConfigFileSchema(path string) (configFileSchema, error) {
-	schema := defaultConfigFileSchema()
+func loadConfigFileSchemaWithProvider(path, defaultSignProvider string) (configFileSchema, error) {
+	schema := defaultConfigFileSchemaWithProvider(defaultSignProvider)
 	file, err := os.Open(path)
 	if err != nil {
 		return schema, err
@@ -409,6 +409,10 @@ func normalizeProtocolMode(mode string) (string, error) {
 }
 
 func normalizeSignProvider(provider string) (string, error) {
+	return normalizeSignProviderWithDefault(provider, signProviderLocal)
+}
+
+func normalizeSignProviderWithDefault(provider, defaultSignProvider string) (string, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
 		provider = defaultSignProvider
@@ -425,6 +429,10 @@ func normalizeSignProvider(provider string) (string, error) {
 
 // NewConfig applies defaults, YAML, environment variables, then explicit CLI flags.
 func NewConfig() (*Config, error) {
+	return newConfig(signProviderLocal)
+}
+
+func newConfig(defaultSignProvider string) (*Config, error) {
 	flags := flag.NewFlagSet("douyinLive", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	portFlag := flags.String("port", "1088", "WebSocket 服务端口")
@@ -449,9 +457,9 @@ func NewConfig() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("查找配置文件失败：%w", err)
 	}
-	schema := defaultConfigFileSchema()
+	schema := defaultConfigFileSchemaWithProvider(defaultSignProvider)
 	if loaded {
-		schema, err = loadConfigFileSchema(configPath)
+		schema, err = loadConfigFileSchemaWithProvider(configPath, defaultSignProvider)
 		if err != nil {
 			return nil, fmt.Errorf("读取配置文件失败：%w", err)
 		}
@@ -545,7 +553,7 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("log.level 配置无效: %s", logLevel)
 	}
 
-	signProvider, err := normalizeSignProvider(schema.Sign.Provider)
+	signProvider, err := normalizeSignProviderWithDefault(schema.Sign.Provider, defaultSignProvider)
 	if err != nil {
 		return nil, err
 	}

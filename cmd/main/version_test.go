@@ -6,7 +6,8 @@ import (
 )
 
 func TestVersionStringIncludesBuildMetadata(t *testing.T) {
-	got := VersionString()
+	build := buildInfo()
+	got := build.VersionString()
 	for _, want := range []string{
 		"tag=" + buildTag,
 		"commit=" + buildCommit,

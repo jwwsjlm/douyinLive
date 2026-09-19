@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -337,7 +337,7 @@ func (a *App) writeAPIError(w http.ResponseWriter, requestID string, status int,
 }
 
 func (a *App) handleHealth(w http.ResponseWriter, r *http.Request, requestID string) {
-	a.writeAPIJSONCached(w, r, requestID, http.StatusOK, map[string]interface{}{"status": "ok", "version": VersionString(), "tag": buildTag, "commit": buildCommit, "build_date": buildDate, "port": a.runningPort, "sign_provider": a.config.Sign.Provider}, 30*time.Second)
+	a.writeAPIJSONCached(w, r, requestID, http.StatusOK, map[string]interface{}{"status": "ok", "version": a.buildInfo.VersionString(), "tag": a.buildInfo.Tag, "commit": a.buildInfo.Commit, "build_date": a.buildInfo.Date, "port": a.runningPort, "sign_provider": a.config.Sign.Provider}, 30*time.Second)
 }
 
 func (a *App) handleCapabilities(w http.ResponseWriter, r *http.Request, requestID string) {

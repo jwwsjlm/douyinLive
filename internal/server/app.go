@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"context"
@@ -47,6 +47,7 @@ type App struct {
 	ctx          context.Context
 	logger       *appLogger
 	config       *Config
+	buildInfo    BuildInfo
 	roomManager  *RoomManager
 	httpServer   *http.Server
 	runningPort  string
@@ -63,6 +64,10 @@ type App struct {
 //   - config: 已加载的运行配置。 Loaded runtime configuration.
 //   - logger: 应用日志器。 Application logger.
 func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error) {
+	return newApp(ctx, config, logger, defaultBuildInfo())
+}
+
+func newApp(ctx context.Context, config *Config, logger *appLogger, buildInfo BuildInfo) (*App, error) {
 	if config == nil {
 		return nil, errors.New("config 不能为空")
 	}
@@ -128,6 +133,7 @@ func NewApp(ctx context.Context, config *Config, logger *appLogger) (*App, error
 		ctx:         ctx,
 		logger:      logger,
 		config:      config,
+		buildInfo:   buildInfo,
 		roomManager: roomManager,
 		ready:       make(chan struct{}),
 		metrics:     metrics,

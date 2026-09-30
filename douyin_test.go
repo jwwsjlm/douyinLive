@@ -687,13 +687,14 @@ func TestBuildRoomEnterParamsUsesCurrentUserAgentAndCookieToken(t *testing.T) {
 	}
 }
 
-func TestBuildRoomEnterParamsIncludesKnownRoomID(t *testing.T) {
+func TestBuildRoomEnterParamsIncludesKnownLiveRoomID(t *testing.T) {
 	dl, err := newDouyinLive("161022647108", nil, "ttwid=user-ttwid; msToken=COOKIE_MS_TOKEN", staticWebsocketSigner{signature: "sig"})
 	if err != nil {
 		t.Fatalf("newDouyinLive() failed: %v", err)
 	}
 	defer dl.Dispose()
 	dl.updateRoomInfo("7659792511015177001", "7659797852999091746", "", "", "")
+	dl.setLiveStatus(true)
 
 	params := dl.buildRoomEnterParams()
 	if !strings.Contains(params, "room_id_str=7659792511015177001") {

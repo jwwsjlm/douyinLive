@@ -696,6 +696,13 @@ func (dl *DouyinLive) fetchLivePageStateWithContext(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// A failed or incomplete page request must not reuse the previous probe's status.
+	// 请求失败或页面缺少状态时，不能沿用上一轮探测的在线/离线结论。
+	// Keep the running listener alive while its HTTP status check is in flight.
+	// HTTP 检查期间不改变正在运行的监听器状态，避免停止心跳和消息读取。
+	dl.mu.Lock()
+	dl.liveStatusKnown = false
+	dl.mu.Unlock()
 
 	headers := map[string]string{
 		"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -861,6 +868,11 @@ func (dl *DouyinLive) refreshRoomEnterDataAfterLivePage(ctx context.Context, liv
 
 func (dl *DouyinLive) buildRoomEnterParams() string {
 	roomInfo := dl.roomInfoSnapshot()
+	if !dl.IsKnownLiveStatus() {
+		// Discover the next session by web_rid instead of pinning an ended/unknown room.
+		// 离线或未知时按 web_rid 查当前场次，避免旧长房间 ID 固定住查询。
+		roomInfo.roomID = ""
+	}
 	screenWidth, screenHeight := dl.fingerprint.screenSize()
 	parts := []string{
 		"aid=" + webcastAid,
@@ -1014,7 +1026,7 @@ func isDefinitiveRoomNotFoundPageError(err error) bool {
 }
 
 func (dl *DouyinLive) roomEnterFallbackBody(err error) (string, bool) {
-	if !isRoomInfoEmptyError(err) || !dl.isLiveStatus() {
+	if !isRoomInfoEmptyError(err) || !dl.IsKnownLiveStatus() {
 		return "", false
 	}
 	roomInfo := dl.roomInfoSnapshot()
@@ -1089,20 +1101,10 @@ func (dl *DouyinLive) fetchLiveStatusFromAPIWithContext(ctx context.Context) (bo
 	livePageErr := dl.fetchLivePageStateWithContext(ctx)
 	if livePageErr == nil {
 		roomInfo := dl.roomInfoSnapshot()
-		if isLive, known := dl.liveStatusSnapshot(); known {
+		if dl.IsKnownLiveStatus() {
 			if roomInfo.roomID != "" || strings.TrimSpace(roomInfo.liveName) != "" || strings.TrimSpace(roomInfo.title) != "" || roomInfo.anchorOnly {
-				step := "live_page_offline"
-				msg := "直播页确认当前未开播"
-				if roomInfo.anchorOnly {
-					step = "account_offline_no_room"
-					msg = "账号存在但当前没有直播间"
-				}
-				if isLive {
-					step = "live_page_online"
-					msg = "直播页确认当前正在直播"
-				}
-				dl.logger.Info(msg,
-					logFlowArgs("room_info", step,
+				dl.logger.Info("直播页确认当前正在直播",
+					logFlowArgs("room_info", "live_page_online",
 						"live_id", dl.liveID,
 						"room_id", roomInfo.roomID,
 						"live_name", roomInfo.liveName,
@@ -1111,7 +1113,7 @@ func (dl *DouyinLive) fetchLiveStatusFromAPIWithContext(ctx context.Context) (bo
 						"account_only", roomInfo.anchorOnly,
 					)...,
 				)
-				return isLive, nil
+				return true, nil
 			}
 		}
 	}

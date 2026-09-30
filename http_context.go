@@ -172,48 +172,29 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() (err error) {
 	dl.logWebSocketPreparationStep("request_context", stepStartedAt, nil)
 
 	stepStartedAt = time.Now()
-	if err := dl.fetchLivePageState(); err != nil {
-		dl.logger.Debug("从直播间页面预取状态失败，继续请求 web/enter", logFlowArgs("room_info", "live_page_state", "live_id", dl.liveID, "endpoint", "live_page", "fallback", "web_enter", "err", err)...)
-		dl.logWebSocketPreparationStep("live_page", stepStartedAt, err)
+	livePageErr := dl.fetchLivePageState()
+	if livePageErr != nil {
+		dl.logger.Debug("从直播间页面预取状态失败，继续请求 web/enter", logFlowArgs("room_info", "live_page_state", "live_id", dl.liveID, "endpoint", "live_page", "fallback", "web_enter", "err", livePageErr)...)
+		dl.logWebSocketPreparationStep("live_page", stepStartedAt, livePageErr)
 	} else {
 		dl.logWebSocketPreparationStep("live_page", stepStartedAt, nil)
 	}
-	if dl.isKnownOfflineStatus() {
-		roomInfo := dl.roomInfoSnapshot()
-		if roomInfo.roomID != "" || roomInfo.liveName != "" || roomInfo.title != "" {
-			dl.logger.Info("直播页显示当前未开播，暂不建立上游 WebSocket",
-				logFlowArgs("room_info", "live_page_offline",
-					"live_id", dl.liveID,
-					"room_id", roomInfo.roomID,
-					"live_name", roomInfo.liveName,
-					"title", roomInfo.title,
-				)...,
-			)
-			return ErrLiveNotStarted
-		}
-	}
-
-	initialIMFetched := false
-	roomInfo := dl.roomInfoSnapshot()
-	if roomInfo.roomID != "" && roomInfo.pushID != "" {
-		stepStartedAt = time.Now()
-		if err := dl.fetchInitialIMState(); err != nil {
-			dl.logger.Debug("预取 IM cursor 失败，继续使用 web/enter 后兜底", logFlowArgs("im_fetch", "prefetch", "live_id", dl.liveID, "room_id", roomInfo.roomID, "user_unique_id", roomInfo.pushID, "fallback", "web_enter", "err", err)...)
-			dl.logWebSocketPreparationStep("initial_im_fetch", stepStartedAt, err)
-		} else {
-			initialIMFetched = true
-			dl.logWebSocketPreparationStep("initial_im_fetch", stepStartedAt, nil)
-		}
-	}
 
 	stepStartedAt = time.Now()
-	if _, err := dl.fetchRoomEnterData(); err != nil {
+	// Always verify the current session before fetching its IM state; the page
+	// and a recent cached web/enter response may still describe the previous live.
+	// 先核验当前场次，再获取 IM 状态；页面和短期缓存都可能仍是上一场直播。
+	roomCtx, roomCancel := dl.requestContext()
+	defer roomCancel()
+	if _, err := dl.refreshRoomEnterDataAfterLivePage(roomCtx, livePageErr); err != nil {
 		dl.logWebSocketPreparationStep("room_enter", stepStartedAt, err)
-		roomInfo := dl.roomInfoSnapshot()
-		if !isRoomInfoEmptyError(err) || roomInfo.roomID == "" || roomInfo.pushID == "" {
-			return err
+		if isRoomInfoEmptyError(err) {
+			if dl.isKnownOfflineStatus() {
+				return ErrLiveNotStarted
+			}
+			return fmt.Errorf("%w: live_id=%s: %v", ErrLiveStatusUnknown, dl.liveID, err)
 		}
-		dl.logger.Debug("web/enter 返回空响应，已使用直播间页面状态继续", logFlowArgs("room_info", "web_enter", "live_id", dl.liveID, "room_id", roomInfo.roomID, "user_unique_id", roomInfo.pushID, "fallback", "live_page_state", "err", err)...)
+		return err
 	} else {
 		dl.logWebSocketPreparationStep("room_enter", stepStartedAt, nil)
 	}
@@ -232,15 +213,13 @@ func (dl *DouyinLive) prepareWebSocketContextLocked() (err error) {
 		}
 		dl.logWebSocketPreparationStep("websocket_signer_runtime", stepStartedAt, nil)
 	}
-	if !initialIMFetched {
-		stepStartedAt = time.Now()
-		if err := dl.fetchInitialIMState(); err != nil {
-			roomInfo := dl.roomInfoSnapshot()
-			dl.logger.Debug("预取 IM cursor 失败，继续使用兜底 WebSocket 参数", logFlowArgs("im_fetch", "prefetch", "live_id", dl.liveID, "room_id", roomInfo.roomID, "user_unique_id", roomInfo.pushID, "fallback", "default_ws_params", "err", err)...)
-			dl.logWebSocketPreparationStep("initial_im_fetch", stepStartedAt, err)
-		} else {
-			dl.logWebSocketPreparationStep("initial_im_fetch", stepStartedAt, nil)
-		}
+	stepStartedAt = time.Now()
+	if err := dl.fetchInitialIMState(); err != nil {
+		roomInfo := dl.roomInfoSnapshot()
+		dl.logger.Debug("预取 IM cursor 失败，继续使用兜底 WebSocket 参数", logFlowArgs("im_fetch", "prefetch", "live_id", dl.liveID, "room_id", roomInfo.roomID, "user_unique_id", roomInfo.pushID, "fallback", "default_ws_params", "err", err)...)
+		dl.logWebSocketPreparationStep("initial_im_fetch", stepStartedAt, err)
+	} else {
+		dl.logWebSocketPreparationStep("initial_im_fetch", stepStartedAt, nil)
 	}
 
 	return nil

@@ -72,25 +72,25 @@ type MonitorConfig struct {
 }
 
 type LogConfig struct {
-	Level string
+	Level string `yaml:"level"`
 }
 
 type SignConfig struct {
-	Provider string
+	Provider string `yaml:"provider"`
 }
 
 type TikHubConfig struct {
-	Key string
+	Key string `yaml:"key"`
 }
 
 type APIConfig struct {
-	Key            string
-	AllowedDomains []string
+	Key            string   `yaml:"key"`
+	AllowedDomains []string `yaml:"allowed_domains"`
 }
 
 type WebSocketConfig struct {
-	Path           string
-	AllowedOrigins []string
+	Path           string   `yaml:"path"`
+	AllowedOrigins []string `yaml:"allowed_origins"`
 }
 
 // Config stores all runtime configuration for the application.
@@ -110,39 +110,17 @@ type Config struct {
 
 // configFileSchema mirrors the supported YAML keys so KnownFields can reject typos.
 type configFileSchema struct {
-	Port      string                    `yaml:"port"`
-	Unknown   bool                      `yaml:"unknown"`
-	Log       configFileLogSchema       `yaml:"log"`
-	Sign      configFileSignSchema      `yaml:"sign"`
-	TikHub    configFileTikHubSchema    `yaml:"tikhub"`
-	API       configFileAPISchema       `yaml:"api"`
-	WebSocket configFileWebSocketSchema `yaml:"websocket"`
-	Monitor   configFileMonitorSchema   `yaml:"monitor"`
-	Cookie    configFileCookieSchema    `yaml:"cookie"`
-	Proxy     ProxyConfig               `yaml:"proxy"`
-	Protocol  ProtocolConfig            `yaml:"protocol"`
-}
-
-type configFileLogSchema struct {
-	Level string `yaml:"level"`
-}
-
-type configFileSignSchema struct {
-	Provider string `yaml:"provider"`
-}
-
-type configFileTikHubSchema struct {
-	Key string `yaml:"key"`
-}
-
-type configFileAPISchema struct {
-	Key            string   `yaml:"key"`
-	AllowedDomains []string `yaml:"allowed_domains"`
-}
-
-type configFileWebSocketSchema struct {
-	Path           string   `yaml:"path"`
-	AllowedOrigins []string `yaml:"allowed_origins"`
+	Port      string                  `yaml:"port"`
+	Unknown   bool                    `yaml:"unknown"`
+	Log       LogConfig               `yaml:"log"`
+	Sign      SignConfig              `yaml:"sign"`
+	TikHub    TikHubConfig            `yaml:"tikhub"`
+	API       APIConfig               `yaml:"api"`
+	WebSocket WebSocketConfig         `yaml:"websocket"`
+	Monitor   configFileMonitorSchema `yaml:"monitor"`
+	Cookie    configFileCookieSchema  `yaml:"cookie"`
+	Proxy     ProxyConfig             `yaml:"proxy"`
+	Protocol  ProtocolConfig          `yaml:"protocol"`
 }
 
 type configFileMonitorSchema struct {
@@ -159,12 +137,12 @@ type configFileCookieSchema struct {
 func defaultConfigFileSchemaWithProvider(defaultSignProvider string) configFileSchema {
 	return configFileSchema{
 		Port: "1088",
-		Log:  configFileLogSchema{Level: "info"},
-		Sign: configFileSignSchema{Provider: defaultSignProvider},
-		API: configFileAPISchema{
+		Log:  LogConfig{Level: "info"},
+		Sign: SignConfig{Provider: defaultSignProvider},
+		API: APIConfig{
 			AllowedDomains: []string{"douyin.com"},
 		},
-		WebSocket: configFileWebSocketSchema{Path: "/ws"},
+		WebSocket: WebSocketConfig{Path: "/ws"},
 		Monitor: configFileMonitorSchema{
 			PollInterval:   "15s",
 			NotifyInterval: "30s",

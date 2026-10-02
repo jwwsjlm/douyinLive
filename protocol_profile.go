@@ -118,10 +118,10 @@ func (mode ProtocolMode) requestHeaders(device pcClientDeviceIdentity) map[strin
 	}
 	return map[string]string{
 		"X-AWEME-CLIENTVERSION":      pcClientAppVersion,
-		"X-AWEME-DEVICEMANUFACTURER": device.Manufacturer,
-		"X-AWEME-DEVICEMODEL":        device.DeviceModel,
+		"X-AWEME-DEVICEMANUFACTURER": pcClientVendor,
+		"X-AWEME-DEVICEMODEL":        pcClientDeviceModel,
 		"X-AWEME-DEVICENAME":         device.DeviceName,
-		"X-AWEME-DEVICEOS":           device.DeviceOS,
+		"X-AWEME-DEVICEOS":           pcClientDeviceOS,
 		"X-AWEME-GUID":               device.GUID,
 	}
 }
@@ -199,11 +199,8 @@ var webImpersonatedUserAgents = []string{
 // 抓包中 X-AWEME-DEVICENAME 为 32 位十六进制、X-AWEME-GUID 为 128 位十六进制，
 // 因此这里用 MD5 与 SHA-512 从会话种子派生，保证长度与字符集一致。
 type pcClientDeviceIdentity struct {
-	DeviceName   string
-	GUID         string
-	DeviceModel  string
-	DeviceOS     string
-	Manufacturer string
+	DeviceName string
+	GUID       string
 }
 
 // newPCClientDeviceIdentity 从会话种子派生 PC 客户端设备标识。
@@ -214,11 +211,8 @@ func newPCClientDeviceIdentity(seed string) pcClientDeviceIdentity {
 	nameDigest := md5.Sum([]byte("aweme-pc-device-name:" + seed))
 	guidDigest := sha512.Sum512([]byte("aweme-pc-device-guid:" + seed))
 	return pcClientDeviceIdentity{
-		DeviceName:   hex.EncodeToString(nameDigest[:]),
-		GUID:         hex.EncodeToString(guidDigest[:]),
-		DeviceModel:  pcClientDeviceModel,
-		DeviceOS:     pcClientDeviceOS,
-		Manufacturer: pcClientVendor,
+		DeviceName: hex.EncodeToString(nameDigest[:]),
+		GUID:       hex.EncodeToString(guidDigest[:]),
 	}
 }
 

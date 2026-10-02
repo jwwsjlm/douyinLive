@@ -99,8 +99,19 @@ func TestEncodingHelpers(t *testing.T) {
 	if got := rc4Encrypt("payload", ""); got != "" {
 		t.Fatalf("rc4Encrypt() with empty key = %q, want empty", got)
 	}
-	if got := getLongInt(0, "abc"); got != 0x616263 {
-		t.Fatalf("getLongInt() = %#x, want %#x", got, uint32(0x616263))
+	// Golden outputs from the original encoder cover binary input and partial groups.
+	for mode, outputs := range map[string][]string{
+		"s0": {"", "/w", "/wA", "/wD+", "/wD+gA", "/wD+gH8"},
+		"s1": {"", "ej", "ejD", "ejpC", "ejpCED", "ejpCEZS"},
+		"s2": {"", "ej", "ejD", "ejpC", "ejpCED", "ejpCEZS"},
+		"s3": {"", "ej", "ejc", "ejpC", "ejpCEc", "ejpCEZS"},
+		"s4": {"", "ej", "ejD", "ejpC", "ejpCED", "ejpCEZS"},
+	} {
+		for length, want := range outputs {
+			if got := resultEncrypt("\xff\x00\xfe\x80\x7f"[:length], mode); got != want {
+				t.Fatalf("resultEncrypt(length=%d, mode=%s) = %q, want %q", length, mode, got, want)
+			}
+		}
 	}
 	if got := splitToBytes(0x01020304); string(got) != string([]byte{1, 2, 3, 4}) {
 		t.Fatalf("splitToBytes() = %v", got)

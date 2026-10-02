@@ -35,7 +35,7 @@ type logSink interface {
 // printLogger 将传统 logger 适配为内部结构化日志接收器。
 // printLogger adapts a legacy logger into the internal structured log sink.
 type printLogger struct {
-	base logger
+	logger
 }
 
 // normalizeLogger 返回可用的日志接收器，必要时使用默认 logger。
@@ -49,32 +49,7 @@ func normalizeLogger(base Logger) logSink {
 	if sink, ok := base.(logSink); ok {
 		return sink
 	}
-	return printLogger{base: base}
-}
-
-// Print 输出一条兼容旧接口的日志。
-// Print writes a log line through the legacy-compatible interface.
-// 参数/Parameters:
-//   - v: 要输出的日志片段。 Log fragments to write.
-func (l printLogger) Print(v ...interface{}) {
-	l.base.Print(v...)
-}
-
-// Printf 按格式输出一条兼容旧接口的日志。
-// Printf writes a formatted log line through the legacy-compatible interface.
-// 参数/Parameters:
-//   - format: 格式化模板。 Format string.
-//   - v: 模板参数。 Format arguments.
-func (l printLogger) Printf(format string, v ...interface{}) {
-	l.base.Printf(format, v...)
-}
-
-// Println 输出一条带换行语义的兼容旧接口日志。
-// Println writes a line-oriented log through the legacy-compatible interface.
-// 参数/Parameters:
-//   - v: 要输出的日志片段。 Log fragments to write.
-func (l printLogger) Println(v ...interface{}) {
-	l.base.Println(v...)
+	return printLogger{logger: base}
 }
 
 // Debug 输出调试级别日志。
@@ -83,7 +58,7 @@ func (l printLogger) Println(v ...interface{}) {
 //   - msg: 日志消息。 Log message.
 //   - args: 结构化键值参数。 Structured key-value arguments.
 func (l printLogger) Debug(msg string, args ...interface{}) {
-	l.base.Printf("[DEBUG] %s", formatLogMessage(msg, args...))
+	l.logger.Printf("[DEBUG] %s", formatLogMessage(msg, args...))
 }
 
 // Info 输出信息级别日志。
@@ -92,7 +67,7 @@ func (l printLogger) Debug(msg string, args ...interface{}) {
 //   - msg: 日志消息。 Log message.
 //   - args: 结构化键值参数。 Structured key-value arguments.
 func (l printLogger) Info(msg string, args ...interface{}) {
-	l.base.Print(formatLogMessage(msg, args...))
+	l.logger.Print(formatLogMessage(msg, args...))
 }
 
 // Warn 输出警告级别日志。
@@ -101,7 +76,7 @@ func (l printLogger) Info(msg string, args ...interface{}) {
 //   - msg: 日志消息。 Log message.
 //   - args: 结构化键值参数。 Structured key-value arguments.
 func (l printLogger) Warn(msg string, args ...interface{}) {
-	l.base.Printf("[WARN] %s", formatLogMessage(msg, args...))
+	l.logger.Printf("[WARN] %s", formatLogMessage(msg, args...))
 }
 
 // Error 输出错误级别日志。
@@ -110,7 +85,7 @@ func (l printLogger) Warn(msg string, args ...interface{}) {
 //   - msg: 日志消息。 Log message.
 //   - args: 结构化键值参数。 Structured key-value arguments.
 func (l printLogger) Error(msg string, args ...interface{}) {
-	l.base.Printf("[ERROR] %s", formatLogMessage(msg, args...))
+	l.logger.Printf("[ERROR] %s", formatLogMessage(msg, args...))
 }
 
 // formatLogMessage 将结构化键值参数拼接为传统日志文本。
@@ -173,7 +148,7 @@ func classifyReadError(err error) string {
 // SlogLogger 将 slog.Logger 适配到 NewDouyinLive 接受的旧 logger 接口。
 // SlogLogger adapts slog.Logger to the legacy logger interface accepted by NewDouyinLive while preserving structured levels.
 type SlogLogger struct {
-	base *slog.Logger
+	*slog.Logger
 }
 
 // NewSlogLogger 包装 slog.Logger，供 NewDouyinLive 使用。
@@ -184,7 +159,7 @@ func NewSlogLogger(base *slog.Logger) *SlogLogger {
 	if base == nil {
 		base = slog.Default()
 	}
-	return &SlogLogger{base: base}
+	return &SlogLogger{Logger: base}
 }
 
 // NewDouyinLiveWithSlog 创建使用 slog 输出日志的 DouyinLive 实例。
@@ -231,40 +206,4 @@ func (l *SlogLogger) Printf(format string, v ...interface{}) {
 //   - v: 要输出的日志片段。 Log fragments to write.
 func (l *SlogLogger) Println(v ...interface{}) {
 	l.Info(strings.TrimSuffix(fmt.Sprintln(v...), "\n"))
-}
-
-// Debug 输出调试级别结构化日志。
-// Debug writes a debug-level structured log message.
-// 参数/Parameters:
-//   - msg: 日志消息。 Log message.
-//   - args: 结构化键值参数。 Structured key-value arguments.
-func (l *SlogLogger) Debug(msg string, args ...interface{}) {
-	l.base.Debug(msg, args...)
-}
-
-// Info 输出信息级别结构化日志。
-// Info writes an info-level structured log message.
-// 参数/Parameters:
-//   - msg: 日志消息。 Log message.
-//   - args: 结构化键值参数。 Structured key-value arguments.
-func (l *SlogLogger) Info(msg string, args ...interface{}) {
-	l.base.Info(msg, args...)
-}
-
-// Warn 输出警告级别结构化日志。
-// Warn writes a warning-level structured log message.
-// 参数/Parameters:
-//   - msg: 日志消息。 Log message.
-//   - args: 结构化键值参数。 Structured key-value arguments.
-func (l *SlogLogger) Warn(msg string, args ...interface{}) {
-	l.base.Warn(msg, args...)
-}
-
-// Error 输出错误级别结构化日志。
-// Error writes an error-level structured log message.
-// 参数/Parameters:
-//   - msg: 日志消息。 Log message.
-//   - args: 结构化键值参数。 Structured key-value arguments.
-func (l *SlogLogger) Error(msg string, args ...interface{}) {
-	l.base.Error(msg, args...)
 }

@@ -2,8 +2,9 @@ package sign
 
 import (
 	"crypto/rc4"
+	"encoding/base64"
 	"encoding/binary"
-	"math"
+	"math/bits"
 	"time"
 )
 
@@ -32,16 +33,6 @@ func (sm3 *SM3) Reset() {
 	}
 	sm3.chunk = make([]byte, 0, 64)
 	sm3.size = 0
-}
-
-// leftRotate 对 uint32 执行循环左移。
-// leftRotate rotates a uint32 value left by n bits.
-// 参数/Parameters:
-//   - x: 待旋转的 32 位整数。 32-bit integer to rotate.
-//   - n: 左移位数。 Number of bits to rotate left.
-func leftRotate(x uint32, n int) uint32 {
-	n %= 32
-	return (x << n) | (x >> (32 - n))
 }
 
 // getTj 返回 SM3 压缩函数第 j 轮常量。
@@ -159,9 +150,9 @@ func (sm3 *SM3) compress(data []byte) {
 	}
 
 	for j := 16; j < 68; j++ {
-		a := w[j-16] ^ w[j-9] ^ leftRotate(w[j-3], 15)
-		a = a ^ leftRotate(a, 15) ^ leftRotate(a, 23)
-		w[j] = (a ^ leftRotate(w[j-13], 7) ^ w[j-6])
+		a := w[j-16] ^ w[j-9] ^ bits.RotateLeft32(w[j-3], 15)
+		a = a ^ bits.RotateLeft32(a, 15) ^ bits.RotateLeft32(a, 23)
+		w[j] = (a ^ bits.RotateLeft32(w[j-13], 7) ^ w[j-6])
 	}
 
 	for j := 0; j < 64; j++ {
@@ -171,19 +162,19 @@ func (sm3 *SM3) compress(data []byte) {
 	a, b, c, d, e, f, g, h := sm3.reg[0], sm3.reg[1], sm3.reg[2], sm3.reg[3], sm3.reg[4], sm3.reg[5], sm3.reg[6], sm3.reg[7]
 
 	for j := 0; j < 64; j++ {
-		ss1 := leftRotate((leftRotate(a, 12) + e + leftRotate(getTj(j), j)), 7)
-		ss2 := ss1 ^ leftRotate(a, 12)
+		ss1 := bits.RotateLeft32((bits.RotateLeft32(a, 12) + e + bits.RotateLeft32(getTj(j), j)), 7)
+		ss2 := ss1 ^ bits.RotateLeft32(a, 12)
 		tt1 := (ffj(j, a, b, c) + d + ss2 + w[j+68])
 		tt2 := (ggj(j, e, f, g) + h + ss1 + w[j])
 
 		d = c
-		c = leftRotate(b, 9)
+		c = bits.RotateLeft32(b, 9)
 		b = a
 		a = tt1
 		h = g
-		g = leftRotate(f, 19)
+		g = bits.RotateLeft32(f, 19)
 		f = e
-		e = (tt2 ^ leftRotate(tt2, 9) ^ leftRotate(tt2, 17))
+		e = (tt2 ^ bits.RotateLeft32(tt2, 9) ^ bits.RotateLeft32(tt2, 17))
 	}
 
 	sm3.reg[0] ^= a
@@ -252,48 +243,7 @@ func resultEncrypt(longStr string, num string) string {
 		"s4": "Dkdpgh2ZmsQB80/MfvV36XI1R45-WUAlEixNLwoqYTOPuzKFjJnry79HbGcaStCe",
 	}
 
-	masks := []uint32{16515072, 258048, 4032, 63}
-	shifts := []int{18, 12, 6, 0}
-	encodingTable := encodingTables[num]
-
-	result := make([]byte, 0)
-	roundNum := 0
-	longInt := getLongInt(roundNum, longStr)
-
-	totalChars := int(math.Ceil(float64(len(longStr)) / 3 * 4))
-
-	for i := 0; i < totalChars; i++ {
-		if i/4 != roundNum {
-			roundNum++
-			longInt = getLongInt(roundNum, longStr)
-		}
-
-		index := i % 4
-		charIndex := (longInt & masks[index]) >> shifts[index]
-		result = append(result, encodingTable[charIndex])
-	}
-
-	return string(result)
-}
-
-// getLongInt 从字符串指定三字节分组中读取 24 位整数。
-// getLongInt reads a 24-bit integer from a three-byte group in the string.
-// 参数/Parameters:
-//   - roundNum: 三字节分组序号。 Three-byte group index.
-//   - longStr: 提供字节数据的字符串。 String that provides byte data.
-func getLongInt(roundNum int, longStr string) uint32 {
-	roundNum = roundNum * 3
-	var char1, char2, char3 byte
-	if roundNum < len(longStr) {
-		char1 = longStr[roundNum]
-	}
-	if roundNum+1 < len(longStr) {
-		char2 = longStr[roundNum+1]
-	}
-	if roundNum+2 < len(longStr) {
-		char3 = longStr[roundNum+2]
-	}
-	return uint32(char1)<<16 | uint32(char2)<<8 | uint32(char3)
+	return base64.NewEncoding(encodingTables[num][:64]).WithPadding(base64.NoPadding).EncodeToString([]byte(longStr))
 }
 
 // generRandom 根据随机数和选项生成混淆字节。

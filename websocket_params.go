@@ -30,36 +30,14 @@ const (
 )
 
 type websocketSignatureParams struct {
-	LiveID            string
-	AID               string
-	VersionCode       string
-	WebcastSDKVersion string
-	RoomID            string
-	SubRoomID         string
-	SubChannelID      string
-	DidRule           string
-	UserUniqueID      string
-	DevicePlatform    string
-	DeviceType        string
-	AC                string
-	Identity          string
+	RoomID       string
+	UserUniqueID string
 }
 
 func newWebsocketSignatureParams(roomID, userUniqueID string) websocketSignatureParams {
 	return websocketSignatureParams{
-		LiveID:            webcastLiveID,
-		AID:               webcastAid,
-		VersionCode:       webcastVersionCode,
-		WebcastSDKVersion: webcastSDKVersion,
-		RoomID:            roomID,
-		SubRoomID:         "",
-		SubChannelID:      "",
-		DidRule:           webcastDidRule,
-		UserUniqueID:      userUniqueID,
-		DevicePlatform:    webcastDevice,
-		DeviceType:        "",
-		AC:                "",
-		Identity:          webcastIdentity,
+		RoomID:       roomID,
+		UserUniqueID: userUniqueID,
 	}
 }
 
@@ -67,19 +45,19 @@ func newWebsocketSignatureParams(roomID, userUniqueID string) websocketSignature
 // Joined 返回规范化的逗号分隔签名输入。
 func (p websocketSignatureParams) Joined() string {
 	fields := [...]struct{ key, value string }{
-		{"live_id", p.LiveID},
-		{"aid", p.AID},
-		{"version_code", p.VersionCode},
-		{"webcast_sdk_version", p.WebcastSDKVersion},
+		{"live_id", webcastLiveID},
+		{"aid", webcastAid},
+		{"version_code", webcastVersionCode},
+		{"webcast_sdk_version", webcastSDKVersion},
 		{"room_id", p.RoomID},
-		{"sub_room_id", p.SubRoomID},
-		{"sub_channel_id", p.SubChannelID},
-		{"did_rule", p.DidRule},
+		{"sub_room_id", ""},
+		{"sub_channel_id", ""},
+		{"did_rule", webcastDidRule},
 		{"user_unique_id", p.UserUniqueID},
-		{"device_platform", p.DevicePlatform},
-		{"device_type", p.DeviceType},
-		{"ac", p.AC},
-		{"identity", p.Identity},
+		{"device_platform", webcastDevice},
+		{"device_type", ""},
+		{"ac", ""},
+		{"identity", webcastIdentity},
 	}
 	var b strings.Builder
 	for i, field := range fields {

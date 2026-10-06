@@ -140,6 +140,10 @@ go get github.com/jwwsjlm/douyinlive-proto@latest
 go mod tidy
 ```
 
+从 v2.3.1 起，依赖的 `douyinlive-proto v0.1.3` 将 `RoomRankMessage.audience_ranks` 修正为重复字段。`AudienceRanks` 和 `GetAudienceRanks()` 返回 `[]*new_douyin.Webcast_Data_Rank`，需要遍历切片；WebSocket JSON 中的 `audienceRanks` 对应数组。
+
+协议定义的修改与 Go 代码生成步骤见 [douyinlive-proto 更新说明](https://github.com/jwwsjlm/douyinlive-proto#更新协议定义)。
+
 ## 订阅接口怎么选
 
 新版本推荐使用 `LiveMessage` 相关订阅接口：

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -12,6 +13,35 @@ import (
 	"github.com/lxzan/gws"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
+
+func TestRoomRankMessageForwardsAudienceRanksArray(t *testing.T) {
+	room := NewRoom("live-id", nil, false, "", douyinLive.SignProviderLocal, "", time.Hour, time.Hour, nil)
+	defer room.Close()
+	client := NewClient("client", nil)
+	addTestClient(room, client)
+
+	// Two field-3 Rank messages: (score=100, rank=1), (score=200, rank=2).
+	room.handleDouyinEventForClients([]*Client{client}, &douyinLive.LiveMessage{
+		Raw: &new_douyin.Webcast_Im_Message{
+			Method:  douyinLive.WebcastRoomRankMessage,
+			Payload: []byte{0x1a, 0x04, 0x10, 0x64, 0x18, 0x01, 0x1a, 0x05, 0x10, 0xc8, 0x01, 0x18, 0x02},
+		},
+	})
+	select {
+	case message := <-client.sendQueue:
+		var result struct {
+			AudienceRanks []struct{ Score, Rank string } `json:"audienceRanks"`
+		}
+		if err := json.Unmarshal(message.payload, &result); err != nil {
+			t.Fatalf("decode forwarded JSON %s: %v", message.payload, err)
+		}
+		if len(result.AudienceRanks) != 2 || result.AudienceRanks[0].Score != "100" || result.AudienceRanks[0].Rank != "1" || result.AudienceRanks[1].Score != "200" || result.AudienceRanks[1].Rank != "2" {
+			t.Fatalf("forwarded JSON = %s, want two distinct audience ranks", message.payload)
+		}
+	default:
+		t.Fatal("room rank message was not forwarded")
+	}
+}
 
 func TestMarkUpstreamReadyOnlyMarksTheCurrentRoomSession(t *testing.T) {
 	current, err := douyinLive.NewDouyinLive("live-id", nil, "")

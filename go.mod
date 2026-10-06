@@ -8,7 +8,7 @@ require (
 	github.com/elliotchance/orderedmap v1.8.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jwwsjlm/Tikhub v0.2.3
-	github.com/jwwsjlm/douyinlive-proto v0.1.2
+	github.com/jwwsjlm/douyinlive-proto v0.1.3
 	github.com/jwwsjlm/req/v3 v3.61.2
 	github.com/lxzan/gws v1.10.1
 	github.com/tidwall/gjson v1.19.0

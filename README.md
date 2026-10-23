@@ -10,7 +10,7 @@
 
 [![GitHub Release](https://img.shields.io/github/v/release/jwwsjlm/douyinLive)](https://github.com/jwwsjlm/douyinLive/releases)
 [![License](https://img.shields.io/github/license/jwwsjlm/douyinLive)](LICENSE)
-[![Go Version](https://img.shields.io/badge/go-1.26.8-blue)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/go-1.27.3-blue)](https://golang.org)
 
 ## 功能
 
@@ -173,7 +173,7 @@ protocol:
 
 普通提交、Pull Request 和推送标签均不自动运行 Actions。只有维护者明确需要发布正式版或测试版时，才在 Actions 的 `release` 工作流中选择 **Run workflow** 并填写已创建的版本标签；发布流程会完成一次验证、打包和可选 Docker 镜像发布。
 
-Dependabot 自动更新已关闭，依赖由维护者手动更新。构建使用 Go 1.26 系列，当前为 1.26.8。
+Dependabot 自动更新已关闭，依赖由维护者手动更新。源码、Actions 和 Docker 构建统一使用 Go 1.27.3。
 
 ## 项目结构
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -244,8 +245,10 @@ func parseRoomInfo(body string) (roomInfoSnapshot, error) {
 func parseLiveStatusFromRoomEnter(body string) (bool, bool) {
 	for _, path := range []string{"data.data.0.status", "data.room.status"} {
 		status := gjson.Get(body, path)
-		if status.Exists() {
-			return status.Int() == 2, true
+		if status.Type == gjson.Number || status.Type == gjson.String {
+			if code, err := strconv.Atoi(status.String()); err == nil {
+				return code == 2, true
+			}
 		}
 	}
 	return false, false
@@ -944,6 +947,9 @@ func (dl *DouyinLive) doRequest(ctx context.Context) (string, error) {
 	if resp == nil {
 		return "", errRoomInfoEmpty
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("直播间信息接口响应异常 status=%d", resp.StatusCode)
+	}
 
 	body, err := responseString(resp)
 	if err != nil {
@@ -969,8 +975,15 @@ func (dl *DouyinLive) doRequest(ctx context.Context) (string, error) {
 		)...,
 	)
 
-	if statusCode := gjson.Get(body, "status_code").Int(); statusCode != 0 {
-		return "", fmt.Errorf("直播间信息接口返回异常 status_code=%d", statusCode)
+	if !gjson.Valid(body) {
+		return "", errors.New("直播间信息接口未返回有效 JSON")
+	}
+	statusCode := gjson.Get(body, "status_code")
+	if statusCode.Type != gjson.Number {
+		return "", errors.New("直播间信息接口未返回有效 status_code")
+	}
+	if statusCode.Num != 0 {
+		return "", fmt.Errorf("直播间信息接口返回异常 status_code=%g", statusCode.Num)
 	}
 
 	return body, nil
@@ -1097,6 +1110,29 @@ func (dl *DouyinLive) fetchLiveStatusFromAPIWithContext(ctx context.Context) (bo
 	if err := dl.prepareRequestContextLocked(ctx); err != nil {
 		return false, err
 	}
+
+	// Discover by web_rid on every probe, without interrupting a running listener.
+	// 每次按 web_rid 查找当前场次，探测期间不改变运行中监听器的状态。
+	dl.mu.Lock()
+	dl.liveStatusKnown = false
+	dl.mu.Unlock()
+	apiCtx, apiCancel := context.WithTimeout(ctx, liveStatusAPITimeout)
+	body, apiErr := dl.doRequest(apiCtx)
+	apiCancel()
+	if apiErr == nil {
+		info, parseErr := parseRoomInfo(body)
+		isLive, known := parseLiveStatusFromRoomEnter(body)
+		if parseErr == nil && known {
+			dl.updateRoomInfoFromEnter(info)
+			dl.setLiveStatus(isLive)
+			dl.storeRoomEnterData(body)
+			return isLive, nil
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	dl.logger.Debug("轻量状态接口无法确认，回退直播页", "live_id", dl.liveID)
 
 	livePageErr := dl.fetchLivePageStateWithContext(ctx)
 	if livePageErr == nil {

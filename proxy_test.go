@@ -385,7 +385,7 @@ func TestProxyPreparationAndReconnect(t *testing.T) {
 	if status, err := dl.CheckLiveStatus(context.Background()); err != nil || status.Code != LiveStatusOnline {
 		t.Fatalf("status through proxy: %+v %v", status, err)
 	}
-	for _, path := range []string{"/", "/1001", "/webcast/room/web/enter/", "/webcast/im/fetch/"} {
+	for _, path := range []string{"/ttwid/union/register/", "/", "/1001", "/webcast/room/web/enter/", "/webcast/im/fetch/"} {
 		if _, ok := paths.Load(path); !ok {
 			t.Errorf("preparation did not request %s", path)
 		}

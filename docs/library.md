@@ -8,7 +8,7 @@
 
 ## 检查直播间是否开播
 
-`CheckLiveStatus` 只执行直播页和 `web/enter` 状态检查，不会建立 WebSocket：
+`CheckLiveStatus` 优先使用本地 `a_bogus` 签名直接请求 `web/enter`；接口未返回可验证的状态与房间身份时，回退直播页和原有状态检查，不会建立 WebSocket。匿名会话优先通过轻量注册接口取得 `ttwid`，失败时回退首页；同一实例会复用已取得的基础 Cookie，显式传入的 Cookie 始终优先：
 
 ```go
 package main

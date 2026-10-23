@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 )
@@ -77,10 +78,10 @@ func (dl *DouyinLive) cookieValue(name string) string {
 	return dl.additionalCookies[name]
 }
 
-// shouldFetchTTWID 判断是否需要自动请求首页获取 ttwid。
-// shouldFetchTTWID reports whether ttwid should be fetched automatically from the homepage.
+// shouldFetchTTWID 判断当前会话是否还需要获取匿名 ttwid。
+// shouldFetchTTWID reports whether this session still needs an anonymous ttwid.
 func (dl *DouyinLive) shouldFetchTTWID() bool {
-	return !dl.hasConfiguredCookie()
+	return !dl.hasConfiguredCookie() && strings.TrimSpace(dl.ttwid) == ""
 }
 
 // hasConfiguredCookie 判断用户是否显式配置了 Cookie。
@@ -95,45 +96,55 @@ func (dl *DouyinLive) setupCookies() {
 	dl.headers.Set("Cookie", dl.getCookieString())
 }
 
-// fetchTTWID 请求抖音首页并提取 ttwid 及附加 Cookie。
-// fetchTTWID requests the Douyin homepage and extracts ttwid plus extra cookies.
+// fetchTTWID 优先注册匿名 ttwid，失败时回退直播首页。
+// fetchTTWID registers an anonymous ttwid, falling back to the live homepage.
 func (dl *DouyinLive) fetchTTWID(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
+	registrationCtx, cancel := context.WithTimeout(ctx, ttwidRegistrationTimeout)
 	resp, err := dl.client.R().
+		SetContext(registrationCtx).
+		SetHeader("Content-Type", "application/json").
+		SetBodyString(`{"region":"cn","aid":1768,"needFid":false,"service":"www.ixigua.com","migrate_info":{"ticket":"","source":"node"},"cbUrlProtocol":"https","union":true}`).
+		Post("https://ttwid.bytedance.com/ttwid/union/register/")
+	cancel()
+	if err == nil && resp != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if err := dl.storeTTWIDCookies(resp.Cookies()); err == nil {
+			return nil
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	dl.logger.Debug("轻量TTWID获取未成功，回退直播首页", "live_id", dl.liveID)
+	resp, err = dl.client.R().
 		SetContext(ctx).
 		Get("https://live.douyin.com/")
 	if err != nil {
 		return fmt.Errorf("请求TTWID失败: %w", err)
 	}
 
-	// 收集所有 Cookie。
-	// Collect all cookies.
+	if resp == nil {
+		return errors.New("获取TTWID响应为空")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("获取TTWID响应异常 status=%d", resp.StatusCode)
+	}
+	return dl.storeTTWIDCookies(resp.Cookies())
+}
+
+func (dl *DouyinLive) storeTTWIDCookies(responseCookies []*http.Cookie) error {
 	cookies := make(map[string]string)
-	for _, c := range resp.Cookies() {
+	for _, c := range responseCookies {
 		cookies[c.Name] = c.Value
 	}
-
-	// 刷新额外 Cookie，避免旧值残留。
-	// Refresh extra cookies to avoid stale values.
-	dl.additionalCookies = make(map[string]string)
-
-	// 优先使用 ttwid，如果没有找到则报错。
-	// Prefer ttwid and fail when it is missing.
-	if ttwid, exists := cookies["ttwid"]; exists {
-		dl.ttwid = ttwid
-	} else {
+	if strings.TrimSpace(cookies["ttwid"]) == "" {
 		return errors.New("未找到TTWID cookie")
 	}
-
-	// 存储其他重要 Cookie。
-	// Store the remaining useful cookies.
-	for name, value := range cookies {
-		if name != "ttwid" {
-			dl.additionalCookies[name] = value
-		}
-	}
+	dl.ttwid = cookies["ttwid"]
+	delete(cookies, "ttwid")
+	dl.additionalCookies = cookies
 	return nil
 }

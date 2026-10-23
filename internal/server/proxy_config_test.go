@@ -62,7 +62,7 @@ func TestRoomProxyRoutingIncludesAPIAndProbeRotation(t *testing.T) {
 	proxies := make([]*httptest.Server, 2)
 	for i := range proxies {
 		proxies[i] = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodConnect || r.Host != "live.douyin.com:443" {
+			if r.Method != http.MethodConnect || (r.Host != "live.douyin.com:443" && r.Host != "ttwid.bytedance.com:443") {
 				t.Errorf("unexpected proxy request: %s %s", r.Method, r.Host)
 			}
 			counts[i].Add(1)

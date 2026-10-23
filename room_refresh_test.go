@@ -71,7 +71,7 @@ func TestRoomRefreshFindsNextLiveSession(t *testing.T) {
 						case "/webcast/room/web/enter/":
 							enterCalls++
 							wantRoomID := ""
-							if tt.page == onlinePage {
+							if tt.page == onlinePage && pageCalls > 0 {
 								wantRoomID = newRoom
 							}
 							if got := request.URL.Query().Get("room_id_str"); got != wantRoomID {
@@ -121,8 +121,12 @@ func TestRoomRefreshFindsNextLiveSession(t *testing.T) {
 				if !errors.Is(err, wantErr) || live != tt.wantLive {
 					t.Fatalf("live=%v err=%v, want live=%v err=%v", live, err, tt.wantLive, wantErr)
 				}
-				if pageCalls != 1 {
-					t.Errorf("page requests=%d, want 1", pageCalls)
+				wantPageCalls := 1
+				if api == "status" && tt.enter != "" {
+					wantPageCalls = 0
+				}
+				if pageCalls != wantPageCalls {
+					t.Errorf("page requests=%d, want %d", pageCalls, wantPageCalls)
 				}
 				if !(api == "status" && tt.page == onlinePage) && enterCalls == 0 {
 					t.Error("refresh skipped web/enter")

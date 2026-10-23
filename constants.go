@@ -23,6 +23,9 @@ const (
 	controlActionLiveEnd    = 3
 	webcastSDKVersion       = "1.0.15"
 	websocketPushURL        = "wss://webcast100-ws-web-lf.douyin.com/webcast/im/push/v2/"
+
+	ttwidRegistrationTimeout = 2 * time.Second
+	liveStatusAPITimeout     = 3 * time.Second
 )
 
 var (
